@@ -75,6 +75,27 @@ class ChildRead(APIModel):
     created_at: datetime
 
 
+class LineLinkInvitationCreate(BaseModel):
+    child_id: UUID
+    expires_in_minutes: int = Field(default=30, ge=5, le=1_440)
+
+
+class LineLinkInvitationRead(APIModel):
+    id: UUID
+    school_id: UUID
+    child_id: UUID
+    expires_at: datetime
+    used_at: datetime | None
+    revoked_at: datetime | None
+    created_at: datetime
+
+
+class LineLinkInvitationCredential(LineLinkInvitationRead):
+    """The one-time code is returned only when a teacher creates it."""
+
+    invite_code: str
+
+
 class RecordCreate(BaseModel):
     """Input from the trusted edge-AI pipeline; never send raw audio here."""
 
@@ -147,4 +168,12 @@ class NotificationRead(APIModel):
 
 
 class NotificationSent(BaseModel):
+
     provider_message_id: str | None = Field(default=None, max_length=255)
+class NotionSyncRead(APIModel):
+    id: UUID
+    record_id: UUID
+    notion_page_id: str
+    notion_page_url: str | None
+    synced_at: datetime
+    created_at: datetime

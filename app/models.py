@@ -88,6 +88,21 @@ class Child(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class LineLinkInvitation(Base):
+    """A short-lived code that lets a guardian bind their LINE account to one child."""
+
+    __tablename__ = "line_link_invitations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_text)
+    school_id: Mapped[str] = mapped_column(ForeignKey("schools.id"), index=True)
+    child_id: Mapped[str] = mapped_column(ForeignKey("children.id"), index=True)
+    code_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class Record(Base):
     """A processed, privacy-filtered candidate awaiting teacher review or delivery."""
 
@@ -122,4 +137,17 @@ class Notification(Base):
     status: Mapped[NotificationStatus] = mapped_column(Enum(NotificationStatus), default=NotificationStatus.pending, index=True)
     provider_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class NotionSync(Base):
+    """One Notion page created for one delivered notification."""
+
+    __tablename__ = "notion_syncs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_text)
+    record_id: Mapped[str] = mapped_column(ForeignKey("records.id"), unique=True, index=True)
+    notion_page_id: Mapped[str] = mapped_column(String(255), unique=True)
+    notion_page_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

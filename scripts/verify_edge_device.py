@@ -12,9 +12,9 @@ from app.main import create_app
 
 def main() -> None:
     settings = Settings()
-    api_key = getpass.getpass("Edge device API key（画面には表示されません）: ")
+    api_key = settings.edge_api_key or getpass.getpass("Edge device API key（画面には表示されません）: ")
     if not api_key:
-        raise SystemExit("APIキーを入力してください。")
+        raise SystemExit(".env に EDGE_API_KEY を設定するか、APIキーを入力してください。")
 
     with TestClient(create_app(settings)) as client:
         response = client.get("/api/v1/edge/me", headers={"X-Edge-Api-Key": api_key})

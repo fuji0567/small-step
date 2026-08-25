@@ -8,6 +8,7 @@ WORKDIR /app
 
 COPY pyproject.toml ./
 COPY app ./app
+COPY scripts ./scripts
 RUN pip install --upgrade pip && pip install .[postgres]
 
 RUN useradd --create-home --uid 10001 appuser

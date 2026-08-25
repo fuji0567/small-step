@@ -1,8 +1,10 @@
+import json
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
+import httpx
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -19,9 +21,13 @@ from app.api.dependencies import (
     is_bootstrap_admin,
 )
 from app.edge_keys import generate_edge_api_key, hash_edge_api_key
+from app.line import generate_link_code, hash_link_code, parse_link_code, verify_webhook_signature
+from app.notion import NotionSyncError, create_delivered_notification_page
 from app.models import (
     Child,
     EdgeDevice,
+    LineLinkInvitation,
+    NotionSync,
     Notification,
     NotificationStatus,
     Record,
@@ -39,8 +45,12 @@ from app.schemas import (
     EdgeDeviceCredential,
     EdgeDeviceRead,
     EdgeRecordCreate,
+    LineLinkInvitationCreate,
+    LineLinkInvitationCredential,
+    LineLinkInvitationRead,
     NotificationRead,
     NotificationSent,
+    NotionSyncRead,
     RecordCreate,
     RecordRead,
     RecordReview,
@@ -107,6 +117,124 @@ def edge_device_credential(device: EdgeDevice, api_key: str) -> EdgeDeviceCreden
 def health_check(db: Session = Depends(get_db)) -> dict[str, str]:
     db.execute(text("SELECT 1"))
     return {"status": "ok"}
+
+
+@router.post("/line/webhook", tags=["line"])
+async def receive_line_webhook(request: Request) -> dict[str, bool]:
+    """Verify LINE's raw webhook request before parsing its JSON body.
+
+    We intentionally do not persist message contents here. The current product
+    only needs the signed endpoint for channel verification and outbound family
+    notifications; guardian-to-child linking is introduced separately.
+    """
+
+    channel_secret = request.app.state.settings.line_channel_secret
+    if not channel_secret:
+        raise HTTPException(status_code=503, detail="LINE_CHANNEL_SECRET is not configured")
+
+    raw_body = await request.body()
+    if not verify_webhook_signature(
+        body=raw_body,
+        signature=request.headers.get("x-line-signature"),
+        channel_secret=channel_secret,
+    ):
+        raise HTTPException(status_code=401, detail="Invalid LINE webhook signature")
+
+    try:
+        payload = json.loads(raw_body)
+    except json.JSONDecodeError as error:
+        raise HTTPException(status_code=400, detail="LINE webhook body must be valid JSON") from error
+    if not isinstance(payload.get("events"), list):
+        raise HTTPException(status_code=400, detail="LINE webhook events must be an array")
+
+    # Never retain guardian message text. Only a valid, one-time link code can
+    # update the existing guardian LINE user ID for the matching child.
+    session = request.app.state.session_factory()
+    try:
+        for event in payload["events"]:
+            if not isinstance(event, dict) or event.get("type") != "message":
+                continue
+            source = event.get("source")
+            message = event.get("message")
+            if not isinstance(source, dict) or not isinstance(message, dict):
+                continue
+            if source.get("type") != "user" or message.get("type") != "text":
+                continue
+            line_user_id = source.get("userId")
+            message_text = message.get("text")
+            if not isinstance(line_user_id, str) or not isinstance(message_text, str):
+                continue
+            link_code = parse_link_code(message_text)
+            if link_code is None:
+                continue
+
+            invitation = session.scalar(
+                select(LineLinkInvitation)
+                .where(LineLinkInvitation.code_hash == hash_link_code(code=link_code, channel_secret=channel_secret))
+                .where(LineLinkInvitation.used_at.is_(None))
+                .where(LineLinkInvitation.revoked_at.is_(None))
+                .where(LineLinkInvitation.expires_at > utc_now())
+            )
+            if invitation is None:
+                continue
+            child = session.get(Child, invitation.child_id)
+            if child is None or child.school_id != invitation.school_id:
+                continue
+            child.guardian_line_user_id = line_user_id
+            invitation.used_at = utc_now()
+            session.commit()
+    finally:
+        session.close()
+    return {"ok": True}
+
+
+@router.post(
+    "/line/link-invitations",
+    response_model=LineLinkInvitationCredential,
+    status_code=status.HTTP_201_CREATED,
+    tags=["line"],
+)
+def create_line_link_invitation(
+    payload: LineLinkInvitationCreate,
+    request: Request,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> LineLinkInvitationCredential:
+    """Issue one guardian code and invalidate any earlier unused code for that child."""
+
+    channel_secret = request.app.state.settings.line_channel_secret
+    if not channel_secret:
+        raise HTTPException(status_code=503, detail="LINE_CHANNEL_SECRET is not configured")
+    child = require_entity(db, Child, as_id(payload.child_id), "Child")
+    assert_school_access(current_teacher, child.school_id)
+    assert_school_admin(current_teacher)
+
+    now = utc_now()
+    db.execute(
+        update(LineLinkInvitation)
+        .where(LineLinkInvitation.child_id == child.id)
+        .where(LineLinkInvitation.used_at.is_(None))
+        .where(LineLinkInvitation.revoked_at.is_(None))
+        .values(revoked_at=now)
+    )
+    invite_code = generate_link_code()
+    invitation = LineLinkInvitation(
+        school_id=child.school_id,
+        child_id=child.id,
+        code_hash=hash_link_code(code=invite_code, channel_secret=channel_secret),
+        expires_at=now + timedelta(minutes=payload.expires_in_minutes),
+    )
+    db.add(invitation)
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="Could not issue a unique LINE link code; please retry") from error
+    db.refresh(invitation)
+    return LineLinkInvitationCredential(
+        **LineLinkInvitationRead.model_validate(invitation).model_dump(),
+        invite_code=invite_code,
+    )
 
 
 @router.post("/schools", response_model=SchoolRead, status_code=status.HTTP_201_CREATED, tags=["schools"])
@@ -534,3 +662,67 @@ def mark_notification_sent(
     db.commit()
     db.refresh(notification)
     return notification
+@router.post(
+    "/records/{record_id}/notion-sync",
+    response_model=NotionSyncRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["notion"],
+)
+def sync_delivered_record_to_notion(
+    record_id: str,
+    request: Request,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> NotionSync:
+    """Create one Notion page after the matching LINE notice has been delivered."""
+
+    record = require_entity(db, Record, record_id, "Record")
+    assert_record_access(current_teacher, record)
+    assert_school_admin(current_teacher)
+    if record.status != RecordStatus.dispatched:
+        raise HTTPException(status_code=409, detail="Only delivered records can be synced to Notion")
+
+    existing_sync = db.scalar(select(NotionSync).where(NotionSync.record_id == record.id))
+    if existing_sync is not None:
+        return existing_sync
+
+    notification = db.scalar(select(Notification).where(Notification.record_id == record.id))
+    if notification is None or notification.status != NotificationStatus.sent or notification.sent_at is None:
+        raise HTTPException(status_code=409, detail="The matching LINE notification has not been delivered")
+
+    settings = request.app.state.settings
+    if not settings.notion_api_token or not settings.notion_data_source_id:
+        raise HTTPException(status_code=503, detail="Notion integration is not configured")
+
+    school = require_entity(db, School, record.school_id, "School")
+    child = db.get(Child, record.child_id) if record.child_id else None
+    try:
+        page_id, page_url = create_delivered_notification_page(
+            api_token=settings.notion_api_token,
+            data_source_id=settings.notion_data_source_id,
+            school_name=school.name,
+            child_name=child.display_name if child else None,
+            record_id=record.id,
+            category=record.category.value,
+            occurred_at=record.occurred_at,
+            reviewed_at=record.reviewed_at,
+            sent_at=notification.sent_at,
+            summary=record.summary,
+            conversation_prompt=record.conversation_prompt,
+            timeout_seconds=settings.notion_api_timeout_seconds,
+        )
+    except (httpx.HTTPError, NotionSyncError) as error:
+        raise HTTPException(status_code=502, detail=f"Notion sync failed: {error}") from error
+
+    sync = NotionSync(record_id=record.id, notion_page_id=page_id, notion_page_url=page_url)
+    db.add(sync)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing_sync = db.scalar(select(NotionSync).where(NotionSync.record_id == record.id))
+        if existing_sync is not None:
+            return existing_sync
+        raise
+    db.refresh(sync)
+    return sync
