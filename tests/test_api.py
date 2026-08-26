@@ -35,14 +35,23 @@ def test_teacher_review_frontend_is_served(tmp_path):
         stylesheet = client.get("/teacher/styles.css")
 
     assert response.status_code == 200
+    assert "先生ログイン" in response.text
     assert "先生用メニュー" in response.text
     assert "今日の状況" in response.text
     assert "通知状況" in response.text
+    assert "園児・保護者" in response.text
     assert "/teacher/app.js" in response.text
     assert script.status_code == 200
     assert "submitReview" in script.text
     assert "loadNotifications" in script.text
     assert "renderHome" in script.text
+    assert "signInWithPassword" in script.text
+    assert "sessionStorage" in script.text
+    assert "fetchWithTimeout" in script.text
+    assert "elements.appShell.style.display" in script.text
+    assert "createChild" in script.text
+    assert "createLinkInvitation" in script.text
+    assert "isSchoolAdmin" in script.text
     assert stylesheet.status_code == 200
 
 
@@ -175,10 +184,18 @@ def test_supabase_user_links_to_pre_registered_teacher(tmp_path, monkeypatch):
             supabase_url="https://example.supabase.co",
             supabase_publishable_key="sb_publishable_test",
             supabase_bootstrap_admin_emails="admin@example.com",
+            line_channel_secret="line-channel-secret",
         )
     )
     with TestClient(app) as client:
         admin_headers = {"Authorization": "Bearer admin-token"}
+        auth_config = client.get("/api/v1/auth/config")
+        assert auth_config.status_code == 200
+        assert auth_config.json() == {
+            "auth_mode": "supabase",
+            "supabase_url": "https://example.supabase.co",
+            "supabase_publishable_key": "sb_publishable_test",
+        }
         school = client.post(
             "/api/v1/schools",
             headers=admin_headers,
@@ -198,6 +215,85 @@ def test_supabase_user_links_to_pre_registered_teacher(tmp_path, monkeypatch):
         linked = client.post("/api/v1/auth/link-teacher", headers={"Authorization": "Bearer teacher-token"})
         assert linked.status_code == 200
         assert linked.json()["email"] == "teacher@example.com"
+
+        teacher_headers = {"Authorization": "Bearer teacher-token"}
+        denied_child = client.post(
+            "/api/v1/children",
+            headers=teacher_headers,
+            json={"school_id": school_id, "display_name": "権限確認園児"},
+        )
+        assert denied_child.status_code == 403
+
+        child = client.post(
+            "/api/v1/children",
+            headers=admin_headers,
+            json={"school_id": school_id, "display_name": "権限確認園児"},
+        )
+        assert child.status_code == 201
+
+        denied_invitation = client.post(
+            "/api/v1/line/link-invitations",
+            headers=teacher_headers,
+            json={"child_id": child.json()["id"]},
+        )
+        assert denied_invitation.status_code == 403
+
+
+def test_bootstrap_admin_can_join_an_existing_school(tmp_path, monkeypatch):
+    bootstrap_user = {
+        "id": "00000000-0000-0000-0000-000000000003",
+        "email": "bootstrap@example.com",
+    }
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return bootstrap_user
+
+    def fake_get(_url, headers, timeout):
+        assert headers["Authorization"] == "Bearer bootstrap-token"
+        return FakeResponse()
+
+    monkeypatch.setattr("app.api.dependencies.httpx.get", fake_get)
+    database_url = f"sqlite:///{tmp_path}/test.db"
+    development_app = create_app(Settings(database_url=database_url, auth_mode="development"))
+    with TestClient(development_app) as client:
+        school = client.post("/api/v1/schools", json={"name": "既存の接続テスト園"})
+        assert school.status_code == 201
+        school_id = school.json()["id"]
+
+    app = create_app(
+        Settings(
+            database_url=database_url,
+            auth_mode="supabase",
+            supabase_url="https://example.supabase.co",
+            supabase_publishable_key="sb_publishable_test",
+            supabase_bootstrap_admin_emails="bootstrap@example.com",
+        )
+    )
+    with TestClient(app) as client:
+        headers = {"Authorization": "Bearer bootstrap-token"}
+        schools = client.get("/api/v1/auth/bootstrap/schools", headers=headers)
+        assert schools.status_code == 200
+        assert schools.json()[0]["id"] == school_id
+
+        created = client.post(
+            "/api/v1/auth/bootstrap/teacher",
+            headers=headers,
+            json={"school_id": school_id, "name": "初回管理者"},
+        )
+        assert created.status_code == 200
+        assert created.json()["email"] == "bootstrap@example.com"
+        assert created.json()["role"] == "school_admin"
+
+        current_teacher = client.get("/api/v1/auth/me", headers=headers)
+        assert current_teacher.status_code == 200
+        assert current_teacher.json()["id"] == created.json()["id"]
+
+        schools_after_linking = client.get("/api/v1/schools", headers=headers)
+        assert schools_after_linking.status_code == 200
+        assert [school["id"] for school in schools_after_linking.json()] == [school_id]
 
 
 def test_edge_device_key_can_only_submit_anonymized_records(tmp_path):

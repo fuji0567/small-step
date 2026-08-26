@@ -39,6 +39,8 @@ from app.models import (
     utc_now,
 )
 from app.schemas import (
+    AuthBootstrapTeacherCreate,
+    AuthClientConfig,
     ChildCreate,
     ChildRead,
     EdgeDeviceCreate,
@@ -278,6 +280,78 @@ def list_schools(
     if not current_teacher.is_development:
         return [require_entity(db, School, current_teacher.school_id, "School")]
     return list(db.scalars(select(School).order_by(School.name)))
+
+
+@router.get("/auth/config", response_model=AuthClientConfig, tags=["auth"])
+def get_auth_client_config(request: Request) -> AuthClientConfig:
+    """Expose only the Supabase values that are safe for a browser client."""
+
+    settings = request.app.state.settings
+    if settings.auth_mode == "development":
+        return AuthClientConfig(auth_mode="development")
+    return AuthClientConfig(
+        auth_mode="supabase",
+        supabase_url=settings.supabase_url,
+        supabase_publishable_key=settings.supabase_publishable_key,
+    )
+
+
+@router.get("/auth/bootstrap/schools", response_model=list[SchoolRead], tags=["auth"])
+def list_bootstrap_schools(
+    request: Request,
+    user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+) -> list[School]:
+    """Let only the configured initial administrator choose an existing school."""
+
+    if request.app.state.settings.auth_mode != "supabase" or not is_bootstrap_admin(request, user):
+        raise HTTPException(status_code=403, detail="Bootstrap administrator access is required")
+    return list(db.scalars(select(School).order_by(School.name)))
+
+
+@router.post("/auth/bootstrap/teacher", response_model=TeacherRead, tags=["auth"])
+def bootstrap_school_admin(
+    payload: AuthBootstrapTeacherCreate,
+    request: Request,
+    user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+) -> Teacher:
+    """Create or safely link the one initial school administrator after sign-in."""
+
+    if request.app.state.settings.auth_mode != "supabase" or not is_bootstrap_admin(request, user):
+        raise HTTPException(status_code=403, detail="Bootstrap administrator access is required")
+
+    existing_link = db.scalar(select(Teacher).where(Teacher.auth_user_id == user.id))
+    if existing_link is not None:
+        return existing_link
+
+    school_id = as_id(payload.school_id)
+    require_entity(db, School, school_id, "School")
+    teacher = db.scalar(select(Teacher).where(Teacher.email == user.email))
+    if teacher is not None:
+        if teacher.school_id != school_id:
+            raise HTTPException(status_code=409, detail="This email is already registered for another school")
+        if teacher.auth_user_id is not None:
+            raise HTTPException(status_code=409, detail="Teacher account is already linked to another Auth user")
+        teacher.auth_user_id = user.id
+        teacher.role = TeacherRole.school_admin
+    else:
+        teacher = Teacher(
+            school_id=school_id,
+            name=payload.name,
+            email=user.email,
+            auth_user_id=user.id,
+            role=TeacherRole.school_admin,
+        )
+        db.add(teacher)
+
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Could not create the initial teacher account") from error
+    db.refresh(teacher)
+    return teacher
 
 
 @router.post("/auth/link-teacher", response_model=TeacherRead, tags=["auth"])

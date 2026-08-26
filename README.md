@@ -19,7 +19,13 @@
 
 ## 先生用レビュー画面
 
-バックエンド起動中に `http://127.0.0.1:8000/teacher/` を開くと、ホームでレビュー待ち・送信待ち・送信済みの件数を確認できます。レビュー待ち記録は一覧・確認・承認・却下でき、通知状況では送信待ち・送信済みの詳細を確認できます。現在は開発モード用の最小画面です。本番のSupabaseログイン画面とデザインシステムは後から追加します。
+バックエンド起動中に `http://127.0.0.1:8000/teacher/` を開くと、ホームでレビュー待ち・送信待ち・送信済みの件数を確認できます。レビュー待ち記録は一覧・確認・承認・却下でき、通知状況では送信待ち・送信済みの詳細を確認できます。
+
+`AUTH_MODE=development` では、ローカル開発を速く進めるためログインなしで表示します。`AUTH_MODE=supabase` ではメールアドレスとパスワードのログイン画面が表示されます。アクセストークンはブラウザを閉じると消える `sessionStorage` にだけ保存し、パスワードとSupabaseのsecret keyはこの画面やFastAPIに保存しません。
+
+### 園児・保護者管理
+
+先生用画面の「園児・保護者」では、園児一覧と保護者LINEの連携状態を確認できます。`school_admin` の先生だけが園児を追加し、未連携の園児向けに60分有効の招待コードを発行できます。保護者はLINE公式アカウントのトークにそのコードだけを送信して連携します。LINEのユーザーIDや保護者のメッセージ本文はこの画面に表示しません。
 
 MCP（Model Context Protocol）サーバーは、マイクに近い園内PCまたは高火力VRTのGPUワーカーで動かします。公開するFastAPIやLINE Webhookで動かすものではありません。
 
@@ -104,19 +110,19 @@ pytest
 
 ## Supabase Authを有効にする
 
-FlutterアプリがSupabaseへ直接メール・パスワードでログインし、取得したアクセストークンをこのAPIへ `Authorization: Bearer <access_token>` として送ります。API側はSupabase Authの `/auth/v1/user` でトークンを検証するため、JWTの署名方式を個別に設定する必要はありません。
+先生Web画面（将来のFlutterアプリも同じ方式）がSupabaseへ直接メール・パスワードでログインし、取得したアクセストークンをこのAPIへ `Authorization: Bearer <access_token>` として送ります。API側はSupabase Authの `/auth/v1/user` でトークンを検証するため、JWTの署名方式を個別に設定する必要はありません。
 
 ### Supabase Dashboardでの設定
 
 1. Freeプロジェクトを作成する。
 2. `Authentication > Providers > Email` でメール認証と `Confirm Email` を有効にする。
 3. `Authentication > General Configuration` で `Allow new users to sign up` を無効にする。これにより、招待済みの先生だけがログインできる。
-4. `Project Settings > API Keys` からProject URLと**Publishable key**を取得する。`service_role` / secret keyはFlutterにもこのAPIにも設定しない。
+4. `Project Settings > API Keys` からProject URLと**Publishable key**を取得する。`service_role` / secret keyは先生Web画面にもこのAPIにも設定しない。
 5. 最初の管理者ユーザーを `Authentication > Users > Add user > Send invitation` から招待する。
 
 ### APIの設定
 
-`.env` を次のように設定して再起動します。`SUPABASE_BOOTSTRAP_ADMIN_EMAILS` は最初の園を一度だけ作るためのメールアドレスです。
+`.env` を次のように設定して再起動します。`SUPABASE_BOOTSTRAP_ADMIN_EMAILS` は、最初に先生管理者として登録できるメールアドレスです。
 
 ```dotenv
 AUTH_MODE=supabase
@@ -125,7 +131,11 @@ SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 SUPABASE_BOOTSTRAP_ADMIN_EMAILS=admin@example.com
 ```
 
-管理者がログインした後、そのアクセストークンで `POST /api/v1/schools` を実行すると、園と管理者先生アカウントが同時に作成されます。完了したら `SUPABASE_BOOTSTRAP_ADMIN_EMAILS` を空にして再起動してください。
+### 既存の園を使う初回ログイン
+
+すでにローカルDBに園を登録している場合は、`http://127.0.0.1:8000/teacher/` を開き、最初の管理者のメールアドレスとパスワードでログインします。最初の一度だけ「管理する園」と表示名を選ぶ画面が出るので、運用する園を選んで登録します。この操作で、そのSupabaseアカウントが選択した園の `school_admin` として紐付きます。
+
+新規の園から始める場合は、管理者のアクセストークンで `POST /api/v1/schools` を実行すると、園と管理者先生アカウントが同時に作成されます。
 
 最初の園と管理者を作るだけなら、次の補助スクリプトが使えます。メールアドレス・パスワードは画面に表示されません。
 
@@ -133,14 +143,14 @@ SUPABASE_BOOTSTRAP_ADMIN_EMAILS=admin@example.com
 .venv/bin/python scripts/bootstrap_admin.py
 ```
 
-作成後は `.env` の `SUPABASE_BOOTSTRAP_ADMIN_EMAILS` を空にして保存してください。
+初回設定が終わったら、`.env` の `SUPABASE_BOOTSTRAP_ADMIN_EMAILS` を空にして保存し、FastAPIを再起動してください。以後は、管理者として登録された先生だけが園の管理操作を行えます。
 
 以後の先生追加は次の順です。
 
 1. 管理者トークンで `POST /api/v1/teachers` を実行し、先生のメールアドレスを事前登録する。
 2. Supabase Dashboardからそのメールアドレスへ招待を送る。
-3. 先生がパスワード設定後にログインし、`POST /api/v1/auth/link-teacher` を一度呼ぶ。
-4. 以後は同じアクセストークンで、自分の園のデータだけへアクセスできる。
+3. 先生がパスワード設定後に `http://127.0.0.1:8000/teacher/` からログインする。画面が自動で `POST /api/v1/auth/link-teacher` を一度だけ呼ぶ。
+4. 以後は、画面が付与するアクセストークンで自分の園のデータだけへアクセスできる。
 
 `GET /api/v1/auth/me` で、現在のSupabaseユーザーと紐付いた先生プロフィールを取得できます。
 

@@ -9,13 +9,54 @@
     <script src="/teacher/app.js" defer></script>
   </head>
   <body>
-    <main class="app-shell">
+    <main id="login-screen" class="login-shell" hidden>
+      <section class="login-card" aria-labelledby="login-title">
+        <p class="eyebrow">SMALL STEP</p>
+        <h1 id="login-title">先生ログイン</h1>
+        <p class="login-intro">登録済みの先生メールアドレスでログインしてください。</p>
+
+        <form id="login-form" class="login-form">
+          <label for="login-email">
+            メールアドレス
+            <input id="login-email" type="email" autocomplete="username" required />
+          </label>
+          <label for="login-password">
+            パスワード
+            <input id="login-password" type="password" autocomplete="current-password" required />
+          </label>
+          <button id="login-button" class="button-primary" type="submit">ログイン</button>
+        </form>
+
+        <p id="login-notice" class="notice" role="status" hidden></p>
+
+        <section id="bootstrap-panel" class="bootstrap-panel" aria-labelledby="bootstrap-title" hidden>
+          <h2 id="bootstrap-title">最初の管理者設定</h2>
+          <p>このアカウントを、既存の園の最初の先生管理者として登録します。</p>
+          <form id="bootstrap-form" class="login-form">
+            <label for="bootstrap-school-select">
+              管理する園
+              <select id="bootstrap-school-select" required></select>
+            </label>
+            <label for="bootstrap-name">
+              表示名
+              <input id="bootstrap-name" type="text" autocomplete="name" required maxlength="120" />
+            </label>
+            <button id="bootstrap-button" class="button-primary" type="submit">管理者として登録</button>
+          </form>
+        </section>
+      </section>
+    </main>
+
+    <main id="app-shell" class="app-shell" hidden>
       <header class="app-header">
         <div>
           <p class="eyebrow">SMALL STEP</p>
           <h1>先生用</h1>
         </div>
-        <p class="header-note">音声から作られた候補を確認してから承認します。</p>
+        <div class="app-header-actions">
+          <p class="header-note">音声から作られた候補を確認してから承認します。</p>
+          <button id="logout-button" class="logout-button" type="button" hidden>ログアウト</button>
+        </div>
       </header>
 
       <section class="toolbar" aria-label="表示設定">
@@ -32,6 +73,7 @@
         <button class="nav-button is-active" type="button" data-view="home">ホーム</button>
         <button class="nav-button" type="button" data-view="review">レビュー待ち</button>
         <button class="nav-button" type="button" data-view="notifications">通知状況</button>
+        <button class="nav-button" type="button" data-view="children">園児・保護者</button>
       </nav>
 
       <section id="home-view" class="app-view" aria-label="ホーム">
@@ -131,6 +173,42 @@
           </div>
           <p class="notification-note">送信は専用ワーカーが行います。この画面では送信状況だけを確認できます。</p>
           <div id="notification-list" class="notification-list" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section id="children-view" class="app-view" aria-label="園児・保護者" hidden>
+        <div class="children-layout">
+          <div class="panel-heading children-heading">
+            <div>
+              <p class="eyebrow">CHILDREN AND GUARDIANS</p>
+              <h2>園児・保護者</h2>
+            </div>
+            <span id="child-count" class="count">0</span>
+          </div>
+
+          <p class="children-note">保護者のLINEユーザーIDは表示しません。招待コードは発行直後にだけ確認できます。</p>
+
+          <form id="child-form" class="child-form" hidden>
+            <label for="child-name-input">
+              園児の表示名
+              <input id="child-name-input" type="text" required maxlength="120" placeholder="例: さくら" />
+            </label>
+            <button id="child-create-button" class="button-primary" type="submit">園児を追加</button>
+          </form>
+
+          <p id="child-role-note" class="children-role-note" hidden>園児の追加と招待コード発行は、先生管理者だけが行えます。</p>
+
+          <section id="invite-result" class="invite-result" aria-live="polite" hidden>
+            <p class="eyebrow">LINE INVITATION</p>
+            <h3 id="invite-child-name"></h3>
+            <p>保護者へ次のコードを一度だけ渡してください。有効期限は <span id="invite-expiration"></span> です。</p>
+            <div class="invite-code-row">
+              <code id="invite-code"></code>
+              <button id="copy-invite-code-button" type="button">コードをコピー</button>
+            </div>
+          </section>
+
+          <div id="child-list" class="child-list" aria-live="polite"></div>
         </div>
       </section>
     </main>

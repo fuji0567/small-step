@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -37,6 +38,19 @@ class TeacherRead(APIModel):
     email: str | None
     role: TeacherRole
     created_at: datetime
+
+
+class AuthClientConfig(BaseModel):
+    """Public auth settings required by the local teacher web client."""
+
+    auth_mode: Literal["development", "supabase"]
+    supabase_url: str | None = None
+    supabase_publishable_key: str | None = None
+
+
+class AuthBootstrapTeacherCreate(BaseModel):
+    school_id: UUID
+    name: str = Field(min_length=1, max_length=120)
 
 
 class EdgeDeviceCreate(BaseModel):

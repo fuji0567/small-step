@@ -1,4 +1,5 @@
 const apiBase = "/api/v1";
+const accessTokenStorageKey = "small-step.access-token";
 
 const state = {
   schoolId: null,
@@ -7,9 +8,25 @@ const state = {
   notifications: [],
   selectedRecordId: null,
   activeView: "home",
+  authConfig: null,
+  accessToken: sessionStorage.getItem(accessTokenStorageKey),
+  isSchoolAdmin: false,
 };
 
 const elements = {
+  loginScreen: document.querySelector("#login-screen"),
+  loginForm: document.querySelector("#login-form"),
+  loginEmail: document.querySelector("#login-email"),
+  loginPassword: document.querySelector("#login-password"),
+  loginButton: document.querySelector("#login-button"),
+  loginNotice: document.querySelector("#login-notice"),
+  bootstrapPanel: document.querySelector("#bootstrap-panel"),
+  bootstrapForm: document.querySelector("#bootstrap-form"),
+  bootstrapSchoolSelect: document.querySelector("#bootstrap-school-select"),
+  bootstrapName: document.querySelector("#bootstrap-name"),
+  bootstrapButton: document.querySelector("#bootstrap-button"),
+  appShell: document.querySelector("#app-shell"),
+  logoutButton: document.querySelector("#logout-button"),
   schoolSelect: document.querySelector("#school-select"),
   reloadButton: document.querySelector("#reload-button"),
   notice: document.querySelector("#notice"),
@@ -28,12 +45,24 @@ const elements = {
   homeView: document.querySelector("#home-view"),
   reviewView: document.querySelector("#review-view"),
   notificationsView: document.querySelector("#notifications-view"),
+  childrenView: document.querySelector("#children-view"),
   homeReviewCount: document.querySelector("#home-review-count"),
   homePendingCount: document.querySelector("#home-pending-count"),
   homeSentCount: document.querySelector("#home-sent-count"),
   homeActions: document.querySelectorAll("[data-view-target]"),
   notificationCount: document.querySelector("#notification-count"),
   notificationList: document.querySelector("#notification-list"),
+  childCount: document.querySelector("#child-count"),
+  childForm: document.querySelector("#child-form"),
+  childNameInput: document.querySelector("#child-name-input"),
+  childCreateButton: document.querySelector("#child-create-button"),
+  childRoleNote: document.querySelector("#child-role-note"),
+  childList: document.querySelector("#child-list"),
+  inviteResult: document.querySelector("#invite-result"),
+  inviteChildName: document.querySelector("#invite-child-name"),
+  inviteExpiration: document.querySelector("#invite-expiration"),
+  inviteCode: document.querySelector("#invite-code"),
+  copyInviteCodeButton: document.querySelector("#copy-invite-code-button"),
 };
 
 function setNotice(message, isError = false) {
@@ -42,14 +71,55 @@ function setNotice(message, isError = false) {
   elements.notice.classList.toggle("is-error", isError);
 }
 
-async function api(path, options = {}) {
-  const response = await fetch(`${apiBase}${path}`, {
-    ...options,
-    headers: { Accept: "application/json", ...options.headers },
-  });
-  if (response.ok) {
-    return response.status === 204 ? null : response.json();
+function setLoginNotice(message, isError = false) {
+  elements.loginNotice.textContent = message;
+  elements.loginNotice.hidden = !message;
+  elements.loginNotice.classList.toggle("is-error", isError);
+}
+
+function showLogin() {
+  elements.loginScreen.hidden = false;
+  elements.loginScreen.style.display = "grid";
+  elements.appShell.hidden = true;
+  elements.appShell.style.display = "none";
+  elements.logoutButton.hidden = true;
+  elements.loginForm.hidden = false;
+  elements.bootstrapPanel.hidden = true;
+}
+
+function showApp() {
+  elements.loginScreen.hidden = true;
+  elements.loginScreen.style.display = "none";
+  elements.appShell.hidden = false;
+  elements.appShell.style.display = "block";
+  elements.logoutButton.hidden = state.authConfig?.auth_mode !== "supabase";
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMilliseconds = 15_000) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMilliseconds);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("通信が時間内に完了しませんでした。FastAPIのターミナルを確認して再試行してください。");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
   }
+}
+
+async function api(path, options = {}) {
+  const response = await fetchWithTimeout(`${apiBase}${path}`, {
+    ...options,
+    headers: {
+      Accept: "application/json",
+      ...(state.accessToken ? { Authorization: `Bearer ${state.accessToken}` } : {}),
+      ...options.headers,
+    },
+  });
+  if (response.ok) return response.status === 204 ? null : response.json();
 
   let message = "通信に失敗しました。";
   try {
@@ -58,14 +128,13 @@ async function api(path, options = {}) {
   } catch {
     // A generic error is safer than showing an unexpected response body.
   }
-  throw new Error(message);
+  const error = new Error(message);
+  error.status = response.status;
+  throw error;
 }
 
 function formatDate(value) {
-  return new Intl.DateTimeFormat("ja-JP", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
 function categoryLabel(category) {
@@ -101,7 +170,6 @@ function renderSchoolOptions(schools) {
 function renderRecordList() {
   elements.recordCount.textContent = String(state.records.length);
   elements.recordList.replaceChildren();
-
   if (!state.records.length) {
     const text = document.createElement("p");
     text.className = "empty-list";
@@ -132,7 +200,6 @@ function renderChildOptions(record) {
   emptyOption.value = "";
   emptyOption.textContent = "未選択";
   elements.childSelect.append(emptyOption);
-
   for (const child of state.children) {
     const option = document.createElement("option");
     option.value = child.id;
@@ -147,7 +214,6 @@ function renderDetail() {
   elements.emptyState.hidden = Boolean(record);
   elements.reviewForm.hidden = !record;
   if (!record) return;
-
   elements.recordMeta.textContent = `${formatDate(record.occurred_at)} / 信頼度 ${Math.round(record.confidence * 100)}%`;
   elements.recordCategory.textContent = categoryLabel(record.category);
   elements.summaryInput.value = record.summary;
@@ -155,17 +221,63 @@ function renderDetail() {
   renderChildOptions(record);
 }
 
+function renderHome() {
+  elements.homeReviewCount.textContent = String(state.records.length);
+  elements.homePendingCount.textContent = String(state.notifications.filter((item) => item.status === "pending").length);
+  elements.homeSentCount.textContent = String(state.notifications.filter((item) => item.status === "sent").length);
+}
+
+function renderChildManagement() {
+  elements.childCount.textContent = String(state.children.length);
+  elements.childForm.hidden = !state.isSchoolAdmin;
+  elements.childRoleNote.hidden = state.isSchoolAdmin;
+  elements.childList.replaceChildren();
+
+  if (!state.children.length) {
+    const text = document.createElement("p");
+    text.className = "empty-list";
+    text.textContent = "園児はまだ登録されていません。";
+    elements.childList.append(text);
+    return;
+  }
+
+  for (const child of state.children) {
+    const item = document.createElement("article");
+    item.className = "child-item";
+
+    const content = document.createElement("div");
+    const name = document.createElement("h3");
+    name.textContent = child.display_name;
+    const status = document.createElement("span");
+    status.className = "guardian-status";
+    status.classList.toggle("is-linked", Boolean(child.guardian_line_user_id));
+    status.textContent = child.guardian_line_user_id ? "LINE連携済み" : "LINE未連携";
+    content.append(name, status);
+
+    item.append(content);
+    if (state.isSchoolAdmin && !child.guardian_line_user_id) {
+      const inviteButton = document.createElement("button");
+      inviteButton.type = "button";
+      inviteButton.className = "child-invite-button";
+      inviteButton.dataset.childId = child.id;
+      inviteButton.textContent = "招待コードを発行";
+      item.append(inviteButton);
+    }
+    elements.childList.append(item);
+  }
+}
+
 function render() {
   renderRecordList();
   renderDetail();
   renderHome();
+  renderChildManagement();
 }
 
 function renderNotifications() {
   elements.notificationCount.textContent = String(state.notifications.length);
   elements.notificationList.replaceChildren();
   renderHome();
-
   if (!state.notifications.length) {
     const text = document.createElement("p");
     text.className = "empty-list";
@@ -177,7 +289,6 @@ function renderNotifications() {
   for (const notification of state.notifications) {
     const item = document.createElement("article");
     item.className = "notification-item";
-
     const content = document.createElement("div");
     const title = document.createElement("h3");
     title.textContent = `${notification.child_display_name ?? "園児未選択"} / ${categoryLabel(notification.category)}`;
@@ -190,7 +301,6 @@ function renderNotifications() {
     status.className = "delivery-status";
     status.classList.toggle("is-sent", notification.status === "sent");
     status.textContent = notificationStatusLabel(notification.status);
-
     const meta = document.createElement("p");
     meta.className = "notification-meta";
     meta.textContent = notification.sent_at
@@ -199,16 +309,6 @@ function renderNotifications() {
     item.append(content, status, meta);
     elements.notificationList.append(item);
   }
-}
-
-function renderHome() {
-  elements.homeReviewCount.textContent = String(state.records.length);
-  elements.homePendingCount.textContent = String(
-    state.notifications.filter((notification) => notification.status === "pending").length,
-  );
-  elements.homeSentCount.textContent = String(
-    state.notifications.filter((notification) => notification.status === "sent").length,
-  );
 }
 
 async function loadRecords() {
@@ -233,9 +333,7 @@ async function loadNotifications() {
 async function loadApp() {
   setNotice("読み込んでいます...");
   const schools = await api("/schools");
-  if (!schools.length) {
-    throw new Error("園がまだ登録されていません。先に園を作成してください。");
-  }
+  if (!schools.length) throw new Error("園がまだ登録されていません。先に園を作成してください。");
   state.schoolId = state.schoolId && schools.some((school) => school.id === state.schoolId)
     ? state.schoolId
     : schools[0].id;
@@ -249,6 +347,7 @@ async function changeView(view) {
   elements.homeView.hidden = view !== "home";
   elements.reviewView.hidden = view !== "review";
   elements.notificationsView.hidden = view !== "notifications";
+  elements.childrenView.hidden = view !== "children";
   for (const button of elements.navButtons) {
     button.classList.toggle("is-active", button.dataset.view === view);
   }
@@ -263,10 +362,60 @@ async function changeView(view) {
   }
 }
 
+async function createChild() {
+  const displayName = elements.childNameInput.value.trim();
+  if (!displayName) return;
+  elements.childCreateButton.disabled = true;
+  try {
+    await api("/children", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ school_id: state.schoolId, display_name: displayName }),
+    });
+    elements.childNameInput.value = "";
+    setNotice("園児を追加しました。");
+    await loadRecords();
+  } catch (error) {
+    setNotice(error.message, true);
+  } finally {
+    elements.childCreateButton.disabled = false;
+  }
+}
+
+async function createLinkInvitation(childId) {
+  const child = state.children.find((item) => item.id === childId);
+  if (!child) return;
+  try {
+    setNotice("LINE招待コードを発行しています...");
+    const invitation = await api("/line/link-invitations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ child_id: childId, expires_in_minutes: 60 }),
+    });
+    elements.inviteChildName.textContent = `${child.display_name}さんの保護者用コード`;
+    elements.inviteExpiration.textContent = formatDate(invitation.expires_at);
+    elements.inviteCode.textContent = invitation.invite_code;
+    elements.inviteResult.hidden = false;
+    setNotice("招待コードを発行しました。保護者へコードだけを送ってください。");
+  } catch (error) {
+    setNotice(error.message, true);
+  }
+}
+
+async function copyInvitationCode() {
+  const code = elements.inviteCode.textContent;
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+    setNotice("招待コードをコピーしました。");
+  } catch {
+    setNotice("コードをコピーできませんでした。表示されたコードを手動でコピーしてください。", true);
+  }
+}
+
 async function submitReview(action) {
   const record = selectedRecord();
   if (!record) return;
-
   const actionLabel = action === "approve" ? "承認" : "却下";
   if (!window.confirm(`この記録を${actionLabel}しますか？`)) return;
 
@@ -297,6 +446,127 @@ async function submitReview(action) {
   }
 }
 
+async function linkOrBootstrapTeacher() {
+  try {
+    const teacher = await api("/auth/link-teacher", { method: "POST" });
+    await openAppForTeacher(teacher);
+  } catch (error) {
+    if (error.status !== 404) throw error;
+    const schools = await api("/auth/bootstrap/schools");
+    if (!schools.length) throw new Error("紐付ける園がありません。先に園を登録してください。");
+    elements.bootstrapSchoolSelect.replaceChildren();
+    for (const school of schools) {
+      const option = document.createElement("option");
+      option.value = school.id;
+      option.textContent = school.name;
+      elements.bootstrapSchoolSelect.append(option);
+    }
+    elements.loginForm.hidden = true;
+    elements.bootstrapPanel.hidden = false;
+    setLoginNotice("初回設定として、管理する園と表示名を登録してください。");
+  }
+}
+
+async function establishTeacherSession() {
+  try {
+    const teacher = await api("/auth/me");
+    await openAppForTeacher(teacher);
+  } catch (error) {
+    if (error.status !== 403) throw error;
+    await linkOrBootstrapTeacher();
+  }
+}
+
+async function openAppForTeacher(teacher) {
+  state.isSchoolAdmin = teacher.role === "school_admin";
+  showApp();
+  await loadApp();
+}
+
+async function signInWithPassword() {
+  const email = elements.loginEmail.value.trim();
+  const password = elements.loginPassword.value;
+  const { supabase_url: supabaseUrl, supabase_publishable_key: publishableKey } = state.authConfig;
+  if (!supabaseUrl || !publishableKey) throw new Error("Supabaseの公開設定が不足しています。");
+
+  const response = await fetchWithTimeout(`${supabaseUrl.replace(/\/$/, "")}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: { apikey: publishableKey, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  const body = await response.json();
+  if (!response.ok || typeof body.access_token !== "string") {
+    throw new Error(body.error_description || body.message || "メールアドレスまたはパスワードを確認してください。");
+  }
+  state.accessToken = body.access_token;
+  sessionStorage.setItem(accessTokenStorageKey, body.access_token);
+  elements.loginPassword.value = "";
+  await establishTeacherSession();
+}
+
+async function start() {
+  state.authConfig = await api("/auth/config");
+  if (state.authConfig.auth_mode === "development") {
+    state.isSchoolAdmin = true;
+    showApp();
+    await loadApp();
+    return;
+  }
+  showLogin();
+  if (state.accessToken) {
+    try {
+      await establishTeacherSession();
+    } catch {
+      state.accessToken = null;
+      sessionStorage.removeItem(accessTokenStorageKey);
+      setLoginNotice("ログインし直してください。", true);
+    }
+  }
+}
+
+elements.loginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  elements.loginButton.disabled = true;
+  try {
+    setLoginNotice("ログインしています...");
+    await signInWithPassword();
+    setLoginNotice("");
+  } catch (error) {
+    setLoginNotice(error.message, true);
+  } finally {
+    elements.loginButton.disabled = false;
+  }
+});
+
+elements.bootstrapForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  elements.bootstrapButton.disabled = true;
+  try {
+    setLoginNotice("管理者を登録しています...");
+    const teacher = await api("/auth/bootstrap/teacher", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        school_id: elements.bootstrapSchoolSelect.value,
+        name: elements.bootstrapName.value.trim(),
+      }),
+    });
+    setLoginNotice("");
+    await openAppForTeacher(teacher);
+  } catch (error) {
+    setLoginNotice(error.message, true);
+  } finally {
+    elements.bootstrapButton.disabled = false;
+  }
+});
+
+elements.logoutButton.addEventListener("click", () => {
+  state.accessToken = null;
+  sessionStorage.removeItem(accessTokenStorageKey);
+  showLogin();
+  setLoginNotice("ログアウトしました。");
+});
+
 elements.schoolSelect.addEventListener("change", async (event) => {
   state.schoolId = event.target.value;
   state.selectedRecordId = null;
@@ -323,15 +593,11 @@ elements.recordList.addEventListener("click", (event) => {
 });
 
 for (const button of elements.navButtons) {
-  button.addEventListener("click", async () => {
-    await changeView(button.dataset.view);
-  });
+  button.addEventListener("click", async () => changeView(button.dataset.view));
 }
 
 for (const button of elements.homeActions) {
-  button.addEventListener("click", async () => {
-    await changeView(button.dataset.viewTarget);
-  });
+  button.addEventListener("click", async () => changeView(button.dataset.viewTarget));
 }
 
 elements.reviewForm.addEventListener("submit", async (event) => {
@@ -339,8 +605,22 @@ elements.reviewForm.addEventListener("submit", async (event) => {
   await submitReview("approve");
 });
 
-elements.rejectButton.addEventListener("click", async () => {
-  await submitReview("reject");
+elements.rejectButton.addEventListener("click", async () => submitReview("reject"));
+
+elements.childForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await createChild();
 });
 
-loadApp().catch((error) => setNotice(error.message, true));
+elements.childList.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-child-id]");
+  if (!button) return;
+  await createLinkInvitation(button.dataset.childId);
+});
+
+elements.copyInviteCodeButton.addEventListener("click", async () => copyInvitationCode());
+
+start().catch((error) => {
+  showLogin();
+  setLoginNotice(error.message, true);
+});
