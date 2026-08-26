@@ -61,6 +61,12 @@ class Teacher(Base):
     role: Mapped[TeacherRole] = mapped_column(Enum(TeacherRole), default=TeacherRole.teacher)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
+    @property
+    def is_auth_linked(self) -> bool:
+        """Expose only whether a teacher has completed Supabase login."""
+
+        return self.auth_user_id is not None
+
 
 class EdgeDevice(Base):
     """A wearable or on-premise edge processor assigned to one teacher."""

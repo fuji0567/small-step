@@ -37,6 +37,7 @@ class TeacherRead(APIModel):
     name: str
     email: str | None
     role: TeacherRole
+    is_auth_linked: bool
     created_at: datetime
 
 

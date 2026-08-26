@@ -4,6 +4,7 @@ const accessTokenStorageKey = "small-step.access-token";
 const state = {
   schoolId: null,
   children: [],
+  teachers: [],
   records: [],
   notifications: [],
   selectedRecordId: null,
@@ -46,6 +47,7 @@ const elements = {
   reviewView: document.querySelector("#review-view"),
   notificationsView: document.querySelector("#notifications-view"),
   childrenView: document.querySelector("#children-view"),
+  teachersView: document.querySelector("#teachers-view"),
   homeReviewCount: document.querySelector("#home-review-count"),
   homePendingCount: document.querySelector("#home-pending-count"),
   homeSentCount: document.querySelector("#home-sent-count"),
@@ -63,6 +65,13 @@ const elements = {
   inviteExpiration: document.querySelector("#invite-expiration"),
   inviteCode: document.querySelector("#invite-code"),
   copyInviteCodeButton: document.querySelector("#copy-invite-code-button"),
+  teachersNavButton: document.querySelector("#teachers-nav-button"),
+  teacherCount: document.querySelector("#teacher-count"),
+  teacherForm: document.querySelector("#teacher-form"),
+  teacherNameInput: document.querySelector("#teacher-name-input"),
+  teacherEmailInput: document.querySelector("#teacher-email-input"),
+  teacherCreateButton: document.querySelector("#teacher-create-button"),
+  teacherList: document.querySelector("#teacher-list"),
 };
 
 function setNotice(message, isError = false) {
@@ -267,11 +276,55 @@ function renderChildManagement() {
   }
 }
 
+function teacherRoleLabel(role) {
+  return role === "school_admin" ? "先生管理者" : "先生";
+}
+
+function renderTeacherManagement() {
+  elements.teachersNavButton.hidden = !state.isSchoolAdmin;
+  elements.teacherCount.textContent = String(state.teachers.length);
+  elements.teacherList.replaceChildren();
+
+  if (!state.teachers.length) {
+    const text = document.createElement("p");
+    text.className = "empty-list";
+    text.textContent = "登録済みの先生はいません。";
+    elements.teacherList.append(text);
+    return;
+  }
+
+  for (const teacher of state.teachers) {
+    const item = document.createElement("article");
+    item.className = "teacher-item";
+
+    const identity = document.createElement("div");
+    const name = document.createElement("h3");
+    name.textContent = teacher.name;
+    const email = document.createElement("p");
+    email.textContent = teacher.email ?? "メールアドレス未設定";
+    identity.append(name, email);
+
+    const status = document.createElement("div");
+    const role = document.createElement("span");
+    role.className = "teacher-role";
+    role.textContent = teacherRoleLabel(teacher.role);
+    const auth = document.createElement("span");
+    auth.className = "teacher-auth-status";
+    auth.classList.toggle("is-linked", teacher.is_auth_linked);
+    auth.textContent = teacher.is_auth_linked ? "ログイン済み" : "招待待ち";
+    status.append(role, auth);
+
+    item.append(identity, status);
+    elements.teacherList.append(item);
+  }
+}
+
 function render() {
   renderRecordList();
   renderDetail();
   renderHome();
   renderChildManagement();
+  renderTeacherManagement();
 }
 
 function renderNotifications() {
@@ -330,6 +383,16 @@ async function loadNotifications() {
   renderNotifications();
 }
 
+async function loadTeachers() {
+  if (!state.isSchoolAdmin) {
+    state.teachers = [];
+    renderTeacherManagement();
+    return;
+  }
+  state.teachers = await api(`/teachers?school_id=${encodeURIComponent(state.schoolId)}`);
+  renderTeacherManagement();
+}
+
 async function loadApp() {
   setNotice("読み込んでいます...");
   const schools = await api("/schools");
@@ -338,7 +401,7 @@ async function loadApp() {
     ? state.schoolId
     : schools[0].id;
   renderSchoolOptions(schools);
-  await Promise.all([loadRecords(), loadNotifications()]);
+  await Promise.all([loadRecords(), loadNotifications(), loadTeachers()]);
   setNotice("");
 }
 
@@ -348,6 +411,7 @@ async function changeView(view) {
   elements.reviewView.hidden = view !== "review";
   elements.notificationsView.hidden = view !== "notifications";
   elements.childrenView.hidden = view !== "children";
+  elements.teachersView.hidden = view !== "teachers";
   for (const button of elements.navButtons) {
     button.classList.toggle("is-active", button.dataset.view === view);
   }
@@ -359,6 +423,28 @@ async function changeView(view) {
     } catch (error) {
       setNotice(error.message, true);
     }
+  }
+}
+
+async function createTeacher() {
+  const name = elements.teacherNameInput.value.trim();
+  const email = elements.teacherEmailInput.value.trim();
+  if (!name || !email) return;
+  elements.teacherCreateButton.disabled = true;
+  try {
+    await api("/teachers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ school_id: state.schoolId, name, email, role: "teacher" }),
+    });
+    elements.teacherNameInput.value = "";
+    elements.teacherEmailInput.value = "";
+    setNotice("先生を登録しました。次にSupabase Dashboardから同じメールアドレスへ招待を送ってください。");
+    await loadTeachers();
+  } catch (error) {
+    setNotice(error.message, true);
+  } finally {
+    elements.teacherCreateButton.disabled = false;
   }
 }
 
@@ -562,6 +648,7 @@ elements.bootstrapForm.addEventListener("submit", async (event) => {
 
 elements.logoutButton.addEventListener("click", () => {
   state.accessToken = null;
+  state.isSchoolAdmin = false;
   sessionStorage.removeItem(accessTokenStorageKey);
   showLogin();
   setLoginNotice("ログアウトしました。");
@@ -571,7 +658,7 @@ elements.schoolSelect.addEventListener("change", async (event) => {
   state.schoolId = event.target.value;
   state.selectedRecordId = null;
   try {
-    await Promise.all([loadRecords(), loadNotifications()]);
+    await Promise.all([loadRecords(), loadNotifications(), loadTeachers()]);
   } catch (error) {
     setNotice(error.message, true);
   }
@@ -619,6 +706,11 @@ elements.childList.addEventListener("click", async (event) => {
 });
 
 elements.copyInviteCodeButton.addEventListener("click", async () => copyInvitationCode());
+
+elements.teacherForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await createTeacher();
+});
 
 start().catch((error) => {
   showLogin();

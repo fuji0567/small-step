@@ -74,6 +74,7 @@
         <button class="nav-button" type="button" data-view="review">レビュー待ち</button>
         <button class="nav-button" type="button" data-view="notifications">通知状況</button>
         <button class="nav-button" type="button" data-view="children">園児・保護者</button>
+        <button id="teachers-nav-button" class="nav-button" type="button" data-view="teachers" hidden>先生管理</button>
       </nav>
 
       <section id="home-view" class="app-view" aria-label="ホーム">
@@ -209,6 +210,34 @@
           </section>
 
           <div id="child-list" class="child-list" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section id="teachers-view" class="app-view" aria-label="先生管理" hidden>
+        <div class="teachers-layout">
+          <div class="panel-heading teachers-heading">
+            <div>
+              <p class="eyebrow">TEACHER ACCOUNTS</p>
+              <h2>先生管理</h2>
+            </div>
+            <span id="teacher-count" class="count">0</span>
+          </div>
+
+          <p class="teachers-note">先生を登録した後、Supabase Dashboardから同じメールアドレスへ招待を送ります。パスワードはこの画面で扱いません。</p>
+
+          <form id="teacher-form" class="teacher-form">
+            <label for="teacher-name-input">
+              先生の表示名
+              <input id="teacher-name-input" type="text" required maxlength="120" placeholder="例: 山田先生" />
+            </label>
+            <label for="teacher-email-input">
+              メールアドレス
+              <input id="teacher-email-input" type="email" required maxlength="320" placeholder="teacher@example.com" />
+            </label>
+            <button id="teacher-create-button" class="button-primary" type="submit">先生を登録</button>
+          </form>
+
+          <div id="teacher-list" class="teacher-list" aria-live="polite"></div>
         </div>
       </section>
     </main>

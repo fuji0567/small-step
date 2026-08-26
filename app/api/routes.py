@@ -410,6 +410,19 @@ def create_teacher(
     return teacher
 
 
+@router.get("/teachers", response_model=list[TeacherRead], tags=["teachers"])
+def list_teachers(
+    school_id: str,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> list[Teacher]:
+    """List teacher accounts only for the school's administrators."""
+
+    assert_school_access(current_teacher, school_id)
+    assert_school_admin(current_teacher)
+    return list(db.scalars(select(Teacher).where(Teacher.school_id == school_id).order_by(Teacher.name)))
+
+
 @router.post(
     "/edge-devices",
     response_model=EdgeDeviceCredential,

@@ -40,6 +40,7 @@ def test_teacher_review_frontend_is_served(tmp_path):
     assert "今日の状況" in response.text
     assert "通知状況" in response.text
     assert "園児・保護者" in response.text
+    assert "先生管理" in response.text
     assert "/teacher/app.js" in response.text
     assert script.status_code == 200
     assert "submitReview" in script.text
@@ -52,6 +53,8 @@ def test_teacher_review_frontend_is_served(tmp_path):
     assert "createChild" in script.text
     assert "createLinkInvitation" in script.text
     assert "isSchoolAdmin" in script.text
+    assert "createTeacher" in script.text
+    assert "loadTeachers" in script.text
     assert stylesheet.status_code == 200
 
 
@@ -211,12 +214,26 @@ def test_supabase_user_links_to_pre_registered_teacher(tmp_path, monkeypatch):
             json={"school_id": school_id, "name": "担当先生", "email": "teacher@example.com"},
         )
         assert teacher.status_code == 201
+        assert teacher.json()["is_auth_linked"] is False
+
+        teachers_before_login = client.get(
+            "/api/v1/teachers", headers=admin_headers, params={"school_id": school_id}
+        )
+        assert teachers_before_login.status_code == 200
+        assert {item["email"] for item in teachers_before_login.json()} == {
+            "admin@example.com",
+            "teacher@example.com",
+        }
 
         linked = client.post("/api/v1/auth/link-teacher", headers={"Authorization": "Bearer teacher-token"})
         assert linked.status_code == 200
         assert linked.json()["email"] == "teacher@example.com"
+        assert linked.json()["is_auth_linked"] is True
 
         teacher_headers = {"Authorization": "Bearer teacher-token"}
+        assert client.get(
+            "/api/v1/teachers", headers=teacher_headers, params={"school_id": school_id}
+        ).status_code == 403
         denied_child = client.post(
             "/api/v1/children",
             headers=teacher_headers,

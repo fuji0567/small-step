@@ -27,6 +27,10 @@
 
 先生用画面の「園児・保護者」では、園児一覧と保護者LINEの連携状態を確認できます。`school_admin` の先生だけが園児を追加し、未連携の園児向けに60分有効の招待コードを発行できます。保護者はLINE公式アカウントのトークにそのコードだけを送信して連携します。LINEのユーザーIDや保護者のメッセージ本文はこの画面に表示しません。
 
+### 先生管理
+
+`school_admin` の先生は、先生用画面の「先生管理」で名前とメールアドレスを事前登録できます。登録直後は`招待待ち`と表示されます。続けてSupabase Dashboardの`Authentication > Users > Add user > Send invitation`から、同じメールアドレスへ招待を送ります。先生がパスワード設定後にログインすると、画面が自動的に紐付け、表示は`ログイン済み`に変わります。パスワードやSupabaseのsecret keyはこの画面・FastAPIのどちらにも保存しません。
+
 MCP（Model Context Protocol）サーバーは、マイクに近い園内PCまたは高火力VRTのGPUワーカーで動かします。公開するFastAPIやLINE Webhookで動かすものではありません。
 
 ```text

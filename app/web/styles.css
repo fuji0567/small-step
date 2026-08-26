@@ -243,6 +243,7 @@ h2 {
 
 .app-nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 18px;
   border-bottom: 1px solid var(--line);
@@ -347,6 +348,99 @@ input:focus {
   border-radius: 14px;
   background: var(--surface);
   box-shadow: 0 18px 45px rgba(36, 55, 49, 0.08);
+}
+
+.teachers-layout {
+  min-height: 360px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 18px 45px rgba(36, 55, 49, 0.08);
+}
+
+.teachers-heading {
+  align-items: end;
+  padding: 24px 26px 16px;
+}
+
+.teachers-heading .eyebrow {
+  margin-bottom: 4px;
+}
+
+.teachers-note {
+  margin: 0;
+  border-top: 1px solid var(--line);
+  padding: 13px 26px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.65;
+}
+
+.teacher-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding: 18px 26px;
+}
+
+.teacher-form button {
+  min-height: 42px;
+  border-radius: 8px;
+  padding: 0 16px;
+  font-weight: 700;
+}
+
+.teacher-list {
+  display: grid;
+}
+
+.teacher-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid var(--line);
+  padding: 18px 26px;
+}
+
+.teacher-item h3,
+.teacher-item p {
+  margin: 0;
+}
+
+.teacher-item h3 {
+  margin-bottom: 6px;
+  font-size: 1rem;
+}
+
+.teacher-item p {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.teacher-item > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  gap: 7px;
+}
+
+.teacher-role,
+.teacher-auth-status {
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: #edf0e9;
+  color: var(--ink);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.teacher-auth-status.is-linked {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
 }
 
 .children-heading {
@@ -766,14 +860,19 @@ input:focus {
   .children-note,
   .children-role-note,
   .child-form,
-  .child-item {
+  .child-item,
+  .teachers-heading,
+  .teachers-note,
+  .teacher-form,
+  .teacher-item {
     padding-right: 18px;
     padding-left: 18px;
   }
 
   .child-form,
   .invite-code-row,
-  .child-item {
+  .child-item,
+  .teacher-item {
     align-items: stretch;
     flex-direction: column;
   }
@@ -781,5 +880,13 @@ input:focus {
   .invite-result {
     margin-right: 18px;
     margin-left: 18px;
+  }
+
+  .teacher-form {
+    grid-template-columns: 1fr;
+  }
+
+  .teacher-item > div:last-child {
+    justify-content: start;
   }
 }
