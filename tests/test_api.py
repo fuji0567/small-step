@@ -27,6 +27,21 @@ def line_signature(secret: str, body: bytes) -> str:
     return base64.b64encode(hmac.new(secret.encode("utf-8"), body, hashlib.sha256).digest()).decode("ascii")
 
 
+def test_teacher_review_frontend_is_served(tmp_path):
+    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/test.db", auth_mode="development"))
+    with TestClient(app) as client:
+        response = client.get("/teacher/")
+        script = client.get("/teacher/app.js")
+        stylesheet = client.get("/teacher/styles.css")
+
+    assert response.status_code == 200
+    assert "先生用レビュー" in response.text
+    assert "/teacher/app.js" in response.text
+    assert script.status_code == 200
+    assert "submitReview" in script.text
+    assert stylesheet.status_code == 200
+
+
 def test_growth_record_is_reviewed_and_scheduled(tmp_path):
     app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/test.db", auth_mode="development"))
     with TestClient(app) as client:

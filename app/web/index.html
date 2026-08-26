@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Small Step 先生用レビュー画面" />
+    <title>Small Step | 先生用レビュー</title>
+    <link rel="stylesheet" href="/teacher/styles.css" />
+    <script src="/teacher/app.js" defer></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">SMALL STEP</p>
+          <h1>先生用レビュー</h1>
+        </div>
+        <p class="header-note">音声から作られた候補を確認してから承認します。</p>
+      </header>
+
+      <section class="toolbar" aria-label="表示設定">
+        <label for="school-select">
+          園
+          <select id="school-select" disabled></select>
+        </label>
+        <button id="reload-button" type="button">再読み込み</button>
+      </section>
+
+      <p id="notice" class="notice" role="status" hidden></p>
+
+      <section class="review-layout" aria-label="レビュー待ち記録">
+        <aside class="record-panel">
+          <div class="panel-heading">
+            <h2>レビュー待ち</h2>
+            <span id="record-count" class="count">0</span>
+          </div>
+          <div id="record-list" class="record-list" aria-live="polite"></div>
+        </aside>
+
+        <section class="detail-panel" aria-label="記録の詳細">
+          <div id="empty-state" class="empty-state">
+            <h2 id="detail-title">記録を選択してください</h2>
+            <p>左の一覧から確認する記録を選択します。</p>
+          </div>
+
+          <form id="review-form" hidden>
+            <div class="detail-heading">
+              <div>
+                <p id="record-meta" class="record-meta"></p>
+                <h2>内容を確認</h2>
+              </div>
+              <span id="record-category" class="category"></span>
+            </div>
+
+            <label for="child-select">
+              園児
+              <select id="child-select"></select>
+            </label>
+
+            <label for="summary-input">
+              保護者へ伝える内容
+              <textarea id="summary-input" rows="5" required maxlength="4000"></textarea>
+            </label>
+
+            <label for="prompt-input">
+              会話のきっかけ（任意）
+              <textarea id="prompt-input" rows="3" maxlength="4000"></textarea>
+            </label>
+
+            <p class="review-note">
+              承認すると通知待ちに登録されます。怪我の記録は通知送信ワーカーが実行されたときに配信されます。
+            </p>
+
+            <div class="actions">
+              <button id="reject-button" class="button-secondary" type="button">却下</button>
+              <button id="approve-button" class="button-primary" type="submit">内容を承認</button>
+            </div>
+          </form>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

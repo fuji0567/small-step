@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
 from app.config import Settings, get_settings
@@ -30,6 +32,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.engine = engine
     application.state.session_factory = create_session_factory(engine)
     application.include_router(router)
+    application.mount(
+        "/teacher",
+        StaticFiles(directory=Path(__file__).parent / "web", html=True),
+        name="teacher-web",
+    )
     return application
 
 
