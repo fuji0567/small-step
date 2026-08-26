@@ -48,6 +48,85 @@ button {
   display: flex;
 }
 
+.home-layout {
+  min-height: 360px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  padding: 30px;
+  box-shadow: 0 18px 45px rgba(36, 55, 49, 0.08);
+}
+
+.home-layout h2 {
+  font-family: "Hiragino Mincho ProN", "Yu Mincho", serif;
+  font-size: 1.5rem;
+}
+
+.home-intro {
+  margin: 10px 0 26px;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.65;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.summary-card {
+  min-height: 142px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+  background: #fbfcf8;
+}
+
+.summary-card p,
+.summary-card span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.summary-card p {
+  margin-bottom: 9px;
+  font-weight: 700;
+}
+
+.summary-card strong,
+.summary-card span {
+  display: block;
+}
+
+.summary-card strong {
+  margin-bottom: 8px;
+  color: var(--accent-dark);
+  font-size: 2.15rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.home-action {
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--accent-dark);
+  padding: 10px 13px;
+  font-weight: 700;
+}
+
+.home-action:hover {
+  background: var(--accent-soft);
+}
+
 .app-header {
   align-items: end;
   justify-content: space-between;
@@ -93,6 +172,29 @@ h2 {
   align-items: end;
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.app-nav {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.nav-button {
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: 10px 12px 9px;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.nav-button:hover,
+.nav-button.is-active {
+  border-bottom-color: var(--accent);
+  color: var(--accent-dark);
 }
 
 label {
@@ -158,6 +260,85 @@ textarea:focus {
   border-radius: 14px;
   background: var(--surface);
   box-shadow: 0 18px 45px rgba(36, 55, 49, 0.08);
+}
+
+.notification-layout {
+  min-height: 360px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 18px 45px rgba(36, 55, 49, 0.08);
+}
+
+.notification-heading {
+  align-items: end;
+  padding: 24px 26px 16px;
+}
+
+.notification-heading .eyebrow {
+  margin-bottom: 4px;
+}
+
+.notification-note {
+  margin: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 13px 26px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.65;
+}
+
+.notification-list {
+  display: grid;
+}
+
+.notification-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 24px;
+  border-bottom: 1px solid var(--line);
+  padding: 18px 26px;
+}
+
+.notification-item h3,
+.notification-item p {
+  margin: 0;
+}
+
+.notification-item h3 {
+  font-size: 1rem;
+}
+
+.notification-summary {
+  margin-top: 8px !important;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.notification-meta {
+  align-self: center;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: right;
+}
+
+.delivery-status {
+  justify-self: end;
+  align-self: start;
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: #edf0e9;
+  color: var(--ink);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.delivery-status.is-sent {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
 }
 
 .record-panel {
@@ -331,5 +512,36 @@ textarea:focus {
 
   .detail-panel {
     padding: 22px 18px;
+  }
+
+  .home-layout {
+    padding: 22px 18px;
+  }
+
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .summary-card {
+    min-height: auto;
+  }
+
+  .notification-heading,
+  .notification-note,
+  .notification-item {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .notification-item {
+    grid-template-columns: 1fr;
+  }
+
+  .notification-meta {
+    text-align: left;
+  }
+
+  .delivery-status {
+    justify-self: start;
   }
 }

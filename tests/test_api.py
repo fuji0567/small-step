@@ -35,10 +35,14 @@ def test_teacher_review_frontend_is_served(tmp_path):
         stylesheet = client.get("/teacher/styles.css")
 
     assert response.status_code == 200
-    assert "先生用レビュー" in response.text
+    assert "先生用メニュー" in response.text
+    assert "今日の状況" in response.text
+    assert "通知状況" in response.text
     assert "/teacher/app.js" in response.text
     assert script.status_code == 200
     assert "submitReview" in script.text
+    assert "loadNotifications" in script.text
+    assert "renderHome" in script.text
     assert stylesheet.status_code == 200
 
 
@@ -86,6 +90,25 @@ def test_growth_record_is_reviewed_and_scheduled(tmp_path):
         approved = client.post(f"/api/v1/records/{record.json()['id']}/approve", json={})
         assert approved.status_code == 200
         assert approved.json()["status"] == "approved"
+
+        notification_overview = client.get("/api/v1/notifications", params={"school_id": school_id})
+        assert notification_overview.status_code == 200
+        assert notification_overview.json() == [
+            {
+                "id": notification_overview.json()[0]["id"],
+                "record_id": record.json()["id"],
+                "channel": "line",
+                "scheduled_for": notification_overview.json()[0]["scheduled_for"],
+                "status": "pending",
+                "sent_at": None,
+                "created_at": notification_overview.json()[0]["created_at"],
+                "child_id": child.json()["id"],
+                "child_display_name": "さくら",
+                "category": "growth",
+                "summary": "鉄棒に初めて挑戦しました。",
+            }
+        ]
+        assert "recipient_line_user_id" not in notification_overview.json()[0]
 
         ready = client.get(
             "/api/v1/notifications/ready",

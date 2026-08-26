@@ -4,7 +4,9 @@ const state = {
   schoolId: null,
   children: [],
   records: [],
+  notifications: [],
   selectedRecordId: null,
+  activeView: "home",
 };
 
 const elements = {
@@ -22,6 +24,16 @@ const elements = {
   promptInput: document.querySelector("#prompt-input"),
   rejectButton: document.querySelector("#reject-button"),
   approveButton: document.querySelector("#approve-button"),
+  navButtons: document.querySelectorAll(".nav-button"),
+  homeView: document.querySelector("#home-view"),
+  reviewView: document.querySelector("#review-view"),
+  notificationsView: document.querySelector("#notifications-view"),
+  homeReviewCount: document.querySelector("#home-review-count"),
+  homePendingCount: document.querySelector("#home-pending-count"),
+  homeSentCount: document.querySelector("#home-sent-count"),
+  homeActions: document.querySelectorAll("[data-view-target]"),
+  notificationCount: document.querySelector("#notification-count"),
+  notificationList: document.querySelector("#notification-list"),
 };
 
 function setNotice(message, isError = false) {
@@ -58,6 +70,12 @@ function formatDate(value) {
 
 function categoryLabel(category) {
   return category === "injury" ? "怪我" : "成長記録";
+}
+
+function notificationStatusLabel(status) {
+  if (status === "sent") return "送信済み";
+  if (status === "failed") return "送信失敗";
+  return "送信待ち";
 }
 
 function childName(childId) {
@@ -140,6 +158,57 @@ function renderDetail() {
 function render() {
   renderRecordList();
   renderDetail();
+  renderHome();
+}
+
+function renderNotifications() {
+  elements.notificationCount.textContent = String(state.notifications.length);
+  elements.notificationList.replaceChildren();
+  renderHome();
+
+  if (!state.notifications.length) {
+    const text = document.createElement("p");
+    text.className = "empty-list";
+    text.textContent = "通知はまだありません。";
+    elements.notificationList.append(text);
+    return;
+  }
+
+  for (const notification of state.notifications) {
+    const item = document.createElement("article");
+    item.className = "notification-item";
+
+    const content = document.createElement("div");
+    const title = document.createElement("h3");
+    title.textContent = `${notification.child_display_name ?? "園児未選択"} / ${categoryLabel(notification.category)}`;
+    const summary = document.createElement("p");
+    summary.className = "notification-summary";
+    summary.textContent = notification.summary;
+    content.append(title, summary);
+
+    const status = document.createElement("span");
+    status.className = "delivery-status";
+    status.classList.toggle("is-sent", notification.status === "sent");
+    status.textContent = notificationStatusLabel(notification.status);
+
+    const meta = document.createElement("p");
+    meta.className = "notification-meta";
+    meta.textContent = notification.sent_at
+      ? `送信: ${formatDate(notification.sent_at)}`
+      : `配信予定: ${formatDate(notification.scheduled_for)}`;
+    item.append(content, status, meta);
+    elements.notificationList.append(item);
+  }
+}
+
+function renderHome() {
+  elements.homeReviewCount.textContent = String(state.records.length);
+  elements.homePendingCount.textContent = String(
+    state.notifications.filter((notification) => notification.status === "pending").length,
+  );
+  elements.homeSentCount.textContent = String(
+    state.notifications.filter((notification) => notification.status === "sent").length,
+  );
 }
 
 async function loadRecords() {
@@ -156,6 +225,11 @@ async function loadRecords() {
   render();
 }
 
+async function loadNotifications() {
+  state.notifications = await api(`/notifications?school_id=${encodeURIComponent(state.schoolId)}`);
+  renderNotifications();
+}
+
 async function loadApp() {
   setNotice("読み込んでいます...");
   const schools = await api("/schools");
@@ -166,8 +240,27 @@ async function loadApp() {
     ? state.schoolId
     : schools[0].id;
   renderSchoolOptions(schools);
-  await loadRecords();
+  await Promise.all([loadRecords(), loadNotifications()]);
   setNotice("");
+}
+
+async function changeView(view) {
+  state.activeView = view;
+  elements.homeView.hidden = view !== "home";
+  elements.reviewView.hidden = view !== "review";
+  elements.notificationsView.hidden = view !== "notifications";
+  for (const button of elements.navButtons) {
+    button.classList.toggle("is-active", button.dataset.view === view);
+  }
+  if (view === "notifications") {
+    try {
+      setNotice("読み込んでいます...");
+      await loadNotifications();
+      setNotice("");
+    } catch (error) {
+      setNotice(error.message, true);
+    }
+  }
 }
 
 async function submitReview(action) {
@@ -195,7 +288,7 @@ async function submitReview(action) {
       await api(`/records/${record.id}/reject`, { method: "POST" });
     }
     setNotice(`記録を${actionLabel}しました。`);
-    await loadRecords();
+    await Promise.all([loadRecords(), loadNotifications()]);
   } catch (error) {
     setNotice(error.message, true);
   } finally {
@@ -208,7 +301,7 @@ elements.schoolSelect.addEventListener("change", async (event) => {
   state.schoolId = event.target.value;
   state.selectedRecordId = null;
   try {
-    await loadRecords();
+    await Promise.all([loadRecords(), loadNotifications()]);
   } catch (error) {
     setNotice(error.message, true);
   }
@@ -228,6 +321,18 @@ elements.recordList.addEventListener("click", (event) => {
   state.selectedRecordId = item.dataset.recordId;
   render();
 });
+
+for (const button of elements.navButtons) {
+  button.addEventListener("click", async () => {
+    await changeView(button.dataset.view);
+  });
+}
+
+for (const button of elements.homeActions) {
+  button.addEventListener("click", async () => {
+    await changeView(button.dataset.viewTarget);
+  });
+}
 
 elements.reviewForm.addEventListener("submit", async (event) => {
   event.preventDefault();

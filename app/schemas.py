@@ -167,6 +167,22 @@ class NotificationRead(APIModel):
     created_at: datetime
 
 
+class NotificationOverviewRead(APIModel):
+    """Teacher-facing notification status without exposing LINE identifiers."""
+
+    id: UUID
+    record_id: UUID
+    channel: str
+    scheduled_for: datetime
+    status: NotificationStatus
+    sent_at: datetime | None
+    created_at: datetime
+    child_id: UUID | None
+    child_display_name: str | None
+    category: RecordCategory
+    summary: str
+
+
 class NotificationSent(BaseModel):
 
     provider_message_id: str | None = Field(default=None, max_length=255)

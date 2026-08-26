@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Small Step 先生用レビュー画面" />
-    <title>Small Step | 先生用レビュー</title>
+    <meta name="description" content="Small Step 先生用画面" />
+    <title>Small Step | 先生用</title>
     <link rel="stylesheet" href="/teacher/styles.css" />
     <script src="/teacher/app.js" defer></script>
   </head>
@@ -13,7 +13,7 @@
       <header class="app-header">
         <div>
           <p class="eyebrow">SMALL STEP</p>
-          <h1>先生用レビュー</h1>
+          <h1>先生用</h1>
         </div>
         <p class="header-note">音声から作られた候補を確認してから承認します。</p>
       </header>
@@ -28,55 +28,110 @@
 
       <p id="notice" class="notice" role="status" hidden></p>
 
-      <section class="review-layout" aria-label="レビュー待ち記録">
-        <aside class="record-panel">
-          <div class="panel-heading">
-            <h2>レビュー待ち</h2>
-            <span id="record-count" class="count">0</span>
-          </div>
-          <div id="record-list" class="record-list" aria-live="polite"></div>
-        </aside>
+      <nav class="app-nav" aria-label="先生用メニュー">
+        <button class="nav-button is-active" type="button" data-view="home">ホーム</button>
+        <button class="nav-button" type="button" data-view="review">レビュー待ち</button>
+        <button class="nav-button" type="button" data-view="notifications">通知状況</button>
+      </nav>
 
-        <section class="detail-panel" aria-label="記録の詳細">
-          <div id="empty-state" class="empty-state">
-            <h2 id="detail-title">記録を選択してください</h2>
-            <p>左の一覧から確認する記録を選択します。</p>
+      <section id="home-view" class="app-view" aria-label="ホーム">
+        <div class="home-layout">
+          <div>
+            <p class="eyebrow">TODAY AT A GLANCE</p>
+            <h2>今日の状況</h2>
+            <p class="home-intro">先生の確認が必要な記録と、保護者への通知状況を確認できます。</p>
           </div>
 
-          <form id="review-form" hidden>
-            <div class="detail-heading">
-              <div>
-                <p id="record-meta" class="record-meta"></p>
-                <h2>内容を確認</h2>
+          <div class="summary-grid">
+            <article class="summary-card">
+              <p>レビュー待ち</p>
+              <strong id="home-review-count">0</strong>
+              <span>先生の確認が必要です</span>
+            </article>
+            <article class="summary-card">
+              <p>送信待ち</p>
+              <strong id="home-pending-count">0</strong>
+              <span>LINE送信ワーカーが配信します</span>
+            </article>
+            <article class="summary-card">
+              <p>送信済み</p>
+              <strong id="home-sent-count">0</strong>
+              <span>保護者への通知が完了しています</span>
+            </article>
+          </div>
+
+          <div class="home-actions">
+            <button class="home-action" type="button" data-view-target="review">レビュー待ちを確認</button>
+            <button class="home-action" type="button" data-view-target="notifications">通知状況を確認</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="review-view" class="app-view" aria-label="レビュー待ち記録" hidden>
+        <div class="review-layout">
+          <aside class="record-panel">
+            <div class="panel-heading">
+              <h2>レビュー待ち</h2>
+              <span id="record-count" class="count">0</span>
+            </div>
+            <div id="record-list" class="record-list" aria-live="polite"></div>
+          </aside>
+
+          <section class="detail-panel" aria-label="記録の詳細">
+            <div id="empty-state" class="empty-state">
+              <h2>記録を選択してください</h2>
+              <p>左の一覧から確認する記録を選択します。</p>
+            </div>
+
+            <form id="review-form" hidden>
+              <div class="detail-heading">
+                <div>
+                  <p id="record-meta" class="record-meta"></p>
+                  <h2>内容を確認</h2>
+                </div>
+                <span id="record-category" class="category"></span>
               </div>
-              <span id="record-category" class="category"></span>
+
+              <label for="child-select">
+                園児
+                <select id="child-select"></select>
+              </label>
+
+              <label for="summary-input">
+                保護者へ伝える内容
+                <textarea id="summary-input" rows="5" required maxlength="4000"></textarea>
+              </label>
+
+              <label for="prompt-input">
+                会話のきっかけ（任意）
+                <textarea id="prompt-input" rows="3" maxlength="4000"></textarea>
+              </label>
+
+              <p class="review-note">
+                承認すると通知待ちに登録されます。怪我の記録は通知送信ワーカーが実行されたときに配信されます。
+              </p>
+
+              <div class="actions">
+                <button id="reject-button" class="button-secondary" type="button">却下</button>
+                <button id="approve-button" class="button-primary" type="submit">内容を承認</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      </section>
+
+      <section id="notifications-view" class="app-view" aria-label="通知状況" hidden>
+        <div class="notification-layout">
+          <div class="panel-heading notification-heading">
+            <div>
+              <p class="eyebrow">LINE DELIVERY</p>
+              <h2>通知状況</h2>
             </div>
-
-            <label for="child-select">
-              園児
-              <select id="child-select"></select>
-            </label>
-
-            <label for="summary-input">
-              保護者へ伝える内容
-              <textarea id="summary-input" rows="5" required maxlength="4000"></textarea>
-            </label>
-
-            <label for="prompt-input">
-              会話のきっかけ（任意）
-              <textarea id="prompt-input" rows="3" maxlength="4000"></textarea>
-            </label>
-
-            <p class="review-note">
-              承認すると通知待ちに登録されます。怪我の記録は通知送信ワーカーが実行されたときに配信されます。
-            </p>
-
-            <div class="actions">
-              <button id="reject-button" class="button-secondary" type="button">却下</button>
-              <button id="approve-button" class="button-primary" type="submit">内容を承認</button>
-            </div>
-          </form>
-        </section>
+            <span id="notification-count" class="count">0</span>
+          </div>
+          <p class="notification-note">送信は専用ワーカーが行います。この画面では送信状況だけを確認できます。</p>
+          <div id="notification-list" class="notification-list" aria-live="polite"></div>
+        </div>
       </section>
     </main>
   </body>

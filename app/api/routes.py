@@ -48,6 +48,7 @@ from app.schemas import (
     LineLinkInvitationCreate,
     LineLinkInvitationCredential,
     LineLinkInvitationRead,
+    NotificationOverviewRead,
     NotificationRead,
     NotificationSent,
     NotionSyncRead,
@@ -640,6 +641,45 @@ def list_ready_notifications(
     return list(
         db.scalars(query.order_by(Notification.scheduled_for))
     )
+
+
+@router.get("/notifications", response_model=list[NotificationOverviewRead], tags=["notifications"])
+def list_notification_overview(
+    school_id: str,
+    notification_status: NotificationStatus | None = None,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> list[NotificationOverviewRead]:
+    """Show teachers a school-scoped delivery history without LINE user IDs."""
+
+    assert_school_access(current_teacher, school_id)
+    assert_school_admin(current_teacher)
+    query = (
+        select(Notification, Record, Child)
+        .join(Record, Notification.record_id == Record.id)
+        .outerjoin(Child, Child.id == Record.child_id)
+        .where(Record.school_id == school_id)
+    )
+    if notification_status:
+        query = query.where(Notification.status == notification_status)
+
+    rows = db.execute(query.order_by(Notification.created_at.desc())).all()
+    return [
+        NotificationOverviewRead(
+            id=notification.id,
+            record_id=notification.record_id,
+            channel=notification.channel,
+            scheduled_for=notification.scheduled_for,
+            status=notification.status,
+            sent_at=notification.sent_at,
+            created_at=notification.created_at,
+            child_id=record.child_id,
+            child_display_name=child.display_name if child is not None else None,
+            category=record.category,
+            summary=record.summary,
+        )
+        for notification, record, child in rows
+    ]
 
 
 @router.post("/notifications/{notification_id}/mark-sent", response_model=NotificationRead, tags=["notifications"])
