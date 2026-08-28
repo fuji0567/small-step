@@ -31,6 +31,7 @@ const elements = {
   schoolSelect: document.querySelector("#school-select"),
   reloadButton: document.querySelector("#reload-button"),
   notice: document.querySelector("#notice"),
+  loadingIndicator: document.querySelector("#loading-indicator"),
   recordCount: document.querySelector("#record-count"),
   recordList: document.querySelector("#record-list"),
   emptyState: document.querySelector("#empty-state"),
@@ -39,7 +40,9 @@ const elements = {
   recordCategory: document.querySelector("#record-category"),
   childSelect: document.querySelector("#child-select"),
   summaryInput: document.querySelector("#summary-input"),
+  summaryCount: document.querySelector("#summary-count"),
   promptInput: document.querySelector("#prompt-input"),
+  promptCount: document.querySelector("#prompt-count"),
   rejectButton: document.querySelector("#reject-button"),
   approveButton: document.querySelector("#approve-button"),
   navButtons: document.querySelectorAll(".nav-button"),
@@ -72,18 +75,103 @@ const elements = {
   teacherEmailInput: document.querySelector("#teacher-email-input"),
   teacherCreateButton: document.querySelector("#teacher-create-button"),
   teacherList: document.querySelector("#teacher-list"),
+  confirmationDialog: document.querySelector("#confirmation-dialog"),
+  confirmationTitle: document.querySelector("#confirmation-title"),
+  confirmationMessage: document.querySelector("#confirmation-message"),
+  confirmationCancel: document.querySelector("#confirmation-cancel"),
+  confirmationConfirm: document.querySelector("#confirmation-confirm"),
 };
+
+const textLimit = 4000;
+let loadingOperationCount = 0;
+let confirmationResolve = null;
+let confirmationReturnFocus = null;
 
 function setNotice(message, isError = false) {
   elements.notice.textContent = message;
   elements.notice.hidden = !message;
   elements.notice.classList.toggle("is-error", isError);
+  elements.notice.setAttribute("role", isError ? "alert" : "status");
 }
 
 function setLoginNotice(message, isError = false) {
   elements.loginNotice.textContent = message;
   elements.loginNotice.hidden = !message;
   elements.loginNotice.classList.toggle("is-error", isError);
+  elements.loginNotice.setAttribute("role", isError ? "alert" : "status");
+}
+
+function setLoading(isLoading) {
+  loadingOperationCount = Math.max(0, loadingOperationCount + (isLoading ? 1 : -1));
+  const isBusy = loadingOperationCount > 0;
+  elements.loadingIndicator.hidden = !isBusy;
+  elements.appShell.setAttribute("aria-busy", String(isBusy));
+}
+
+async function withLoading(operation) {
+  setLoading(true);
+  try {
+    return await operation();
+  } finally {
+    setLoading(false);
+  }
+}
+
+function updateCharacterCount(input, output) {
+  const maximum = input.maxLength > 0 ? input.maxLength : textLimit;
+  output.textContent = `${input.value.length.toLocaleString("ja-JP")} / ${maximum.toLocaleString("ja-JP")}文字`;
+}
+
+function updateReviewCharacterCounts() {
+  updateCharacterCount(elements.summaryInput, elements.summaryCount);
+  updateCharacterCount(elements.promptInput, elements.promptCount);
+}
+
+function createButtonIcon(iconName) {
+  const icon = document.createElement("span");
+  icon.className = "material-symbols-outlined button-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = iconName;
+  return icon;
+}
+
+function setButtonLabel(button, iconName, label) {
+  button.replaceChildren(createButtonIcon(iconName), document.createTextNode(label));
+}
+
+function requestConfirmation({ title, message, confirmLabel, confirmIcon = "check" }) {
+  if (!elements.confirmationDialog || typeof elements.confirmationDialog.showModal !== "function") {
+    return Promise.resolve(false);
+  }
+  if (elements.confirmationDialog.open || confirmationResolve) return Promise.resolve(false);
+
+  elements.confirmationTitle.textContent = title;
+  elements.confirmationMessage.textContent = message;
+  setButtonLabel(elements.confirmationConfirm, confirmIcon, confirmLabel);
+  confirmationReturnFocus = document.activeElement;
+  elements.confirmationDialog.returnValue = "";
+  elements.confirmationDialog.showModal();
+  elements.confirmationConfirm.focus();
+
+  return new Promise((resolve) => {
+    confirmationResolve = resolve;
+  });
+}
+
+function closeConfirmation(returnValue) {
+  if (elements.confirmationDialog.open) elements.confirmationDialog.close(returnValue);
+}
+
+function finishConfirmation() {
+  if (!confirmationResolve) return;
+  const resolve = confirmationResolve;
+  const returnFocus = confirmationReturnFocus;
+  confirmationResolve = null;
+  confirmationReturnFocus = null;
+  resolve(elements.confirmationDialog.returnValue === "confirm");
+  if (returnFocus instanceof HTMLElement && returnFocus.isConnected) {
+    queueMicrotask(() => returnFocus.focus());
+  }
 }
 
 function showLogin() {
@@ -191,14 +279,20 @@ function renderRecordList() {
     const item = document.createElement("button");
     item.type = "button";
     item.className = "record-item";
-    item.classList.toggle("is-selected", record.id === state.selectedRecordId);
+    const isSelected = record.id === state.selectedRecordId;
+    item.classList.toggle("is-selected", isSelected);
+    if (isSelected) item.setAttribute("aria-current", "true");
     item.dataset.recordId = record.id;
 
+    const icon = createButtonIcon("description");
+    const content = document.createElement("span");
+    content.className = "record-item-content";
     const title = document.createElement("strong");
     title.textContent = `${childName(record.child_id)} / ${categoryLabel(record.category)}`;
     const detail = document.createElement("small");
     detail.textContent = `${formatDate(record.occurred_at)} - 信頼度 ${Math.round(record.confidence * 100)}%`;
-    item.append(title, detail);
+    content.append(title, detail);
+    item.append(icon, content);
     elements.recordList.append(item);
   }
 }
@@ -222,11 +316,17 @@ function renderDetail() {
   const record = selectedRecord();
   elements.emptyState.hidden = Boolean(record);
   elements.reviewForm.hidden = !record;
-  if (!record) return;
+  if (!record) {
+    elements.summaryInput.value = "";
+    elements.promptInput.value = "";
+    updateReviewCharacterCounts();
+    return;
+  }
   elements.recordMeta.textContent = `${formatDate(record.occurred_at)} / 信頼度 ${Math.round(record.confidence * 100)}%`;
   elements.recordCategory.textContent = categoryLabel(record.category);
   elements.summaryInput.value = record.summary;
   elements.promptInput.value = record.conversation_prompt ?? "";
+  updateReviewCharacterCounts();
   renderChildOptions(record);
 }
 
@@ -269,7 +369,7 @@ function renderChildManagement() {
       inviteButton.type = "button";
       inviteButton.className = "child-invite-button";
       inviteButton.dataset.childId = child.id;
-      inviteButton.textContent = "招待コードを発行";
+      setButtonLabel(inviteButton, "person_add", "招待コードを発行");
       item.append(inviteButton);
     }
     elements.childList.append(item);
@@ -394,15 +494,15 @@ async function loadTeachers() {
 }
 
 async function loadApp() {
-  setNotice("読み込んでいます...");
-  const schools = await api("/schools");
-  if (!schools.length) throw new Error("園がまだ登録されていません。先に園を作成してください。");
-  state.schoolId = state.schoolId && schools.some((school) => school.id === state.schoolId)
-    ? state.schoolId
-    : schools[0].id;
-  renderSchoolOptions(schools);
-  await Promise.all([loadRecords(), loadNotifications(), loadTeachers()]);
-  setNotice("");
+  return withLoading(async () => {
+    const schools = await api("/schools");
+    if (!schools.length) throw new Error("園がまだ登録されていません。先に園を作成してください。");
+    state.schoolId = state.schoolId && schools.some((school) => school.id === state.schoolId)
+      ? state.schoolId
+      : schools[0].id;
+    renderSchoolOptions(schools);
+    await Promise.all([loadRecords(), loadNotifications(), loadTeachers()]);
+  });
 }
 
 async function changeView(view) {
@@ -413,13 +513,17 @@ async function changeView(view) {
   elements.childrenView.hidden = view !== "children";
   elements.teachersView.hidden = view !== "teachers";
   for (const button of elements.navButtons) {
-    button.classList.toggle("is-active", button.dataset.view === view);
+    const isActive = button.dataset.view === view;
+    button.classList.toggle("is-active", isActive);
+    if (isActive) {
+      button.setAttribute("aria-current", "page");
+    } else {
+      button.removeAttribute("aria-current");
+    }
   }
   if (view === "notifications") {
     try {
-      setNotice("読み込んでいます...");
-      await loadNotifications();
-      setNotice("");
+      await withLoading(() => loadNotifications());
     } catch (error) {
       setNotice(error.message, true);
     }
@@ -503,7 +607,15 @@ async function submitReview(action) {
   const record = selectedRecord();
   if (!record) return;
   const actionLabel = action === "approve" ? "承認" : "却下";
-  if (!window.confirm(`この記録を${actionLabel}しますか？`)) return;
+  const confirmed = await requestConfirmation({
+    title: `記録を${actionLabel}しますか？`,
+    message: action === "approve"
+      ? "編集内容を保存し、保護者への通知を準備します。"
+      : "この記録はレビュー待ちの一覧から削除されます。",
+    confirmLabel: actionLabel,
+    confirmIcon: action === "approve" ? "check" : "close",
+  });
+  if (!confirmed) return;
 
   elements.approveButton.disabled = true;
   elements.rejectButton.disabled = true;
@@ -658,7 +770,7 @@ elements.schoolSelect.addEventListener("change", async (event) => {
   state.schoolId = event.target.value;
   state.selectedRecordId = null;
   try {
-    await Promise.all([loadRecords(), loadNotifications(), loadTeachers()]);
+    await withLoading(() => Promise.all([loadRecords(), loadNotifications(), loadTeachers()]));
   } catch (error) {
     setNotice(error.message, true);
   }
@@ -694,6 +806,22 @@ elements.reviewForm.addEventListener("submit", async (event) => {
 
 elements.rejectButton.addEventListener("click", async () => submitReview("reject"));
 
+elements.summaryInput.addEventListener("input", () => {
+  updateCharacterCount(elements.summaryInput, elements.summaryCount);
+});
+
+elements.promptInput.addEventListener("input", () => {
+  updateCharacterCount(elements.promptInput, elements.promptCount);
+});
+
+elements.confirmationCancel.addEventListener("click", () => closeConfirmation("cancel"));
+elements.confirmationConfirm.addEventListener("click", () => closeConfirmation("confirm"));
+elements.confirmationDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeConfirmation("cancel");
+});
+elements.confirmationDialog.addEventListener("close", finishConfirmation);
+
 elements.childForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await createChild();
@@ -711,6 +839,9 @@ elements.teacherForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await createTeacher();
 });
+
+updateReviewCharacterCounts();
+changeView(state.activeView);
 
 start().catch((error) => {
   showLogin();

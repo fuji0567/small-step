@@ -5,13 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Small Step 先生用画面" />
     <title>Small Step | 先生用</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;icon_names=admin_panel_settings,check,child_care,close,content_copy,description,fact_check,group,group_add,home,login,logout,notifications,person_add,refresh&amp;display=block"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/teacher/styles.css" />
     <script src="/teacher/app.js" defer></script>
   </head>
   <body>
-    <main id="login-screen" class="login-shell" hidden>
+    <a class="skip-link" href="#main-content">本文へ移動</a>
+
+    <main id="main-content" tabindex="-1">
+      <div id="login-screen" class="login-shell" hidden>
       <section class="login-card" aria-labelledby="login-title">
-        <p class="eyebrow">SMALL STEP</p>
+        <p class="eyebrow">スモールステップ</p>
         <h1 id="login-title">先生ログイン</h1>
         <p class="login-intro">登録済みの先生メールアドレスでログインしてください。</p>
 
@@ -24,7 +33,10 @@
             パスワード
             <input id="login-password" type="password" autocomplete="current-password" required />
           </label>
-          <button id="login-button" class="button-primary" type="submit">ログイン</button>
+          <button id="login-button" class="button-primary" type="submit">
+            <span class="material-symbols-outlined button-icon" aria-hidden="true">login</span>
+            ログイン
+          </button>
         </form>
 
         <p id="login-notice" class="notice" role="status" hidden></p>
@@ -41,21 +53,27 @@
               表示名
               <input id="bootstrap-name" type="text" autocomplete="name" required maxlength="120" />
             </label>
-            <button id="bootstrap-button" class="button-primary" type="submit">管理者として登録</button>
+            <button id="bootstrap-button" class="button-primary" type="submit">
+              <span class="material-symbols-outlined button-icon" aria-hidden="true">admin_panel_settings</span>
+              管理者として登録
+            </button>
           </form>
         </section>
       </section>
-    </main>
+      </div>
 
-    <main id="app-shell" class="app-shell" hidden>
+    <div id="app-shell" class="app-shell" hidden>
       <header class="app-header">
         <div>
-          <p class="eyebrow">SMALL STEP</p>
+          <p class="eyebrow">スモールステップ</p>
           <h1>先生用</h1>
         </div>
         <div class="app-header-actions">
           <p class="header-note">音声から作られた候補を確認してから承認します。</p>
-          <button id="logout-button" class="logout-button" type="button" hidden>ログアウト</button>
+          <button id="logout-button" class="logout-button" type="button" hidden>
+            <span class="material-symbols-outlined button-icon" aria-hidden="true">logout</span>
+            ログアウト
+          </button>
         </div>
       </header>
 
@@ -64,23 +82,46 @@
           園
           <select id="school-select" disabled></select>
         </label>
-        <button id="reload-button" type="button">再読み込み</button>
+        <button id="reload-button" type="button">
+          <span class="material-symbols-outlined button-icon" aria-hidden="true">refresh</span>
+          再読み込み
+        </button>
       </section>
 
       <p id="notice" class="notice" role="status" hidden></p>
 
+      <div id="loading-indicator" class="loading-indicator" role="status" aria-live="polite" hidden>
+        <span class="loading-indicator-mark" aria-hidden="true"></span>
+        <span>読み込み中です</span>
+      </div>
+
       <nav class="app-nav" aria-label="先生用メニュー">
-        <button class="nav-button is-active" type="button" data-view="home">ホーム</button>
-        <button class="nav-button" type="button" data-view="review">レビュー待ち</button>
-        <button class="nav-button" type="button" data-view="notifications">通知状況</button>
-        <button class="nav-button" type="button" data-view="children">園児・保護者</button>
-        <button id="teachers-nav-button" class="nav-button" type="button" data-view="teachers" hidden>先生管理</button>
+        <button class="nav-button is-active" type="button" data-view="home" aria-current="page">
+          <span class="material-symbols-outlined button-icon" aria-hidden="true">home</span>
+          ホーム
+        </button>
+        <button class="nav-button" type="button" data-view="review">
+          <span class="material-symbols-outlined button-icon" aria-hidden="true">fact_check</span>
+          レビュー待ち
+        </button>
+        <button class="nav-button" type="button" data-view="notifications">
+          <span class="material-symbols-outlined button-icon" aria-hidden="true">notifications</span>
+          通知状況
+        </button>
+        <button class="nav-button" type="button" data-view="children">
+          <span class="material-symbols-outlined button-icon" aria-hidden="true">child_care</span>
+          園児・保護者
+        </button>
+        <button id="teachers-nav-button" class="nav-button" type="button" data-view="teachers" hidden>
+          <span class="material-symbols-outlined button-icon" aria-hidden="true">group</span>
+          先生管理
+        </button>
       </nav>
 
       <section id="home-view" class="app-view" aria-label="ホーム">
         <div class="home-layout">
           <div>
-            <p class="eyebrow">TODAY AT A GLANCE</p>
+            <p class="eyebrow">今日の概要</p>
             <h2>今日の状況</h2>
             <p class="home-intro">先生の確認が必要な記録と、保護者への通知状況を確認できます。</p>
           </div>
@@ -104,8 +145,14 @@
           </div>
 
           <div class="home-actions">
-            <button class="home-action" type="button" data-view-target="review">レビュー待ちを確認</button>
-            <button class="home-action" type="button" data-view-target="notifications">通知状況を確認</button>
+            <button class="home-action" type="button" data-view-target="review">
+              <span class="material-symbols-outlined button-icon" aria-hidden="true">fact_check</span>
+              レビュー待ちを確認
+            </button>
+            <button class="home-action" type="button" data-view-target="notifications">
+              <span class="material-symbols-outlined button-icon" aria-hidden="true">notifications</span>
+              通知状況を確認
+            </button>
           </div>
         </div>
       </section>
@@ -142,12 +189,27 @@
 
               <label for="summary-input">
                 保護者へ伝える内容
-                <textarea id="summary-input" rows="5" required maxlength="4000"></textarea>
+                <span id="summary-support" class="field-support">通知として保護者に伝わる文章を確認し、必要に応じて修正してください。</span>
+                <textarea
+                  id="summary-input"
+                  rows="5"
+                  required
+                  maxlength="4000"
+                  aria-describedby="summary-support summary-count"
+                ></textarea>
+                <span id="summary-count" class="character-count" aria-live="polite">0 / 4,000文字</span>
               </label>
 
               <label for="prompt-input">
                 会話のきっかけ（任意）
-                <textarea id="prompt-input" rows="3" maxlength="4000"></textarea>
+                <span id="prompt-support" class="field-support">ご家庭で会話を始めるための一言を入力できます。</span>
+                <textarea
+                  id="prompt-input"
+                  rows="3"
+                  maxlength="4000"
+                  aria-describedby="prompt-support prompt-count"
+                ></textarea>
+                <span id="prompt-count" class="character-count" aria-live="polite">0 / 4,000文字</span>
               </label>
 
               <p class="review-note">
@@ -155,8 +217,14 @@
               </p>
 
               <div class="actions">
-                <button id="reject-button" class="button-secondary" type="button">却下</button>
-                <button id="approve-button" class="button-primary" type="submit">内容を承認</button>
+                <button id="reject-button" class="button-secondary" type="button">
+                  <span class="material-symbols-outlined button-icon" aria-hidden="true">close</span>
+                  却下
+                </button>
+                <button id="approve-button" class="button-primary" type="submit">
+                  <span class="material-symbols-outlined button-icon" aria-hidden="true">check</span>
+                  内容を承認
+                </button>
               </div>
             </form>
           </section>
@@ -167,7 +235,7 @@
         <div class="notification-layout">
           <div class="panel-heading notification-heading">
             <div>
-              <p class="eyebrow">LINE DELIVERY</p>
+              <p class="eyebrow">LINE通知</p>
               <h2>通知状況</h2>
             </div>
             <span id="notification-count" class="count">0</span>
@@ -181,7 +249,7 @@
         <div class="children-layout">
           <div class="panel-heading children-heading">
             <div>
-              <p class="eyebrow">CHILDREN AND GUARDIANS</p>
+              <p class="eyebrow">園児・保護者管理</p>
               <h2>園児・保護者</h2>
             </div>
             <span id="child-count" class="count">0</span>
@@ -192,20 +260,33 @@
           <form id="child-form" class="child-form" hidden>
             <label for="child-name-input">
               園児の表示名
-              <input id="child-name-input" type="text" required maxlength="120" placeholder="例: さくら" />
+              <span id="child-name-support" class="field-support">入力例：さくら</span>
+              <input
+                id="child-name-input"
+                type="text"
+                required
+                maxlength="120"
+                aria-describedby="child-name-support"
+              />
             </label>
-            <button id="child-create-button" class="button-primary" type="submit">園児を追加</button>
+            <button id="child-create-button" class="button-primary" type="submit">
+              <span class="material-symbols-outlined button-icon" aria-hidden="true">person_add</span>
+              園児を追加
+            </button>
           </form>
 
           <p id="child-role-note" class="children-role-note" hidden>園児の追加と招待コード発行は、先生管理者だけが行えます。</p>
 
           <section id="invite-result" class="invite-result" aria-live="polite" hidden>
-            <p class="eyebrow">LINE INVITATION</p>
+            <p class="eyebrow">LINE招待</p>
             <h3 id="invite-child-name"></h3>
             <p>保護者へ次のコードを一度だけ渡してください。有効期限は <span id="invite-expiration"></span> です。</p>
             <div class="invite-code-row">
               <code id="invite-code"></code>
-              <button id="copy-invite-code-button" type="button">コードをコピー</button>
+              <button id="copy-invite-code-button" type="button">
+                <span class="material-symbols-outlined button-icon" aria-hidden="true">content_copy</span>
+                コードをコピー
+              </button>
             </div>
           </section>
 
@@ -217,7 +298,7 @@
         <div class="teachers-layout">
           <div class="panel-heading teachers-heading">
             <div>
-              <p class="eyebrow">TEACHER ACCOUNTS</p>
+              <p class="eyebrow">先生アカウント</p>
               <h2>先生管理</h2>
             </div>
             <span id="teacher-count" class="count">0</span>
@@ -228,18 +309,58 @@
           <form id="teacher-form" class="teacher-form">
             <label for="teacher-name-input">
               先生の表示名
-              <input id="teacher-name-input" type="text" required maxlength="120" placeholder="例: 山田先生" />
+              <span id="teacher-name-support" class="field-support">入力例：山田先生</span>
+              <input
+                id="teacher-name-input"
+                type="text"
+                required
+                maxlength="120"
+                aria-describedby="teacher-name-support"
+              />
             </label>
             <label for="teacher-email-input">
               メールアドレス
-              <input id="teacher-email-input" type="email" required maxlength="320" placeholder="teacher@example.com" />
+              <span id="teacher-email-support" class="field-support">入力例：teacher@example.com</span>
+              <input
+                id="teacher-email-input"
+                type="email"
+                required
+                maxlength="320"
+                aria-describedby="teacher-email-support"
+              />
             </label>
-            <button id="teacher-create-button" class="button-primary" type="submit">先生を登録</button>
+            <button id="teacher-create-button" class="button-primary" type="submit">
+              <span class="material-symbols-outlined button-icon" aria-hidden="true">group_add</span>
+              先生を登録
+            </button>
           </form>
 
           <div id="teacher-list" class="teacher-list" aria-live="polite"></div>
         </div>
       </section>
+      </div>
     </main>
+
+    <dialog
+      id="confirmation-dialog"
+      class="confirmation-dialog"
+      aria-labelledby="confirmation-title"
+      aria-describedby="confirmation-message"
+    >
+      <div class="confirmation-dialog-content">
+        <h2 id="confirmation-title">操作の確認</h2>
+        <p id="confirmation-message">この操作を実行してもよろしいですか。</p>
+        <div class="confirmation-dialog-actions">
+          <button id="confirmation-cancel" class="button-tertiary" type="button">
+            <span class="material-symbols-outlined button-icon" aria-hidden="true">close</span>
+            キャンセル
+          </button>
+          <button id="confirmation-confirm" class="button-primary" type="button">
+            <span class="material-symbols-outlined button-icon" aria-hidden="true">check</span>
+            実行する
+          </button>
+        </div>
+      </div>
+    </dialog>
   </body>
 </html>

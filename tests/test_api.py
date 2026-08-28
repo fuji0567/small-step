@@ -42,6 +42,17 @@ def test_teacher_review_frontend_is_served(tmp_path):
     assert "園児・保護者" in response.text
     assert "先生管理" in response.text
     assert "/teacher/app.js" in response.text
+    assert 'id="loading-indicator"' in response.text
+    assert 'id="summary-count"' in response.text
+    assert 'id="prompt-count"' in response.text
+    assert 'maxlength="4000"' in response.text
+    assert 'id="confirmation-dialog"' in response.text
+    assert 'aria-labelledby="confirmation-title"' in response.text
+    assert 'id="confirmation-cancel"' in response.text
+    assert 'id="confirmation-confirm"' in response.text
+    assert "fonts.googleapis.com/css2?family=Material+Symbols+Outlined" in response.text
+    assert 'class="material-symbols-outlined button-icon"' in response.text
+    assert 'aria-hidden="true">home</span>' in response.text
     assert script.status_code == 200
     assert "submitReview" in script.text
     assert "loadNotifications" in script.text
@@ -55,7 +66,18 @@ def test_teacher_review_frontend_is_served(tmp_path):
     assert "isSchoolAdmin" in script.text
     assert "createTeacher" in script.text
     assert "loadTeachers" in script.text
+    assert "requestConfirmation" in script.text
+    assert ".showModal()" in script.text
+    assert 'addEventListener("cancel"' in script.text
+    assert 'addEventListener("close", finishConfirmation)' in script.text
+    assert "window.confirm" not in script.text
+    assert 'setAttribute("aria-busy", String(isBusy))' in script.text
+    assert 'setAttribute("aria-current", "page")' in script.text
+    assert "updateReviewCharacterCounts" in script.text
+    assert "createButtonIcon" in script.text
+    assert "setButtonLabel" in script.text
     assert stylesheet.status_code == 200
+    assert ".material-symbols-outlined.button-icon" in stylesheet.text
 
 
 def test_growth_record_is_reviewed_and_scheduled(tmp_path):
