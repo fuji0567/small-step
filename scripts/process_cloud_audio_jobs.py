@@ -1,0 +1,106 @@
+"""Run the Small Step cloud GPU audio worker on a Sakura VRT instance."""
+
+import argparse
+import time
+from datetime import timedelta
+
+from app.cloud_audio import CloudAudioJobStorage
+from app.cloud_audio_worker import process_next_cloud_audio_job
+from app.config import Settings
+from app.database import create_database_engine, create_session_factory, initialise_database
+from app.edge_audio import EdgeAudioProcessor
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("1以上の整数を指定してください。")
+    return parsed
+
+
+def require_ready_configuration(settings: Settings, processor: EdgeAudioProcessor) -> None:
+    if not settings.cloud_audio_enabled:
+        raise SystemExit("CLOUD_AUDIO_ENABLED=true を設定してから起動してください。")
+    status = processor.status()
+    if not status["llm_configured"]:
+        raise SystemExit("LLM_BASE_URL と LLM_MODEL を設定してから起動してください。")
+
+
+def process_available_jobs(
+    *,
+    session_factory,
+    storage: CloudAudioJobStorage,
+    processor: EdgeAudioProcessor,
+    limit: int,
+    processing_timeout: timedelta,
+) -> int:
+    completed_count = 0
+    for _ in range(limit):
+        with session_factory() as db:
+            job = process_next_cloud_audio_job(
+                db=db,
+                storage=storage,
+                processor=processor,
+                processing_timeout=processing_timeout,
+            )
+        if job is None:
+            break
+        completed_count += 1
+        print(f"クラウド音声ジョブを処理しました: {job.id} ({job.status.value})")
+    return completed_count
+
+
+def main() -> None:
+    settings = Settings()
+    parser = argparse.ArgumentParser(description="VRT上でクラウド音声ジョブをGPU処理します。")
+    parser.add_argument("--once", action="store_true", help="現在のジョブを処理して終了します。")
+    parser.add_argument("--limit", type=positive_int, default=10, help="1回に処理する最大件数です。")
+    parser.add_argument(
+        "--poll-seconds",
+        type=float,
+        default=settings.cloud_audio_worker_poll_seconds,
+        help="待機秒数。既定値は CLOUD_AUDIO_WORKER_POLL_SECONDS です。",
+    )
+    args = parser.parse_args()
+    if args.poll_seconds <= 0:
+        raise SystemExit("--poll-seconds は0より大きい値にしてください。")
+
+    processor = EdgeAudioProcessor(settings=settings)
+    require_ready_configuration(settings, processor)
+    storage = CloudAudioJobStorage(
+        job_dir=settings.cloud_audio_job_dir,
+        max_file_bytes=settings.edge_audio_max_file_bytes,
+    )
+    storage.ensure_directory()
+
+    engine = create_database_engine(settings.database_url)
+    initialise_database(engine)
+    session_factory = create_session_factory(engine)
+    processing_timeout = timedelta(minutes=settings.cloud_audio_processing_timeout_minutes)
+    try:
+        if args.once:
+            count = process_available_jobs(
+                session_factory=session_factory,
+                storage=storage,
+                processor=processor,
+                limit=args.limit,
+                processing_timeout=processing_timeout,
+            )
+            print(f"処理したクラウド音声ジョブ: {count}件")
+            return
+
+        while True:
+            process_available_jobs(
+                session_factory=session_factory,
+                storage=storage,
+                processor=processor,
+                limit=args.limit,
+                processing_timeout=processing_timeout,
+            )
+            time.sleep(args.poll_seconds)
+    finally:
+        engine.dispose()
+
+
+if __name__ == "__main__":
+    main()

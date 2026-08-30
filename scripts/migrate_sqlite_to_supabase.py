@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 
 from app.config import Settings
 from app.database import create_database_engine, create_session_factory, initialise_database
+from app.database_migrations import upgrade_database
 from app.models import Child, Notification, Record, School, Teacher
 
 
@@ -68,7 +69,7 @@ def main() -> None:
     source_engine = create_database_engine(SOURCE_DATABASE_URL)
     target_engine = create_database_engine(settings.database_url)
     initialise_database(source_engine)
-    initialise_database(target_engine)
+    upgrade_database(settings.database_url)
     SourceSession = create_session_factory(source_engine)
     TargetSession = create_session_factory(target_engine)
 

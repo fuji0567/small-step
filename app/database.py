@@ -21,24 +21,32 @@ def create_session_factory(engine: Engine) -> sessionmaker[Session]:
 
 
 def initialise_database(engine: Engine) -> None:
+    """Prepare only local SQLite databases for quick development.
+
+    Production PostgreSQL is created and updated by Alembic migrations.  This
+    deliberate split prevents a newly deployed API process from silently
+    changing the production schema while keeping the local prototype simple.
+    """
+
+    if engine.dialect.name != "sqlite":
+        return
+
     Base.metadata.create_all(bind=engine)
     # This project started with a SQLite prototype before Auth was introduced.
     # Keep local developer databases usable without forcing a destructive reset.
-    if engine.dialect.name == "sqlite":
-        columns = {column["name"] for column in inspect(engine).get_columns("teachers")}
-        with engine.begin() as connection:
-            if "auth_user_id" not in columns:
-                connection.execute(text("ALTER TABLE teachers ADD COLUMN auth_user_id VARCHAR(36)"))
-                connection.execute(
-                    text(
-                        "CREATE UNIQUE INDEX IF NOT EXISTS ix_teachers_auth_user_id "
-                        "ON teachers (auth_user_id)"
-                    )
+    columns = {column["name"] for column in inspect(engine).get_columns("teachers")}
+    with engine.begin() as connection:
+        if "auth_user_id" not in columns:
+            connection.execute(text("ALTER TABLE teachers ADD COLUMN auth_user_id VARCHAR(36)"))
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_teachers_auth_user_id "
+                    "ON teachers (auth_user_id)"
                 )
-            if "role" not in columns:
-                connection.execute(
-                    text("ALTER TABLE teachers ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'teacher'")
-                )
+            )
+        if "role" not in columns:
+            connection.execute(
+                text("ALTER TABLE teachers ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'teacher'"))
 
 
 def get_db_session(session_factory: sessionmaker[Session]) -> Generator[Session, None, None]:

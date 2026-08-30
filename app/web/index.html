@@ -5,12 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Small Step 先生用画面" />
     <title>Small Step | 先生用</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;icon_names=admin_panel_settings,check,child_care,close,content_copy,description,fact_check,group,group_add,home,login,logout,notifications,person_add,refresh&amp;display=block"
-      rel="stylesheet"
-    />
     <link rel="stylesheet" href="/teacher/styles.css" />
     <script src="/teacher/app.js" defer></script>
   </head>
@@ -104,17 +98,45 @@
           <span class="material-symbols-outlined button-icon" aria-hidden="true">fact_check</span>
           レビュー待ち
         </button>
+        <button class="nav-button" type="button" data-view="record-history">
+          <span class="material-symbols-outlined button-icon" aria-hidden="true">history</span>
+          記録履歴
+        </button>
         <button class="nav-button" type="button" data-view="notifications">
           <span class="material-symbols-outlined button-icon" aria-hidden="true">notifications</span>
           通知状況
+        </button>
+        <button class="nav-button" type="button" data-view="audio-jobs">
+          <span class="material-symbols-outlined button-icon" aria-hidden="true">graphic_eq</span>
+          音声処理
         </button>
         <button class="nav-button" type="button" data-view="children">
           <span class="material-symbols-outlined button-icon" aria-hidden="true">child_care</span>
           園児・保護者
         </button>
+        <button id="school-settings-nav-button" class="nav-button" type="button" data-view="school-settings" hidden>
+          <span class="material-symbols-outlined button-icon" aria-hidden="true">schedule</span>
+          園の設定
+        </button>
         <button id="teachers-nav-button" class="nav-button" type="button" data-view="teachers" hidden>
           <span class="material-symbols-outlined button-icon" aria-hidden="true">group</span>
           先生管理
+        </button>
+        <button id="edge-devices-nav-button" class="nav-button" type="button" data-view="edge-devices" hidden>
+          <span class="material-symbols-outlined button-icon" aria-hidden="true">mic</span>
+          録音端末
+        </button>
+        <button id="runtime-nav-button" class="nav-button" type="button" data-view="runtime" hidden>
+          <span class="material-symbols-outlined button-icon" aria-hidden="true">checklist</span>
+          稼働準備
+        </button>
+        <button id="audit-events-nav-button" class="nav-button" type="button" data-view="audit-events" hidden>
+          <span class="material-symbols-outlined button-icon" aria-hidden="true">history</span>
+          操作履歴
+        </button>
+        <button class="nav-button" type="button" data-view="voice-consent">
+          <span class="material-symbols-outlined button-icon" aria-hidden="true">privacy_tip</span>
+          声紋設定
         </button>
       </nav>
 
@@ -142,6 +164,11 @@
               <strong id="home-sent-count">0</strong>
               <span>保護者への通知が完了しています</span>
             </article>
+            <article class="summary-card is-waiting-guardian-link">
+              <p>LINE連携待ち</p>
+              <strong id="home-waiting-guardian-link-count">0</strong>
+              <span>保護者の招待コード連携が必要です</span>
+            </article>
           </div>
 
           <div class="home-actions">
@@ -162,7 +189,13 @@
           <aside class="record-panel">
             <div class="panel-heading">
               <h2>レビュー待ち</h2>
-              <span id="record-count" class="count">0</span>
+              <div class="review-panel-actions">
+                <span id="record-count" class="count">0</span>
+                <button id="manual-record-open-button" class="manual-record-open-button" type="button">
+                  <span class="material-symbols-outlined button-icon" aria-hidden="true">edit_note</span>
+                  手入力で追加
+                </button>
+              </div>
             </div>
             <div id="record-list" class="record-list" aria-live="polite"></div>
           </aside>
@@ -172,6 +205,54 @@
               <h2>記録を選択してください</h2>
               <p>左の一覧から確認する記録を選択します。</p>
             </div>
+
+            <form id="manual-record-form" class="manual-record-form" hidden>
+              <div class="detail-heading">
+                <div>
+                  <p class="record-meta">音声を使わない記録</p>
+                  <h2>記録を手入力</h2>
+                </div>
+              </div>
+              <p class="manual-record-note">作成後はレビュー待ちになります。ここから保護者へ直接送信されることはありません。</p>
+
+              <label for="manual-record-child-select">
+                園児
+                <select id="manual-record-child-select" required></select>
+              </label>
+              <label id="manual-record-teacher-field" for="manual-record-teacher-select" hidden>
+                担当先生
+                <select id="manual-record-teacher-select"></select>
+              </label>
+              <label for="manual-record-category-select">
+                種別
+                <select id="manual-record-category-select" required>
+                  <option value="growth">成長記録</option>
+                  <option value="injury">怪我記録</option>
+                </select>
+              </label>
+              <label for="manual-record-occurred-at-input">
+                発生日時
+                <input id="manual-record-occurred-at-input" type="datetime-local" required />
+              </label>
+              <label for="manual-record-summary-input">
+                保護者へ伝える内容
+                <textarea id="manual-record-summary-input" rows="5" required maxlength="4000"></textarea>
+              </label>
+              <label for="manual-record-prompt-input">
+                会話のきっかけ（任意）
+                <textarea id="manual-record-prompt-input" rows="3" maxlength="4000"></textarea>
+              </label>
+              <div class="actions">
+                <button id="manual-record-cancel-button" class="button-secondary" type="button">
+                  <span class="material-symbols-outlined button-icon" aria-hidden="true">close</span>
+                  戻る
+                </button>
+                <button id="manual-record-create-button" class="button-primary" type="submit">
+                  <span class="material-symbols-outlined button-icon" aria-hidden="true">edit_note</span>
+                  レビュー待ちに追加
+                </button>
+              </div>
+            </form>
 
             <form id="review-form" hidden>
               <div class="detail-heading">
@@ -212,6 +293,19 @@
                 <span id="prompt-count" class="character-count" aria-live="polite">0 / 4,000文字</span>
               </label>
 
+              <fieldset class="delivery-schedule-field">
+                <legend>配信時刻</legend>
+                <p class="field-support">空欄では、成長記録は園の配信時刻、怪我記録は即時に配信待ちになります。</p>
+                <label class="delivery-schedule-toggle" for="scheduled-for-enabled">
+                  <input id="scheduled-for-enabled" type="checkbox" />
+                  配信日時を指定する
+                </label>
+                <label for="scheduled-for-input">
+                  指定する日時
+                  <input id="scheduled-for-input" type="datetime-local" disabled />
+                </label>
+              </fieldset>
+
               <p class="review-note">
                 承認すると通知待ちに登録されます。怪我の記録は通知送信ワーカーが実行されたときに配信されます。
               </p>
@@ -241,7 +335,108 @@
             <span id="notification-count" class="count">0</span>
           </div>
           <p class="notification-note">送信は専用ワーカーが行います。この画面では送信状況だけを確認できます。</p>
+          <form id="notification-filter-form" class="notification-filter-form" role="search">
+            <label for="notification-status-select">
+              状態
+              <select id="notification-status-select">
+                <option value="">すべて</option>
+                <option value="pending">送信待ち</option>
+                <option value="waiting_guardian_link">保護者LINEの連携待ち</option>
+                <option value="sent">送信済み</option>
+                <option value="failed">送信失敗</option>
+                <option value="cancelled">配信取消</option>
+              </select>
+            </label>
+            <label for="notification-search">
+              園児名・内容
+              <input id="notification-search" type="search" maxlength="120" placeholder="名前や通知内容で検索" />
+            </label>
+            <div class="notification-filter-actions">
+              <button class="button-primary" type="submit">
+                <span class="material-symbols-outlined button-icon" aria-hidden="true">search</span>
+                絞り込む
+              </button>
+              <button id="notification-filter-reset-button" class="button-tertiary" type="button">条件をリセット</button>
+            </div>
+          </form>
           <div id="notification-list" class="notification-list" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section id="record-history-view" class="app-view" aria-label="記録履歴" hidden>
+        <div class="record-history-layout">
+          <div class="panel-heading record-history-heading">
+            <div>
+              <p class="eyebrow">確認済みを含む記録</p>
+              <h2>記録履歴</h2>
+            </div>
+            <div class="record-history-heading-actions">
+              <span id="record-history-count" class="count">0</span>
+              <button id="record-history-export-button" class="button-tertiary" type="button" hidden>
+                <span class="material-symbols-outlined button-icon" aria-hidden="true">download</span>
+                CSVをダウンロード
+              </button>
+            </div>
+          </div>
+          <p class="record-history-note">承認済み・配信済み・却下済みの記録を確認できます。退園済みの園児も履歴として表示します。</p>
+          <form id="record-history-filter-form" class="record-history-filter-form">
+            <label for="record-history-search">
+              キーワード
+              <input id="record-history-search" type="search" maxlength="120" placeholder="通知内容から検索" />
+            </label>
+            <label for="record-history-child-select">
+              園児
+              <select id="record-history-child-select"></select>
+            </label>
+            <label for="record-history-status-select">
+              状態
+              <select id="record-history-status-select">
+                <option value="">すべて</option>
+                <option value="pending_review">レビュー待ち</option>
+                <option value="approved">承認済み</option>
+                <option value="dispatched">配信済み</option>
+                <option value="rejected">却下</option>
+              </select>
+            </label>
+            <label for="record-history-category-select">
+              種別
+              <select id="record-history-category-select">
+                <option value="">すべて</option>
+                <option value="growth">成長記録</option>
+                <option value="injury">怪我</option>
+              </select>
+            </label>
+            <label for="record-history-from">
+              発生日（開始）
+              <input id="record-history-from" type="date" />
+            </label>
+            <label for="record-history-to">
+              発生日（終了）
+              <input id="record-history-to" type="date" />
+            </label>
+            <div class="record-history-filter-actions">
+              <button class="button-primary" type="submit">
+                <span class="material-symbols-outlined button-icon" aria-hidden="true">refresh</span>
+                検索
+              </button>
+              <button id="record-history-reset-button" class="button-tertiary" type="button">条件をリセット</button>
+            </div>
+          </form>
+          <div id="record-history-list" class="record-history-list" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section id="audio-jobs-view" class="app-view" aria-label="音声処理状況" hidden>
+        <div class="audio-jobs-layout">
+          <div class="panel-heading audio-jobs-heading">
+            <div>
+              <p class="eyebrow">GPUワーカー</p>
+              <h2>音声処理状況</h2>
+            </div>
+            <span id="audio-job-count" class="count">0</span>
+          </div>
+          <p class="audio-jobs-note">音声の内容・元ファイル名・保存場所は表示しません。処理が終わると、レビュー待ちの記録が作成されます。</p>
+          <div id="audio-job-list" class="audio-job-list" aria-live="polite"></div>
         </div>
       </section>
 
@@ -286,6 +481,19 @@
               <button id="copy-invite-code-button" type="button">
                 <span class="material-symbols-outlined button-icon" aria-hidden="true">content_copy</span>
                 コードをコピー
+              </button>
+            </div>
+          </section>
+
+          <section id="guardian-archive-result" class="guardian-archive-result" aria-live="polite" hidden>
+            <p class="eyebrow">保護者用 配信アーカイブ</p>
+            <h3 id="guardian-archive-child-name"></h3>
+            <p>次のURLは <span id="guardian-archive-expiration"></span> まで有効です。保護者本人とのLINEトークへ個別に送ってください。新しいURLを発行すると、以前のURLは使えなくなります。</p>
+            <div class="guardian-archive-url-row">
+              <code id="guardian-archive-url"></code>
+              <button id="copy-guardian-archive-url-button" type="button">
+                <span class="material-symbols-outlined button-icon" aria-hidden="true">content_copy</span>
+                URLをコピー
               </button>
             </div>
           </section>
@@ -336,6 +544,233 @@
           </form>
 
           <div id="teacher-list" class="teacher-list" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section id="school-settings-view" class="app-view" aria-label="園の設定" hidden>
+        <div class="school-settings-layout">
+          <div class="panel-heading school-settings-heading">
+            <div>
+              <p class="eyebrow">保護者への定時配信</p>
+              <h2>園の設定</h2>
+            </div>
+          </div>
+          <p class="school-settings-note">成長記録を承認したときの既定の配信時刻です。怪我記録は引き続き即時に送信待ちになります。すでに送信待ちの通知時刻は変更されません。</p>
+          <form id="school-settings-form" class="school-settings-form">
+            <label for="school-digest-time-input">
+              成長記録の既定配信時刻
+              <span id="school-timezone-note" class="field-support"></span>
+              <input id="school-digest-time-input" type="time" required step="60" />
+            </label>
+            <button id="school-digest-time-save-button" class="button-primary" type="submit">
+              <span class="material-symbols-outlined button-icon" aria-hidden="true">schedule</span>
+              配信時刻を保存
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <section id="edge-devices-view" class="app-view" aria-label="録音端末" hidden>
+        <div class="edge-devices-layout">
+          <div class="panel-heading edge-devices-heading">
+            <div>
+              <p class="eyebrow">録音・送信端末</p>
+              <h2>録音端末</h2>
+            </div>
+            <span id="edge-device-count" class="count">0</span>
+          </div>
+
+          <p class="edge-devices-note">端末ごとに専用の鍵を発行します。鍵は発行直後にだけ表示され、一覧には保存・表示されません。</p>
+
+          <form id="edge-device-form" class="edge-device-form">
+            <label for="edge-device-name-input">
+              端末名
+              <span class="field-support">入力例：保育室マイク 01</span>
+              <input id="edge-device-name-input" type="text" required maxlength="120" />
+            </label>
+            <label for="edge-device-teacher-select">
+              担当先生
+              <select id="edge-device-teacher-select" required></select>
+            </label>
+            <button id="edge-device-create-button" class="button-primary" type="submit">
+              <span class="material-symbols-outlined button-icon" aria-hidden="true">mic</span>
+              端末を登録
+            </button>
+          </form>
+
+          <section id="edge-device-key-result" class="edge-device-key-result" aria-live="polite" hidden>
+            <p class="eyebrow">端末の接続用キー</p>
+            <h3 id="edge-device-key-title">新しい端末</h3>
+            <p>このキーは今だけ表示されています。端末の `.env` の `EDGE_API_KEY` に設定してください。</p>
+            <div class="edge-device-key-row">
+              <code id="edge-device-api-key"></code>
+              <button id="copy-edge-device-key-button" type="button">
+                <span class="material-symbols-outlined button-icon" aria-hidden="true">content_copy</span>
+                キーをコピー
+              </button>
+            </div>
+          </section>
+
+          <div id="edge-device-list" class="edge-device-list" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section id="audit-events-view" class="app-view" aria-label="操作履歴" hidden>
+        <div class="audit-events-layout">
+          <div class="panel-heading audit-events-heading">
+            <div>
+              <p class="eyebrow">園の運用記録</p>
+              <h2>操作履歴</h2>
+            </div>
+            <div class="record-history-heading-actions">
+              <span id="audit-event-count" class="count">0</span>
+              <button id="audit-events-export-button" class="button-tertiary" type="button">
+                <span class="material-symbols-outlined button-icon" aria-hidden="true">download</span>
+                CSVをダウンロード
+              </button>
+            </div>
+          </div>
+          <p class="audit-events-note">承認・連携解除・端末管理などの操作を新しい順に表示します。園児名、通知文、音声、LINE連携情報、接続用キーは保存・表示しません。CSVには実行者の表示名だけを含みます。</p>
+          <form id="audit-events-filter-form" class="audit-events-filter-form">
+            <label for="audit-events-action-select">
+              操作の種類
+              <select id="audit-events-action-select">
+                <option value="">すべて</option>
+                <option value="record_approved">記録を承認</option>
+                <option value="record_rejected">記録を却下</option>
+                <option value="manual_record_created">手入力の記録を作成</option>
+                <option value="record_history_exported">記録履歴をCSV出力</option>
+                <option value="audit_history_exported">操作履歴をCSV出力</option>
+                <option value="notification_retry_scheduled">LINE通知の再送を予約</option>
+                <option value="notification_cancelled">LINE通知を取消</option>
+                <option value="notification_rescheduled">LINE通知の配信日時を変更</option>
+                <option value="line_link_invitation_issued">保護者LINEの招待コードを発行</option>
+                <option value="guardian_line_linked">保護者LINEが連携済み</option>
+                <option value="guardian_line_unlinked">保護者LINEの連携を解除</option>
+                <option value="guardian_archive_issued">配信アーカイブURLを発行</option>
+                <option value="guardian_archive_revoked">配信アーカイブURLを無効化</option>
+                <option value="child_updated">園児の表示名を変更</option>
+                <option value="child_archived">園児を退園処理</option>
+                <option value="child_restored">園児を復園へ戻す</option>
+                <option value="teacher_disabled">先生アカウントを利用停止</option>
+                <option value="teacher_restored">先生アカウントの利用を再開</option>
+                <option value="teacher_role_changed">先生の権限を変更</option>
+                <option value="school_digest_time_changed">成長記録の配信時刻を変更</option>
+                <option value="notion_synced">Notionに記録</option>
+                <option value="edge_device_created">録音端末を登録</option>
+                <option value="edge_device_key_rotated">録音端末のキーを再発行</option>
+                <option value="edge_device_disabled">録音端末を無効化</option>
+              </select>
+            </label>
+            <label for="audit-events-from">
+              実行日（開始）
+              <input id="audit-events-from" type="date" />
+            </label>
+            <label for="audit-events-to">
+              実行日（終了）
+              <input id="audit-events-to" type="date" />
+            </label>
+            <div class="audit-events-filter-actions">
+              <button class="button-primary" type="submit">
+                <span class="material-symbols-outlined button-icon" aria-hidden="true">filter_alt</span>
+                絞り込む
+              </button>
+              <button id="audit-events-filter-reset-button" class="button-tertiary" type="button">条件をリセット</button>
+            </div>
+          </form>
+          <div id="audit-event-list" class="audit-event-list" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section id="runtime-view" class="app-view" aria-label="稼働準備チェック" hidden>
+        <div class="runtime-layout">
+          <div class="panel-heading runtime-heading">
+            <div>
+              <p class="eyebrow">VRT切替前の確認</p>
+              <h2>稼働準備チェック</h2>
+            </div>
+            <span id="runtime-overall-status" class="runtime-overall-status" aria-live="polite">未確認</span>
+          </div>
+          <p class="runtime-note">データベース、VRTで使うクラウド音声処理、LINE配信の準備状態を確認します。接続先・APIキー・音声・文字起こしはこの画面に表示しません。</p>
+          <div class="runtime-readiness-grid">
+            <article class="runtime-readiness-card">
+              <h3>データベース</h3>
+              <p id="runtime-database-status" class="runtime-check-status">未確認</p>
+              <p id="runtime-database-note" class="runtime-check-note">確認ボタンを押すと状態を読み込みます。</p>
+            </article>
+            <article class="runtime-readiness-card">
+              <h3>データベース更新</h3>
+              <p id="runtime-migration-status" class="runtime-check-status">未確認</p>
+              <p id="runtime-migration-note" class="runtime-check-note">VRTへ移す前に必要な更新を確認します。</p>
+            </article>
+            <article class="runtime-readiness-card">
+              <h3>音声処理の場所</h3>
+              <p id="runtime-audio-mode-status" class="runtime-check-status">未確認</p>
+              <p id="runtime-audio-mode-note" class="runtime-check-note">現在の処理モードを確認します。</p>
+            </article>
+            <article class="runtime-readiness-card">
+              <h3>VRTの一時音声保存</h3>
+              <p id="runtime-storage-status" class="runtime-check-status">未確認</p>
+              <p id="runtime-storage-note" class="runtime-check-note">クラウド音声処理を使う場合だけ確認します。</p>
+            </article>
+            <article class="runtime-readiness-card">
+              <h3>VRTの文章生成AI</h3>
+              <p id="runtime-llm-status" class="runtime-check-status">未確認</p>
+              <p id="runtime-llm-note" class="runtime-check-note">クラウド音声処理を使う場合だけ確認します。</p>
+            </article>
+            <article class="runtime-readiness-card">
+              <h3>LINE配信</h3>
+              <p id="runtime-line-status" class="runtime-check-status">未確認</p>
+              <p id="runtime-line-note" class="runtime-check-note">LINEの送信設定が入っているかだけを確認します。</p>
+            </article>
+          </div>
+          <div class="runtime-actions">
+            <button id="runtime-refresh-button" class="button-primary" type="button">
+              <span class="material-symbols-outlined button-icon" aria-hidden="true">refresh</span>
+              状態を確認
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section id="voice-consent-view" class="app-view" aria-label="声紋設定" hidden>
+        <div class="voice-consent-layout">
+          <div class="panel-heading voice-consent-heading">
+            <div>
+              <p class="eyebrow">声紋登録の事前設定</p>
+              <h2>声紋設定</h2>
+            </div>
+          </div>
+
+          <p class="voice-consent-note">話者分離では個人を特定しません。将来、先生の声を識別する機能を使う場合にだけ、先生本人の明示的な同意が必要です。</p>
+
+          <section class="voice-consent-card" aria-label="声紋登録への同意">
+            <h3>現在の状態</h3>
+            <p id="voice-consent-status" class="voice-consent-status" aria-live="polite"></p>
+            <p class="voice-consent-details">この画面では音声や声紋の特徴量を登録しません。同意の目的・日時・有効期限だけを保存し、いつでも取り消せます。</p>
+
+            <form id="voice-consent-form" class="voice-consent-form">
+              <label class="voice-consent-checkbox" for="voice-consent-checkbox">
+                <input id="voice-consent-checkbox" type="checkbox" required />
+                <span>先生本人の声紋登録を、園内の話者識別にだけ使うことを理解し、同意します。</span>
+              </label>
+              <label for="voice-consent-retention-days">
+                同意の有効期間（日数）
+                <span class="field-support">期間終了後は、改めて先生本人の同意が必要です。</span>
+                <input id="voice-consent-retention-days" type="number" min="1" max="365" value="30" required />
+              </label>
+              <div class="actions voice-consent-actions">
+                <button id="voice-consent-revoke-button" class="button-secondary" type="button" hidden>
+                  <span class="material-symbols-outlined button-icon" aria-hidden="true">close</span>
+                  同意を取り消す
+                </button>
+                <button id="voice-consent-submit-button" class="button-primary" type="submit">
+                  <span class="material-symbols-outlined button-icon" aria-hidden="true">check</span>
+                  同意を保存
+                </button>
+              </div>
+            </form>
+          </section>
         </div>
       </section>
       </div>

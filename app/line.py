@@ -20,6 +20,10 @@ LINE_LINK_CODE_LENGTH = 8
 class LineMessagingError(RuntimeError):
     """Raised when LINE rejects a push-message request."""
 
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 def generate_link_code() -> str:
     """Create a guardian-friendly, one-time code without ambiguous characters."""
@@ -115,5 +119,8 @@ def push_text_message(
     )
     if not response.is_success:
         detail = response.text.strip().replace("\n", " ")[:500]
-        raise LineMessagingError(f"LINE push failed with HTTP {response.status_code}: {detail}")
+        raise LineMessagingError(
+            f"LINE push failed with HTTP {response.status_code}: {detail}",
+            status_code=response.status_code,
+        )
     return response.headers.get("x-line-request-id")

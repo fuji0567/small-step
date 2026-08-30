@@ -1,0 +1,58 @@
+# Add this file only on a Sakura High Firepower VRT instance:
+# docker compose -f compose.yaml -f compose.vrt.yaml up -d --build
+services:
+  api:
+    environment:
+      CLOUD_AUDIO_JOB_DIR: /var/lib/small-step/cloud-audio-jobs
+    volumes:
+      - cloud_audio_jobs:/var/lib/small-step/cloud-audio-jobs
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  migrate:
+    build: .
+    env_file:
+      - .env
+    command: ["python", "scripts/prepare_database.py"]
+    volumes:
+      - api_data:/app/data
+    restart: "no"
+
+  gpu-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    env_file:
+      - .env
+    environment:
+      CLOUD_AUDIO_JOB_DIR: /var/lib/small-step/cloud-audio-jobs
+      HF_HOME: /var/lib/small-step/models/huggingface
+    command: ["python3", "scripts/process_cloud_audio_jobs.py"]
+    gpus: all
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - api_data:/app/data
+      - cloud_audio_jobs:/var/lib/small-step/cloud-audio-jobs
+      - gpu_model_cache:/var/lib/small-step/models
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  line-worker:
+    build: .
+    env_file:
+      - .env
+    command: ["python", "scripts/send_pending_line_notifications.py", "--watch"]
+    volumes:
+      - api_data:/app/data
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  cloud_audio_jobs:
+  gpu_model_cache:

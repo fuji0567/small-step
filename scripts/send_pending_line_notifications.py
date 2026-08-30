@@ -1,22 +1,54 @@
 """Deliver due guardian notifications through the LINE Messaging API.
 
-Run this script from a scheduler on the API host. It operates directly on the
-same database as the API, so it does not require a teacher access token.
+This worker operates directly on the same database as the API, so it does not
+require a teacher access token. It only sends pending notices by default;
+failed notices require an explicit manual retry.
 """
 
 import argparse
+import time
 
 import httpx
 from sqlalchemy import select
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.database import create_database_engine, create_session_factory, initialise_database
 from app.line import LineMessagingError, build_notification_text, push_text_message
 from app.models import Notification, NotificationStatus, Record, RecordStatus, utc_now
 
 
-def send_due_notifications(*, retry_failed: bool = False, dry_run: bool = False) -> tuple[int, int]:
-    settings = get_settings()
+FAILURE_GUARDIAN_NOT_LINKED = "guardian_not_linked"
+FAILURE_NETWORK = "network"
+FAILURE_LINE_REJECTED = "line_rejected"
+FAILURE_LINE_UNAVAILABLE = "line_unavailable"
+FAILURE_UNKNOWN = "unknown"
+
+
+def line_failure_kind(error: Exception) -> str:
+    """Classify delivery failures without retaining provider response text."""
+
+    if isinstance(error, httpx.TransportError):
+        return FAILURE_NETWORK
+    if isinstance(error, LineMessagingError):
+        if error.status_code is not None and error.status_code >= 500:
+            return FAILURE_LINE_UNAVAILABLE
+        return FAILURE_LINE_REJECTED
+    return FAILURE_UNKNOWN
+
+
+def send_due_notifications(
+    *,
+    retry_failed: bool = False,
+    dry_run: bool = False,
+    settings: Settings | None = None,
+) -> tuple[int, int]:
+    """Send due notifications once, without exposing guardian IDs in logs."""
+
+    settings = settings or get_settings()
+    if not dry_run and not settings.line_channel_access_token:
+        # A deployment without LINE credentials must not change queued notices.
+        return 0, 0
+
     engine = create_database_engine(settings.database_url)
     initialise_database(engine)
     session_factory = create_session_factory(engine)
@@ -41,12 +73,13 @@ def send_due_notifications(*, retry_failed: bool = False, dry_run: bool = False)
                 record = session.get(Record, notification.record_id)
                 if record is None or not notification.recipient_line_user_id:
                     notification.status = NotificationStatus.failed
+                    notification.last_failure_kind = FAILURE_GUARDIAN_NOT_LINKED
                     session.commit()
                     failed_count += 1
                     continue
 
                 if dry_run:
-                    print(f"Would send notification {notification.id} to {notification.recipient_line_user_id}")
+                    sent_count += 1
                     continue
 
                 try:
@@ -61,19 +94,24 @@ def send_due_notifications(*, retry_failed: bool = False, dry_run: bool = False)
                         timeout_seconds=settings.line_api_timeout_seconds,
                     )
                 except (httpx.HTTPError, LineMessagingError) as error:
+                    notification.delivery_attempts += 1
+                    notification.last_attempt_at = utc_now()
                     notification.status = NotificationStatus.failed
+                    notification.last_failure_kind = line_failure_kind(error)
                     session.commit()
                     failed_count += 1
-                    print(f"Failed notification {notification.id}: {error}")
+                    print(f"LINE送信に失敗しました（{type(error).__name__}）。")
                     continue
 
+                notification.delivery_attempts += 1
+                notification.last_attempt_at = utc_now()
                 notification.status = NotificationStatus.sent
                 notification.provider_message_id = request_id
+                notification.last_failure_kind = None
                 notification.sent_at = utc_now()
                 record.status = RecordStatus.dispatched
                 session.commit()
                 sent_count += 1
-                print(f"Sent notification {notification.id}")
     finally:
         engine.dispose()
 
@@ -84,11 +122,35 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Send due Small Step notifications through LINE")
     parser.add_argument("--dry-run", action="store_true", help="List due notifications without sending them")
     parser.add_argument("--retry-failed", action="store_true", help="Also retry notifications marked as failed")
+    parser.add_argument("--watch", action="store_true", help="継続して配信待ち通知を確認します")
+    parser.add_argument(
+        "--poll-seconds",
+        type=float,
+        help="待機秒数。既定値は LINE_WORKER_POLL_SECONDS です。",
+    )
     args = parser.parse_args()
-    sent, failed = send_due_notifications(retry_failed=args.retry_failed, dry_run=args.dry_run)
-    print(f"Completed: sent={sent}, failed={failed}")
+    if args.watch and args.dry_run:
+        raise SystemExit("--watch と --dry-run は同時に指定できません。")
+
+    settings = get_settings()
+    poll_seconds = args.poll_seconds if args.poll_seconds is not None else settings.line_worker_poll_seconds
+    if poll_seconds <= 0:
+        raise SystemExit("--poll-seconds は0より大きい値にしてください。")
+    if not args.dry_run and not settings.line_channel_access_token:
+        raise SystemExit("LINE_CHANNEL_ACCESS_TOKEN を設定してから起動してください。")
+
+    while True:
+        sent, failed = send_due_notifications(
+            retry_failed=args.retry_failed,
+            dry_run=args.dry_run,
+            settings=settings,
+        )
+        mode_label = "確認" if args.dry_run else "送信"
+        print(f"LINE通知 {mode_label}: 対象={sent}件, 失敗={failed}件")
+        if not args.watch:
+            return
+        time.sleep(poll_seconds)
 
 
 if __name__ == "__main__":
     main()
-

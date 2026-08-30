@@ -6,7 +6,8 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
 from app.config import Settings, get_settings
-from app.database import create_database_engine, create_session_factory, initialise_database
+from app.database import create_database_engine, create_session_factory
+from app.database_migrations import prepare_database
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -15,7 +16,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        initialise_database(engine)
+        # SQLite remains the zero-setup local-development option. Applying the
+        # checked-in migrations here also keeps local prototypes current.
+        if engine.dialect.name == "sqlite":
+            prepare_database(runtime_settings.database_url)
         yield
         engine.dispose()
 
@@ -24,7 +28,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version="0.1.0",
         description=(
             "Privacy-filtered kindergarten growth and incident record API. "
-            "Raw audio must remain inside the kindergarten edge environment."
+            "Raw-audio uploads are disabled by default and are short-lived when cloud GPU mode is enabled."
         ),
         lifespan=lifespan,
     )
@@ -36,6 +40,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         "/teacher",
         StaticFiles(directory=Path(__file__).parent / "web", html=True),
         name="teacher-web",
+    )
+    application.mount(
+        "/guardian",
+        StaticFiles(directory=Path(__file__).parent / "guardian", html=True),
+        name="guardian-web",
     )
     return application
 

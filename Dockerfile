@@ -7,7 +7,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml ./
+COPY alembic.ini ./
 COPY app ./app
+COPY migrations ./migrations
 COPY scripts ./scripts
 RUN pip install --upgrade pip && pip install .[postgres]
 

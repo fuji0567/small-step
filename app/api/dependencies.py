@@ -115,6 +115,11 @@ def get_current_teacher(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This Supabase account is not linked to a teacher account",
         )
+    if not teacher.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This teacher account is disabled",
+        )
     return CurrentTeacher(user=user, teacher=teacher, is_development=False)
 
 
