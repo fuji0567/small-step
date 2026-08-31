@@ -6,11 +6,23 @@ does not identify people, store voiceprints, or send raw audio to the API.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Protocol
+import subprocess
+from tempfile import TemporaryDirectory
+from typing import Callable, Protocol
 
 from pydantic import BaseModel, Field, model_validator
+
+
+# Keep soft, distant speech audible without turning silence into excessive gain.
+QUIET_SPEECH_AUDIO_FILTER = (
+    "highpass=f=80,"
+    "acompressor=threshold=0.1:ratio=4:attack=20:release=250:makeup=8,"
+    "dynaudnorm=f=100:g=15:p=0.9:m=15"
+)
+MIN_RETRY_SPEAKER_SECONDS = 1.5
 
 
 class SpeakerDiarizationError(RuntimeError):
@@ -36,6 +48,8 @@ class SpeakerDiarizationResult(BaseModel):
 
     speaker_count: int = Field(ge=0)
     segments: list[SpeakerSegment]
+    used_low_volume_retry: bool = False
+    low_volume_retry_speaker_count: int | None = Field(default=None, ge=0)
 
 
 class SpeakerDiarizer(Protocol):
@@ -62,13 +76,92 @@ def build_anonymous_diarization_result(
     return SpeakerDiarizationResult(speaker_count=len(label_map), segments=segments)
 
 
+def build_quiet_speech_preprocess_command(
+    *,
+    ffmpeg_bin: str,
+    audio_path: Path,
+    output_path: Path,
+) -> list[str]:
+    """Build a local-only gain balancing command for a retry attempt."""
+
+    return [
+        ffmpeg_bin,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-y",
+        "-i",
+        str(audio_path),
+        "-af",
+        QUIET_SPEECH_AUDIO_FILTER,
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "pcm_s16le",
+        str(output_path),
+    ]
+
+
+def preprocess_quiet_speech(
+    *,
+    ffmpeg_bin: str,
+    audio_path: Path,
+    output_path: Path,
+    run_command: Callable[..., object] = subprocess.run,
+) -> None:
+    """Create one temporary balanced WAV without modifying the source audio."""
+
+    command = build_quiet_speech_preprocess_command(
+        ffmpeg_bin=ffmpeg_bin,
+        audio_path=audio_path,
+        output_path=output_path,
+    )
+    try:
+        run_command(command, check=True)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise SpeakerDiarizationError("Could not prepare the low-volume speaker retry") from error
+    if not output_path.is_file() or output_path.stat().st_size == 0:
+        raise SpeakerDiarizationError("Low-volume speaker retry did not create an audio file")
+
+
+def should_use_low_volume_retry_result(
+    *,
+    original: SpeakerDiarizationResult,
+    retry: SpeakerDiarizationResult,
+) -> bool:
+    """Reject short false splits caused by background noise after gain balancing."""
+
+    if retry.speaker_count <= original.speaker_count:
+        return False
+
+    durations: dict[str, float] = defaultdict(float)
+    for segment in retry.segments:
+        durations[segment.speaker_label] += segment.end_seconds - segment.start_seconds
+    return bool(durations) and min(durations.values()) >= MIN_RETRY_SPEAKER_SECONDS
+
+
 class PyannoteCommunityDiarizer:
     """Lazy local adapter for the pyannote Community-1 offline pipeline."""
 
-    def __init__(self, *, model: str, token: str | None, device: str) -> None:
+    def __init__(
+        self,
+        *,
+        model: str,
+        token: str | None,
+        device: str,
+        low_volume_retry: bool = True,
+        ffmpeg_bin: str = "ffmpeg",
+        preprocessor: Callable[[Path, Path], None] | None = None,
+    ) -> None:
         self.model = model
         self.token = token
         self.device = device
+        self.low_volume_retry = low_volume_retry
+        self.ffmpeg_bin = ffmpeg_bin
+        self.preprocessor = preprocessor
         self._pipeline: object | None = None
 
     def _load_pipeline(self) -> object:
@@ -97,13 +190,10 @@ class PyannoteCommunityDiarizer:
                 ) from error
         return pipeline
 
-    def diarize(self, audio_path: Path) -> SpeakerDiarizationResult:
-        if not audio_path.is_file():
-            raise SpeakerDiarizationError("Audio file was not found")
-        if self._pipeline is None:
-            self._pipeline = self._load_pipeline()
-
+    def _diarize_once(self, audio_path: Path) -> SpeakerDiarizationResult:
         try:
+            if self._pipeline is None:
+                self._pipeline = self._load_pipeline()
             output = self._pipeline(str(audio_path))
             diarization = getattr(output, "exclusive_speaker_diarization", None)
             if diarization is None:
@@ -123,3 +213,41 @@ class PyannoteCommunityDiarizer:
             raise
         except Exception as error:
             raise SpeakerDiarizationError("Local speaker diarization failed") from error
+
+    def _preprocess_quiet_speech(self, audio_path: Path, output_path: Path) -> None:
+        if self.preprocessor is not None:
+            self.preprocessor(audio_path, output_path)
+            return
+        preprocess_quiet_speech(
+            ffmpeg_bin=self.ffmpeg_bin,
+            audio_path=audio_path,
+            output_path=output_path,
+        )
+
+    def diarize(self, audio_path: Path) -> SpeakerDiarizationResult:
+        if not audio_path.is_file():
+            raise SpeakerDiarizationError("Audio file was not found")
+
+        original_result = self._diarize_once(audio_path)
+        if not self.low_volume_retry or original_result.speaker_count != 1:
+            return original_result
+
+        # The enhanced recording stays in a temporary directory and is removed immediately.
+        try:
+            with TemporaryDirectory(prefix="small-step-diarization-") as directory:
+                retry_audio_path = Path(directory) / "quiet-speech-retry.wav"
+                self._preprocess_quiet_speech(audio_path, retry_audio_path)
+                retry_result = self._diarize_once(retry_audio_path)
+        except SpeakerDiarizationError:
+            return original_result
+
+        if should_use_low_volume_retry_result(original=original_result, retry=retry_result):
+            return retry_result.model_copy(
+                update={
+                    "used_low_volume_retry": True,
+                    "low_volume_retry_speaker_count": retry_result.speaker_count,
+                }
+            )
+        return original_result.model_copy(
+            update={"low_volume_retry_speaker_count": retry_result.speaker_count}
+        )

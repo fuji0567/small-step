@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     speaker_diarization_model: str = "pyannote/speaker-diarization-community-1"
     speaker_diarization_token: str | None = None
     speaker_diarization_device: str = "cpu"
+    speaker_diarization_low_volume_retry: bool = True
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None
