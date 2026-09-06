@@ -1,0 +1,147 @@
+# API サーバー
+
+- 索引: [../architecture.md](../architecture.md)
+
+FastAPI 製の単一プロセスです。全エンドポイントは `/api/v1` 配下にあり、
+先生用・保護者用の静的アプリも同じプロセスから配信します。
+
+---
+
+## アプリケーションの組み立て
+
+`app/main.py` の `create_app()` が組み立てを一手に引き受けます。
+
+```
+create_app(settings)
+  ├ create_database_engine(database_url)
+  ├ lifespan
+  │   └ SQLite のときだけ prepare_database() で移行を適用
+  ├ app.state.settings / engine / session_factory
+  ├ include_router(router)            … app/api/routes.py（prefix /api/v1）
+  ├ mount("/teacher",  StaticFiles(app/web,      html=True))
+  └ mount("/guardian", StaticFiles(app/guardian, html=True))
+```
+
+- 設定を引数で差し替えられるため、テストは本番用の環境変数を読まずにアプリを組み立てられます。
+- SQLite のときだけ起動時に移行を適用します。PostgreSQL では Alembic を明示的に実行する運用です
+  （[data-model.md](data-model.md) を参照）。
+- `html=True` の `StaticFiles` なので `/teacher` と `/guardian` は `index.html` にフォールバックします。
+
+---
+
+## ファイル構成
+
+| ファイル | 役割 |
+| --- | --- |
+| `app/main.py` | アプリ生成、静的マウント、ライフサイクル |
+| `app/api/routes.py` | 全エンドポイント（単一ルーター） |
+| `app/api/dependencies.py` | DB セッション、認証、園スコープ、管理者判定 |
+| `app/schemas.py` | Pydantic の入出力モデル |
+| `app/models.py` | SQLAlchemy のテーブル定義 |
+| `app/database.py` | エンジンとセッションファクトリ |
+| `app/database_migrations.py` | SQLite 向けの移行適用 |
+| `app/config.py` | 環境変数の読み込みと本番構成の検証 |
+
+---
+
+## エンドポイントの分類
+
+タグごとのエンドポイント数です（`/api/v1` 配下、合計 55 本）。
+
+| タグ | 数 | 代表的なエンドポイント |
+| --- | --- | --- |
+| `records` | 6 | `POST /records/{id}/approve`, `POST /records/manual`, `GET /records/export.csv` |
+| `notifications` | 6 | `GET /notifications`, `POST /notifications/{id}/retry`, `PATCH /notifications/{id}/schedule` |
+| `children` | 6 | `POST /children`, `POST /children/{id}/archive`, `DELETE /children/{id}/guardian-line-link` |
+| `teachers` | 5 | `GET /teachers`, `PATCH /teachers/{id}/role`, `POST /teachers/{id}/disable` |
+| `auth` | 5 | `GET /auth/config`, `GET /auth/me`, `POST /auth/link-teacher`, `POST /auth/bootstrap/teacher` |
+| `edge devices` | 4 | `POST /edge-devices`, `POST /edge-devices/{id}/rotate-key` |
+| `voice consent` | 3 | `GET /voice-consent/me`, `POST /voice-consent/me/revoke` |
+| `schools` | 3 | `POST /schools`, `PATCH /schools/{id}/digest-time` |
+| `line` | 3 | `POST /line/webhook`, `POST /line/link-invitations` |
+| `guardian archive` | 3 | `POST /guardian-archive-links`, `GET /guardian/archive` |
+| `edge` | 3 | `POST /edge/records`, `POST /edge/heartbeat`, `GET /edge/me` |
+| `cloud audio` | 3 | `POST /edge/audio-jobs`, `GET /audio-jobs` |
+| `system` | 2 | `GET /health`, `GET /readiness` |
+| `audit` | 2 | `GET /audit-events`, `GET /audit-events/export.csv` |
+| `notion` | 1 | `POST /records/{id}/notion-sync` |
+
+利用者別の入口:
+
+- **先生用アプリ** … `auth` / `records` / `notifications` / `children` / `teachers` / `schools` / `edge devices` / `audit` / `voice consent`
+- **録音端末** … `edge` / `cloud audio`（端末 APIキー認証）
+- **GPU ワーカー** … `cloud audio`
+- **LINE** … `line`（Webhook）
+- **保護者** … `guardian archive` の `GET /guardian/archive` のみ
+
+---
+
+## 依存性注入
+
+`app/api/dependencies.py` が横断的な関心事をまとめています。
+
+| 依存 | 役割 |
+| --- | --- |
+| `get_db` | リクエストごとの SQLAlchemy セッション。終了時に必ずクローズ |
+| `get_authenticated_user` | `Authorization: Bearer` から Supabase のユーザーを解決 |
+| `get_current_teacher` | 認証ユーザーに紐づく有効な `teachers` 行を解決 |
+| `get_current_edge_device` | 端末 APIキーから `edge_devices` 行を解決 |
+| `assert_school_access` | 操作対象が自分の園かを検証 |
+| `assert_school_admin` | `school_admin` 限定の操作かを検証 |
+| `is_bootstrap_admin` | 初回の管理者登録を許可してよいユーザーかを判定 |
+
+園スコープの検証は各ハンドラの冒頭で明示的に呼びます。
+ミドルウェアに隠さないことで、「どのエンドポイントがどこまで許すか」をコード上で追えるようにしています。
+詳細は [auth.md](auth.md) を参照してください。
+
+---
+
+## 設定
+
+`app/config.py` の `Settings`（`pydantic-settings`）が環境変数または `.env` を読み込みます。
+`get_settings()` は `lru_cache` 付きで、プロセス内で一度だけ評価されます。
+
+主な設定グループ:
+
+| グループ | 代表的なキー |
+| --- | --- |
+| 実行環境 | `APP_ENV`, `DATABASE_URL`, `TIMEZONE`, `DIGEST_TIME` |
+| 認証 | `AUTH_MODE`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_BOOTSTRAP_ADMIN_EMAILS` |
+| LINE | `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_WORKER_POLL_SECONDS` |
+| 音声（エッジ） | `EDGE_AUDIO_*`（インボックス、モデル、再試行間隔、処理モードなど） |
+| 音声（クラウド） | `CLOUD_AUDIO_ENABLED`, `CLOUD_AUDIO_JOB_DIR`, `CLOUD_AUDIO_JOB_RETENTION_MINUTES` |
+| 話者分離 | `SPEAKER_DIARIZATION_MODEL`, `SPEAKER_DIARIZATION_TOKEN`, `SPEAKER_DIARIZATION_DEVICE` |
+| LLM | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_ALLOW_EXTERNAL` |
+| 保護者アーカイブ | `GUARDIAN_ARCHIVE_ENABLED`, `GUARDIAN_ARCHIVE_BASE_URL`, `GUARDIAN_ARCHIVE_LINK_TTL_HOURS` |
+| Notion | `NOTION_API_TOKEN`, `NOTION_DATA_SOURCE_ID` |
+
+### 本番構成の検証
+
+`reject_unsafe_production_configuration()` が `APP_ENV=production` のときだけ働き、
+次のいずれかに当てはまると起動を止めます。
+
+- `AUTH_MODE` が `supabase` でない
+- `SUPABASE_URL` または `SUPABASE_PUBLISHABLE_KEY` が未設定
+- `DATABASE_URL` が SQLite
+- 保護者アーカイブが有効なのに `GUARDIAN_ARCHIVE_BASE_URL` が HTTPS でない
+
+ローカル開発用の既定値をそのまま公開デプロイに持ち込む事故を、起動時点で防ぐための仕組みです。
+
+---
+
+## エラーの返し方
+
+エラーは `HTTPException` の `detail` に日本語または英語の 1 文で入れます。
+フロントエンドの `api()` ヘルパーは `detail` が文字列のときだけそれを表示し、
+それ以外は汎用メッセージにフォールバックします（想定外のレスポンス本文を画面に出さないため）。
+
+よく使う状態コード:
+
+| コード | 用途 |
+| --- | --- |
+| 401 | Bearer トークンがない、または無効 |
+| 403 | 園が違う、`school_admin` でない、機能が無効 |
+| 404 | 対象が存在しない、教員として未登録（初回設定へ誘導） |
+| 409 | 状態が合わない（レビュー済みの記録を再承認、アーカイブ済みの園児を指定など） |
+| 422 | 入力値の検証エラー |
+| 503 | 必要な外部設定が未構成（`LINE_CHANNEL_SECRET` 未設定など） |
