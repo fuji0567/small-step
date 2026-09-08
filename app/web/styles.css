@@ -354,6 +354,50 @@ h3 {
   color: var(--primary-800);
 }
 
+/* 画面が広いときは、タブ列ではなく左のサイドパネルへ切り替えます。
+   1024px 未満は従来どおり横並びのままにして、狭い画面の挙動を変えません。 */
+@media (min-width: 64rem) {
+  .app-shell {
+    width: min(1400px, calc(100% - var(--space-4)));
+  }
+
+  .app-body {
+    display: grid;
+    grid-template-columns: 15rem minmax(0, 1fr);
+    gap: var(--space-3);
+    align-items: start;
+  }
+
+  .app-nav {
+    position: sticky;
+    top: var(--space-2);
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 0.125rem;
+    margin-bottom: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    padding: var(--space-1);
+    max-height: calc(100vh - var(--space-4));
+    overflow-y: auto;
+  }
+
+  .nav-button {
+    width: 100%;
+    text-align: left;
+    border-bottom: 0;
+    border-left: 4px solid transparent;
+    border-radius: var(--radius-sm);
+    padding: 0.5rem var(--space-2);
+  }
+
+  .nav-button.is-active,
+  .nav-button[aria-current="page"] {
+    border-left-color: var(--primary-600);
+  }
+}
+
 label {
   display: grid;
   gap: var(--space-1);
