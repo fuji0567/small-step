@@ -8,7 +8,7 @@ FastAPI が `StaticFiles` としてそのまま配信します。
 
 | マウントパス | ディレクトリ | 対象利用者 | 規模 |
 | --- | --- | --- | --- |
-| `/teacher` | `app/web/` | 先生・先生管理者 | HTML 801 行 / JS 2,874 行 / CSS 2,338 行 |
+| `/teacher` | `app/web/` | 先生・先生管理者 | HTML 805 行 / JS 2,918 行 / CSS 2,382 行 |
 | `/guardian` | `app/guardian/` | 保護者 | HTML 30 行 / JS 91 行 / CSS 124 行 |
 
 ---
@@ -19,7 +19,7 @@ FastAPI が `StaticFiles` としてそのまま配信します。
 - 画面数が十数程度で、フレームワークの導入コストが機能の複雑さに見合わない。
 - 依存が増えないぶん、供給網まわりの検討事項も増えない。
 
-代償として `app/web/app.js` が 2,874 行の単一ファイルになっています。
+代償として `app/web/app.js` が 2,918 行の単一ファイルになっています。
 これ以上増えるなら、ビューごとのモジュール分割か軽量フレームワークの導入を検討する分岐点です。
 
 ---
@@ -62,12 +62,11 @@ async function api(path, options = {}) { … }
 
 ### 認証状態
 
-アクセストークンは `sessionStorage`（キー `small-step.access-token`）に置きます。
-タブを閉じれば消えるため、共用端末に残りにくくなります。
-ログアウト時は `state` の内容を明示的に空にしてから画面を戻します
-（発行済みの招待コードや APIキーが画面に残らないようにするため）。
+アクセストークンの保持場所とその理由、認証の分岐は [auth.md](auth.md) にあります。
+このファイルが受け持つのはログアウト時のふるまいだけです。`state` の内容を明示的に空にしてから
+画面を戻します（発行済みの招待コードや APIキーが画面に残らないようにするため）。
 
-認証の分岐は [auth.md](auth.md)、画面の状態遷移は [../transition.md](../transition.md) を参照してください。
+画面の状態遷移は [../transition.md](../transition.md) を参照してください。
 
 ### アイコン
 
@@ -103,6 +102,10 @@ HTML には `<span class="material-symbols-outlined button-icon">fact_check</spa
 - 冒頭に「本文へ移動」のスキップリンク、`<main id="main-content" tabindex="-1">`。
 - 各ビューは `<section class="app-view" aria-label="...">` で、非表示は `hidden` 属性。
 - ナビゲーションの現在地は `aria-current="page"`。
+- ナビは 1024px 以上（`@media (min-width: 64rem)`）で左のサイドパネル、それ未満では横並びの帯になります。
+  現在地の指標も、サイドパネルでは下線ではなく左の縦帯です。
+- 先生管理者専用の 5 ビューは、一般の先生では `hidden` を立てるだけでなく
+  `applySchoolAdminVisibility()` がナビとビュー本体を DOM から取り除きます。詳細は [../transition.md](../transition.md)。
 - 非同期に更新される領域（記録一覧、通知一覧、読み込み表示、文字数カウンタなど）は `aria-live="polite"`。
 - 通知メッセージは種類に応じて `role="status"` と `role="alert"` を出し分けます。
 - 破壊的な操作は `<dialog>` の `showModal()` による確認を挟み、ESC・キャンセル・背景クリックは
@@ -114,34 +117,22 @@ HTML には `<span class="material-symbols-outlined button-icon">fact_check</spa
 
 ## 保護者用アプリ（`app/guardian/`）
 
-ログインを持たない単一画面です。園から配布された URL のフラグメントがそのまま資格情報になります。
+ログイン画面を持ちません。
+トークンの解決から一覧表示・エラー画面までの流れは [../transition.md](../transition.md) の
+状態遷移図、トークン自体の性質は [auth.md](auth.md) を参照してください。
 
-```
-/guardian#ssa_xxxxx
-   ↓ archiveToken()
-sessionStorage に移す + history.replaceState() で URL から除去
-   ↓
-GET /api/v1/guardian/archive（Authorization: Bearer ssa_...）
-   ↓
-配信済みのお知らせ一覧を描画
-```
+このファイルが受け持つのは次の2点だけです。
 
 - 失敗時は `sessionStorage` のトークンを破棄し、「園から届いた最新の URL を開いてください」と案内します。
-- `<meta name="referrer" content="no-referrer">` を指定し、トークンが外部へ漏れないようにしています。
-- 表示するのは配信日時・種別・本文・会話のきっかけだけです。音声も文字起こし原文も扱いません。
-- 先生用画面と違い、こちらは Google Fonts（Zen Maru Gothic / Zen Old Mincho）を読み込みます。
+- **先生用と違い、Google Fonts（Zen Maru Gothic / Zen Old Mincho）を読み込みます。**
+  先生用画面が外部へ一切リクエストを出さないのとは対照的です。
 
 ---
 
 ## 開発時の確認
 
-静的ファイルなのでビルドもウォッチも不要です。API を起動してブラウザで開くだけです。
+静的ファイルなのでビルドもウォッチも要りません。API を起動してブラウザで開くだけです
+（起動手順は [deployment.md](deployment.md)、`AUTH_MODE` のふるまいは [auth.md](auth.md)）。
 
-```bash
-uvicorn app.main:app --reload
-# 先生用   http://127.0.0.1:8000/teacher
-# 保護者用 http://127.0.0.1:8000/guardian
-```
-
-`AUTH_MODE=development`（既定）ではログイン画面を経ずに全機能が開き、`isSchoolAdmin` も `true` 扱いです。
-権限による表示差分を確認したいときは `AUTH_MODE=supabase` にして実際にログインしてください。
+既定の `AUTH_MODE=development` では権限による表示差分が出ません。
+一般の先生の画面を確認したいときは `AUTH_MODE=supabase` にして実際にログインしてください。

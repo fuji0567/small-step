@@ -126,44 +126,17 @@ SQLite の移行は起動時に自動適用されるため、事前準備は不�
 
 ## 運用スクリプト
 
-`scripts/` 配下は、常駐ワーカーと一度きりの管理コマンドが混在しています。
-
-### 常駐させるもの
-
-| スクリプト | 用途 |
-| --- | --- |
-| `send_pending_line_notifications.py --watch` | LINE 送信ワーカー |
-| `process_cloud_audio_jobs.py` | GPU ワーカー |
-| `watch_edge_audio.py` | エッジ音声インボックスの監視 |
-| `record_edge_audio.py` | マイクからの連続録音 |
-
-### 初期設定
+どんなコマンドがあるかは `scripts/` を直接見てください。使い方の手順は `README.md` にあります。
+ここに挙げるのは、**ファイル名からは分からない「常駐させるもの」だけ**です。
 
 | スクリプト | 用途 |
 | --- | --- |
-| `prepare_database.py` | マイグレーションの適用 |
-| `bootstrap_admin.py` | 最初の先生管理者を作成 |
-| `register_edge_device.py` | 録音端末を登録して APIキーを発行 |
-| `create_notion_database.py` | Notion 側のデータソースを作成 |
-| `configure_supabase_database.py` | Supabase 側の初期設定 |
+| `send_pending_line_notifications.py --watch` | LINE 送信ワーカー（Compose の `line-worker`） |
+| `process_cloud_audio_jobs.py` | GPU ワーカー（Compose の `gpu-worker`） |
+| `watch_edge_audio.py` | エッジ音声インボックスの監視（園内で常駐） |
+| `record_edge_audio.py` | マイクからの連続録音（園内で常駐） |
 
-### 確認・移行
-
-| スクリプト | 用途 |
-| --- | --- |
-| `check_runtime_readiness.py` | 稼働準備チェック |
-| `verify_edge_device.py` | 端末 APIキーの疎通確認 |
-| `verify_supabase_login.py` | 実際のログインが通るかの確認 |
-| `diarize_edge_audio.py` | 話者分離の単体確認 |
-| `migrate_sqlite_to_supabase.py` | SQLite から Supabase への移行 |
-
-### デモ・動作確認
-
-| スクリプト | 用途 |
-| --- | --- |
-| `create_demo_growth_record.py` | 成長記録のサンプルを作成 |
-| `send_demo_from_edge.py` | エッジ端末からの送信を模擬 |
-| `approve_latest_edge_demo.py` | 直近のデモ記録を承認 |
+残りは一度きりの管理コマンドです。
 
 ---
 

@@ -37,7 +37,7 @@ flowchart LR
 | ステップ | 実装 | 補足 |
 | --- | --- | --- |
 | 録音 | `app/edge_recorder.py` | `EDGE_AUDIO_RECORD_CHUNK_SECONDS`（既定 30 秒）で分割 |
-| 監視 | `scripts/watch_edge_audio.py` | `EDGE_AUDIO_WATCH_POLL_SECONDS` ごとに走査。書き込み途中を避けるため `MIN_AGE_SECONDS` を待つ |
+| 監視 | `scripts/watch_edge_audio.py` | `EDGE_AUDIO_WATCH_POLL_SECONDS` ごとに走査。書き込み途中を避けるため `EDGE_AUDIO_WATCH_MIN_AGE_SECONDS` を待つ |
 | 文字起こし | `app/edge_audio.py` | faster-whisper。既定は `small` / `cpu` / `int8` |
 | 話者分離 | `app/speaker_diarization.py` | pyannote。ラベルは `speaker_01` 形式の一時 ID のみ |
 | 匿名化 | `app/edge_audio.py` → ローカル LLM | OpenAI 互換 API。園児名などを含まない候補文を生成 |
@@ -143,17 +143,6 @@ APIキーは発行・再発行の応答でのみ平文が返り、データベ�
 
 ## 関連する設定
 
-| キー | 既定値 | 説明 |
-| --- | --- | --- |
-| `EDGE_AUDIO_PROCESSING_MODE` | `local` | 処理モード |
-| `EDGE_AUDIO_INBOX_DIR` | `./data/edge-audio-inbox` | 監視対象ディレクトリ |
-| `EDGE_AUDIO_MAX_FILE_BYTES` | `25000000` | 受け付ける最大サイズ |
-| `EDGE_AUDIO_MODEL` / `_DEVICE` / `_COMPUTE_TYPE` | `small` / `cpu` / `int8` | faster-whisper の設定 |
-| `EDGE_AUDIO_LANGUAGE` | `ja` | 文字起こしの言語 |
-| `EDGE_AUDIO_RECORD_CHUNK_SECONDS` | `30` | 録音の分割長 |
-| `EDGE_AUDIO_INPUT_DEVICE` | `:0` | 入力デバイス |
-| `EDGE_AUDIO_DELETE_AFTER_PROCESSING` | `true` | 処理後に音声を削除 |
-| `CLOUD_AUDIO_ENABLED` | `false` | クラウド処理の有効化 |
-| `CLOUD_AUDIO_JOB_DIR` | `./data/cloud-audio-jobs` | 短命ジョブの保管先 |
-| `SPEAKER_DIARIZATION_DEVICE` | `cpu` | 話者分離の実行デバイス |
-| `LLM_ALLOW_EXTERNAL` | `false` | 外部 LLM への送信可否 |
+キーと既定値の一覧は `.env.example` にあります（`EDGE_AUDIO_*` / `CLOUD_AUDIO_*` /
+`SPEAKER_DIARIZATION_*` / `LLM_*`）。ここに写すと部分的な複製になり、片方だけ古くなるため置いていません。
+このページの本文で名前を挙げているキーは、そのふるまいを説明する必要があるものだけです。

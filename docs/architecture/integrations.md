@@ -95,11 +95,10 @@ flowchart LR
 | 性質 | 内容 |
 | --- | --- |
 | 対象 | LINE 連携済みの園児のみ |
-| 有効期限 | `GUARDIAN_ARCHIVE_LINK_TTL_HOURS`（既定 168 時間 = 7 日） |
-| 保存形式 | トークンは SHA-256 ハッシュのみ（`guardian_archive_links.token_hash`） |
-| 返す内容 | 送信済み通知の配信日時・種別・本文・会話のきっかけだけ |
 | 本番の制約 | `GUARDIAN_ARCHIVE_BASE_URL` は HTTPS 必須 |
 | 再発行 | 新しい URL を発行すると、同じ園児の既存 URL はすべて失効 |
+
+トークンの形式・有効期限・返す範囲は [auth.md](auth.md) の「保護者アーカイブのトークン」にあります。
 
 保護者用ページの実装は [frontend.md](frontend.md)、
 画面の状態遷移は [../transition.md](../transition.md) を参照してください。
@@ -130,11 +129,3 @@ POST /api/v1/records/{record_id}/notion-sync   （school_admin のみ）
 | `NOTION_API_TIMEOUT_SECONDS` | 既定 10 秒 |
 
 データソースは `scripts/create_notion_database.py` で作成できます。
-
----
-
-## MCP
-
-`app/mcp_server.py` は、公開 API ではなく園内のマイク・GPU ワーカーの隣で動かすローカル専用の MCP サーバーです。
-録音や記録送信といった園内パイプラインの操作を MCP ツールとして公開します。
-詳細は [audio-pipeline.md](audio-pipeline.md) を参照してください。

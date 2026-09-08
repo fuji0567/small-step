@@ -15,6 +15,7 @@ Small Step（お便りAI）は、園内の音声を **園内で匿名化して�
 | フロントエンド | [architecture/frontend.md](architecture/frontend.md) | 2 つの静的アプリの構成と実装方針 |
 | デプロイ・運用 | [architecture/deployment.md](architecture/deployment.md) | Docker、Compose、環境変数、運用スクリプト |
 | 画面遷移 | [transition.md](transition.md) | 画面一覧と遷移図 |
+| 参考デザインシステム | [design-system-digital-agency.md](design-system-digital-agency.md) | デジタル庁デザインシステムへの案内とトークンの値。考え方の原文は [reference/dads/](reference/dads/ABOUT-THIS-COPY.md) に無改変で複製 |
 
 ---
 

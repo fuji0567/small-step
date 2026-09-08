@@ -101,19 +101,8 @@ create_app(settings)
 `app/config.py` の `Settings`（`pydantic-settings`）が環境変数または `.env` を読み込みます。
 `get_settings()` は `lru_cache` 付きで、プロセス内で一度だけ評価されます。
 
-主な設定グループ:
-
-| グループ | 代表的なキー |
-| --- | --- |
-| 実行環境 | `APP_ENV`, `DATABASE_URL`, `TIMEZONE`, `DIGEST_TIME` |
-| 認証 | `AUTH_MODE`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_BOOTSTRAP_ADMIN_EMAILS` |
-| LINE | `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_WORKER_POLL_SECONDS` |
-| 音声（エッジ） | `EDGE_AUDIO_*`（インボックス、モデル、再試行間隔、処理モードなど） |
-| 音声（クラウド） | `CLOUD_AUDIO_ENABLED`, `CLOUD_AUDIO_JOB_DIR`, `CLOUD_AUDIO_JOB_RETENTION_MINUTES` |
-| 話者分離 | `SPEAKER_DIARIZATION_MODEL`, `SPEAKER_DIARIZATION_TOKEN`, `SPEAKER_DIARIZATION_DEVICE` |
-| LLM | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_ALLOW_EXTERNAL` |
-| 保護者アーカイブ | `GUARDIAN_ARCHIVE_ENABLED`, `GUARDIAN_ARCHIVE_BASE_URL`, `GUARDIAN_ARCHIVE_LINK_TTL_HOURS` |
-| Notion | `NOTION_API_TOKEN`, `NOTION_DATA_SOURCE_ID` |
+設定キーの一覧と既定値は `.env.example` にあります。
+`Settings` が読むのはそこにあるキーで、本文で名前を挙げるのは、ふるまいの説明に必要なものだけです。
 
 ### 本番構成の検証
 
@@ -132,8 +121,7 @@ create_app(settings)
 ## エラーの返し方
 
 エラーは `HTTPException` の `detail` に日本語または英語の 1 文で入れます。
-フロントエンドの `api()` ヘルパーは `detail` が文字列のときだけそれを表示し、
-それ以外は汎用メッセージにフォールバックします（想定外のレスポンス本文を画面に出さないため）。
+フロントエンドがこれをどう表示するかは [frontend.md](frontend.md) の「API 呼び出し」にあります。
 
 よく使う状態コード:
 
