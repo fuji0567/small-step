@@ -1,6 +1,7 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to coding agents (Claude Code, Codex) when working with code in this repository.
+`AGENTS.md` points here, so add or change instructions in this file only.
 
 Small Step（お便りAI）は、幼稚園の会話から「成長の記録」「けがの記録」の候補を作り、
 **先生が承認したものだけ** を保護者の LINE へ配信する FastAPI バックエンドです。
@@ -97,7 +98,7 @@ README では別の venv（`.venv313`）へ入れる運用になっています�
   **先生用画面は外部ネットワークへ一切リクエストを出しません。**
 - トークンは `sessionStorage`（`small-step.access-token`）にのみ保持します。
 
-`app/web/app.js` は 2,900 行の単一ファイルで、分割の分岐点に来ています。
+`app/web/app.js` は 2,918 行の単一ファイルで、分割の分岐点に来ています。
 
 ### 音声パイプライン
 
@@ -123,6 +124,32 @@ README では別の venv（`.venv313`）へ入れる運用になっています�
 - **重複防止は一意制約で担保されています。** `records(school_id, source_event_id)`、
   `notifications.record_id`、`notion_syncs.record_id`、GPU ジョブの `claim_token` 排他取得。
 
+## 画面を作るとき・レビューするとき
+
+**デジタル庁デザインシステム（DADS）に準拠する。** 原文は `docs/reference/dads/` に無改変で置いてあり、
+トークンの値は `docs/design-system-digital-agency.md` にある。色や余白を決める前に、
+該当する `docs/reference/dads/foundations/<領域>/index.md` を読むこと。要約で代用しない。
+
+新しい画面・部品を作るときも、既存を review するときも、次は必ず確認する。
+
+| 項目 | 基準 |
+| --- | --- |
+| コントラスト | テキストは背景に対して 4.5:1 以上（WCAG 1.4.3）。枠線・アイコンなど非テキストは 3:1 以上（1.4.11） |
+| 色以外の手がかり | 色だけで情報を区別しない（1.4.1）。状態はアイコンや文言も併せて示す |
+| フォーカス表示 | Yellow-300（`#ffd43d`）と Black の2重構造。DADS は「いかなる場合も変更してはいけない」と規定している |
+| 余白 | 基準単位 8px の倍数。スケールは 3〜5 段階に収める |
+| 書体 | Noto Sans JP / Noto Sans Mono。ウェイトは 400 と 700 のみ。和文の行送りは 1.75 まで使ってよい |
+| セマンティック色 | 用途で選ぶ。アイコン・枠線には `-1`（3:1）、文字には `-2`（4.5:1） |
+| 角丸 | 同じ半径でも図形が小さいほど丸く見える。部品の大きさごとに半径を決める |
+
+レビューで指摘するときは、根拠になる DADS のページを併記する。
+
+**現時点で分かっているズレ**（直すときはここから）:
+
+- `--line`（`#d6dbe0`）は白背景に対して 1.39:1。31 箇所の枠線に使われており、識別に必要な境界では 3:1 に届かない
+- グレーが青みを帯びている（`#f7f8f9`〜`#111820`）。DADS は純粋な無彩色
+- 余白に 8px の倍数でない値が 8 種類・57 箇所ある（`0.125rem`〜`0.875rem`）。トークン 7 段と合わせて実効 15 段で、DADS の「3〜5 段階」から外れている
+
 ## ドキュメント
 
 `docs/` に領域別の設計文書があります。実装前にこちらを読むと早いです。
@@ -138,5 +165,6 @@ README では別の venv（`.venv313`）へ入れる運用になっています�
 | フロントエンド | `docs/architecture/frontend.md` |
 | デプロイ・運用 | `docs/architecture/deployment.md` |
 | 画面遷移 | `docs/transition.md` |
+| 参考デザインシステム | `docs/design-system-digital-agency.md` / `docs/reference/dads/` |
 
 運用手順とセットアップの詳細は `README.md`、設定項目の一覧は `.env.example` にあります。

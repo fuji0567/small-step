@@ -3,10 +3,7 @@
 Small Step のフロントエンドは、ビルド工程を持たない素の HTML/CSS/JavaScript で構成された 2 つの静的アプリです。
 FastAPI が `StaticFiles` としてマウントしています（`app/main.py`）。
 
-| マウントパス | ディレクトリ | 対象利用者 |
-| --- | --- | --- |
-| `/teacher` | `app/web/` | 先生・先生管理者 |
-| `/guardian` | `app/guardian/` | 保護者（配信アーカイブ閲覧のみ） |
+マウント先とディレクトリの対応は [architecture/frontend.md](architecture/frontend.md) にあります。
 
 先生用アプリは単一ページ内で `hidden` 属性を切り替える SPA で、URL ルーティング（History API / ハッシュ）は使っていません。
 そのため「画面遷移」はすべて `state.activeView` の変化と、それに紐づく DOM の表示切り替えを指します（`app/web/app.js` の `changeView()`）。
@@ -51,7 +48,7 @@ stateDiagram-v2
 
 ### 認証まわりの要点
 
-- アクセストークンは `sessionStorage`（キー `small-step.access-token`）に保持します。タブを閉じると破棄されます。
+- アクセストークンの保持場所は [architecture/auth.md](architecture/auth.md) の「先生の認証」にあります。
 - ログインはブラウザから Supabase の `POST /auth/v1/token?grant_type=password` を直接叩き、
   取得した JWT を `Authorization: Bearer` で自前 API に渡します。API 側は Supabase にトークン検証を委譲します。
 - `auth_mode=development` ではログイン画面自体を表示せず、`isSchoolAdmin = true` で全機能が開きます（ローカル開発専用）。
@@ -254,9 +251,8 @@ stateDiagram-v2
     エラー画面: 「このアーカイブは開けません」
 ```
 
-- 表示するのは送信済み通知の「配信日時 / 種別 / 本文 / 会話のきっかけ」だけです。音声も文字起こし原文も返しません。
-- URL の有効期限（既定 168 時間）が切れるか、園が失効させると開けなくなります。
-- `<meta name="referrer" content="no-referrer">` を指定し、トークンが外部へ漏れないようにしています。
+表示できる範囲・有効期限・`no-referrer` の指定は、トークンの性質として
+[architecture/auth.md](architecture/auth.md) の「保護者アーカイブのトークン」にまとめています。
 
 ---
 

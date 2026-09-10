@@ -189,6 +189,47 @@ let loadingOperationCount = 0;
 let confirmationResolve = null;
 let confirmationReturnFocus = null;
 
+// 先生管理者だけが使えるビュー。一般の先生には、ナビもビュー本体もDOMから取り除きます。
+const schoolAdminOnlyViews = [
+  { view: "school-settings", navButton: elements.schoolSettingsNavButton, section: elements.schoolSettingsView },
+  { view: "teachers", navButton: elements.teachersNavButton, section: elements.teachersView },
+  { view: "edge-devices", navButton: elements.edgeDevicesNavButton, section: elements.edgeDevicesView },
+  { view: "runtime", navButton: elements.runtimeNavButton, section: elements.runtimeView },
+  { view: "audit-events", navButton: elements.auditEventsNavButton, section: elements.auditEventsView },
+];
+const detachedAdminNodes = new Map();
+
+function detachAdminNode(node) {
+  if (detachedAdminNodes.has(node)) return;
+  const placeholder = document.createComment(node.id);
+  detachedAdminNodes.set(node, placeholder);
+  node.replaceWith(placeholder);
+}
+
+function attachAdminNode(node) {
+  const placeholder = detachedAdminNodes.get(node);
+  if (!placeholder) return;
+  detachedAdminNodes.delete(node);
+  placeholder.replaceWith(node);
+}
+
+function applySchoolAdminVisibility() {
+  for (const { navButton, section } of schoolAdminOnlyViews) {
+    navButton.hidden = !state.isSchoolAdmin;
+    if (state.isSchoolAdmin) {
+      attachAdminNode(navButton);
+      attachAdminNode(section);
+    } else {
+      detachAdminNode(navButton);
+      detachAdminNode(section);
+    }
+  }
+}
+
+function isSchoolAdminOnlyView(view) {
+  return schoolAdminOnlyViews.some((entry) => entry.view === view);
+}
+
 function setNotice(message, isError = false) {
   elements.notice.textContent = message;
   elements.notice.hidden = !message;
@@ -466,7 +507,6 @@ function selectedSchool() {
 }
 
 function renderSchoolSettings() {
-  elements.schoolSettingsNavButton.hidden = !state.isSchoolAdmin;
   const school = selectedSchool();
   if (!school) {
     elements.schoolDigestTimeInput.value = "";
@@ -805,7 +845,6 @@ function teacherRoleLabel(role) {
 }
 
 function renderTeacherManagement() {
-  elements.teachersNavButton.hidden = !state.isSchoolAdmin;
   elements.teacherCount.textContent = String(state.teachers.length);
   elements.teacherList.replaceChildren();
 
@@ -907,7 +946,6 @@ function edgeDeviceConnectionStatus(device) {
 }
 
 function renderEdgeDeviceManagement() {
-  elements.edgeDevicesNavButton.hidden = !state.isSchoolAdmin;
   elements.edgeDeviceForm.hidden = !state.isSchoolAdmin;
   elements.edgeDeviceCount.textContent = String(state.edgeDevices.length);
   renderEdgeDeviceTeacherOptions();
@@ -1003,7 +1041,6 @@ function auditEventActionLabel(action) {
 }
 
 function renderAuditEventManagement() {
-  elements.auditEventsNavButton.hidden = !state.isSchoolAdmin;
   elements.auditEventCount.textContent = String(state.auditEvents.length);
   elements.auditEventsExportButton.hidden = !state.isSchoolAdmin;
   elements.auditEventsExportButton.disabled = !state.isSchoolAdmin || !state.auditEvents.length;
@@ -1039,7 +1076,6 @@ function setRuntimeCheck(statusElement, noteElement, { label, note, tone }) {
 }
 
 function renderRuntimeReadiness() {
-  elements.runtimeNavButton.hidden = !state.isSchoolAdmin;
   if (!state.isSchoolAdmin) return;
 
   const readiness = state.runtimeReadiness;
@@ -1131,6 +1167,7 @@ function renderVoiceConsent() {
 }
 
 function render() {
+  applySchoolAdminVisibility();
   renderRecordList();
   renderDetail();
   renderHome();
@@ -1724,6 +1761,7 @@ async function loadApp() {
 }
 
 async function changeView(view) {
+  if (!state.isSchoolAdmin && isSchoolAdminOnlyView(view)) view = "home";
   state.activeView = view;
   elements.homeView.hidden = view !== "home";
   elements.reviewView.hidden = view !== "review";
@@ -2420,7 +2458,9 @@ async function establishTeacherSession() {
 async function openAppForTeacher(teacher) {
   state.isSchoolAdmin = teacher.role === "school_admin";
   state.currentTeacherId = teacher.id;
+  applySchoolAdminVisibility();
   showApp();
+  await changeView("home");
   await loadApp();
 }
 
@@ -2449,6 +2489,7 @@ async function start() {
   state.authConfig = await api("/auth/config");
   if (state.authConfig.auth_mode === "development") {
     state.isSchoolAdmin = true;
+    applySchoolAdminVisibility();
     showApp();
     await loadApp();
     return;
@@ -2501,7 +2542,7 @@ elements.bootstrapForm.addEventListener("submit", async (event) => {
   }
 });
 
-elements.logoutButton.addEventListener("click", () => {
+elements.logoutButton.addEventListener("click", async () => {
   state.accessToken = null;
   state.isSchoolAdmin = false;
   state.currentTeacherId = null;
@@ -2510,6 +2551,7 @@ elements.logoutButton.addEventListener("click", () => {
   state.edgeDevices = [];
   state.audioJobs = [];
   state.auditEvents = [];
+  state.teachers = [];
   state.runtimeReadiness = null;
   state.voiceConsent = null;
   state.children = [];
@@ -2522,6 +2564,8 @@ elements.logoutButton.addEventListener("click", () => {
   clearInvitationCode();
   clearGuardianArchiveUrl();
   sessionStorage.removeItem(accessTokenStorageKey);
+  applySchoolAdminVisibility();
+  await changeView("home");
   showLogin();
   setLoginNotice("ログアウトしました。");
 });
@@ -2866,6 +2910,7 @@ elements.voiceConsentRevokeButton.addEventListener("click", async () => {
 
 replaceIconPlaceholders();
 updateReviewCharacterCounts();
+applySchoolAdminVisibility();
 changeView(state.activeView);
 
 start().catch((error) => {

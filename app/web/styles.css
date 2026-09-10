@@ -143,9 +143,23 @@ input,
   outline: none;
 }
 
+/* DADS のフォーカスカラーは Yellow-300 と Black の2重構造で、原文は
+   「いかなる場合も変更してはいけない」と規定している
+   （docs/reference/dads/foundations/color/index.md のフォーカスカラー）。
+   黄は白背景に対して 1.43:1 しかなく、非テキストに求められる 3:1
+   （WCAG 1.4.11、同ページに明記）を満たしているのは外周の黒（17.9:1）。
+   単層にすると達成基準を割るので、2層を分解しないこと。
+
+   黒を外周にするのは、背景に接するのが黒でなければ 3:1 を満たさないため。
+   内周の黄は box-shadow（0〜3px）、外周の黒は outline を offset 3px で
+   3〜6px に置き、2層を重ねずに隣接させている。重ねると outline と
+   box-shadow のどちらが上に描かれるかに依存してしまう。
+   外周を outline にしてあるのは、forced-colors では box-shadow が
+   描画されず outline だけが残るため。 */
 :focus-visible {
-  outline: 3px solid #ffbf00;
+  outline: 3px solid var(--neutral-900);
   outline-offset: 3px;
+  box-shadow: 0 0 0 3px #ffd43d;
 }
 
 .skip-link {
@@ -354,6 +368,50 @@ h3 {
   color: var(--primary-800);
 }
 
+/* 画面が広いときは、タブ列ではなく左のサイドパネルへ切り替えます。
+   1024px 未満は従来どおり横並びのままにして、狭い画面の挙動を変えません。 */
+@media (min-width: 64rem) {
+  .app-shell {
+    width: min(1400px, calc(100% - var(--space-4)));
+  }
+
+  .app-body {
+    display: grid;
+    grid-template-columns: 15rem minmax(0, 1fr);
+    gap: var(--space-4);
+    align-items: start;
+  }
+
+  .app-nav {
+    position: sticky;
+    top: var(--space-2);
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 0.125rem;
+    margin-bottom: 0;
+    border: 1px solid var(--neutral-300);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    padding: var(--space-1);
+    max-height: calc(100vh - var(--space-4));
+    overflow-y: auto;
+  }
+
+  .nav-button {
+    width: 100%;
+    text-align: left;
+    border-bottom: 0;
+    border-left: 4px solid transparent;
+    border-radius: var(--radius-sm);
+    padding: 0.5rem var(--space-2);
+  }
+
+  .nav-button.is-active,
+  .nav-button[aria-current="page"] {
+    border-left-color: var(--primary-600);
+  }
+}
+
 label {
   display: grid;
   gap: var(--space-1);
@@ -390,8 +448,6 @@ select:focus-visible,
 textarea:focus-visible,
 input:focus-visible {
   border-color: var(--primary-700);
-  outline: 3px solid #ffbf00;
-  outline-offset: 2px;
 }
 
 ::placeholder {
@@ -448,7 +504,6 @@ input:focus-visible {
   margin-right: var(--space-1);
   border: 2px solid currentColor;
   border-radius: 50%;
-  font-family: Georgia, serif;
   font-size: 0.875rem;
   line-height: 1;
   vertical-align: -0.125rem;
@@ -592,7 +647,7 @@ input:focus-visible {
   border-radius: var(--radius-sm);
   padding: 0.625rem 1rem;
   font-weight: 700;
-  line-height: 1.35;
+  line-height: 1.4;
 }
 
 .button-primary {
@@ -845,7 +900,7 @@ input:focus-visible {
   gap: var(--space-2);
   margin: 0;
   border: 1px solid var(--line);
-  border-radius: var(--radius-2);
+  border-radius: var(--radius-md);
   padding: var(--space-3);
 }
 
@@ -1032,7 +1087,7 @@ input:focus-visible {
   margin-top: var(--space-2) !important;
   color: var(--muted);
   font-size: 0.875rem;
-  line-height: 1.65;
+  line-height: 1.7;
 }
 
 .runtime-actions {
@@ -1170,7 +1225,7 @@ input:focus-visible {
   margin-top: 0.25rem !important;
   color: var(--muted);
   font-size: 0.875rem;
-  line-height: 1.65;
+  line-height: 1.7;
 }
 
 .notification-summary {
@@ -1211,7 +1266,7 @@ input:focus-visible {
   background: var(--neutral-0);
   color: var(--primary-700);
   font-weight: 700;
-  line-height: 1.35;
+  line-height: 1.4;
   text-decoration: none;
 }
 
@@ -1760,7 +1815,7 @@ input:focus-visible {
   margin-top: 0.25rem !important;
   color: var(--muted);
   font-size: 0.875rem;
-  line-height: 1.65;
+  line-height: 1.7;
 }
 
 .record-history-summary {
