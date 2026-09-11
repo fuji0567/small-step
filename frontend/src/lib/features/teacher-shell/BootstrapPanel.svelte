@@ -72,6 +72,7 @@
 
   section {
     width: min(100%, 32rem);
+    box-sizing: border-box;
     border: 1px solid var(--ss-color-border);
     border-radius: var(--ss-radius-large);
     padding: var(--ss-space-4);

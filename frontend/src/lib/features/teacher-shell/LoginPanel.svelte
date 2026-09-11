@@ -67,6 +67,7 @@
   section {
     display: grid;
     width: min(100%, 32rem);
+    box-sizing: border-box;
     gap: var(--ss-space-2);
     border: 1px solid var(--ss-color-border);
     border-radius: var(--ss-radius-large);

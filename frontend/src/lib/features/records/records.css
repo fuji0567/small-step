@@ -55,6 +55,10 @@
   background: var(--ss-color-surface);
 }
 
+.records-card > p {
+  max-width: 40em;
+}
+
 .records-card-header {
   justify-content: space-between;
 }
