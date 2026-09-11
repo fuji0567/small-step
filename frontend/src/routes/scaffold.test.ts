@@ -1,15 +1,20 @@
-import { render, screen } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
+import { cleanup, render, screen } from '@testing-library/svelte';
+import { afterEach, describe, expect, it } from 'vitest';
 
+import TeacherPageFixture from '$lib/features/dashboard/DashboardPageFixture.test.svelte';
 import GuardianPage from './guardian-next/+page.svelte';
-import TeacherPage from './teacher-next/+page.svelte';
+
+afterEach(cleanup);
 
 describe('preview routes', () => {
   it('renders the teacher preview shell', () => {
-    render(TeacherPage);
+    render(TeacherPageFixture);
     expect(
-      screen.getByRole('heading', { name: '先生用画面' })
+      screen.getByRole('heading', { name: '今日の状況' })
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: /レビュー待ち 0件/ })
+    ).toHaveAttribute('href', '/teacher-next/review/');
   });
 
   it('renders the guardian preview shell', () => {
