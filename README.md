@@ -115,8 +115,9 @@ CLOUD_AUDIO_JOB_RETENTION_MINUTES=15
 CLOUD_AUDIO_PROCESSING_TIMEOUT_MINUTES=10
 EDGE_AUDIO_DEVICE=cuda
 EDGE_AUDIO_COMPUTE_TYPE=float16
+LLM_BACKEND=vllm
 LLM_BASE_URL=http://127.0.0.1:8001/v1
-LLM_MODEL=<VRT内で起動するモデル名>
+LLM_MODEL=Qwen/Qwen3-32B
 ```
 
 アップロードされた生音声には元のファイル名を付けず、ランダムIDで保存します。未処理ジョブは最大15分で期限切れになり、GPUワーカーは成功・失敗を問わず音声を削除します。処理中にVRTやワーカーが停止した場合は、既定10分後に次のワーカーが安全に引き継げます。DBや先生画面に保存・表示されるのはジョブ状態と匿名化済みの承認待ち記録だけです。
@@ -163,11 +164,21 @@ EDGE_AUDIO_DEVICE=cuda
 EDGE_AUDIO_COMPUTE_TYPE=float16
 SPEAKER_DIARIZATION_DEVICE=cuda
 
-# VRTホスト上のOllama/vLLMをコンテナから使う場合の例。
-# ホスト側は外部公開せず、127.0.0.1またはDocker内部ネットワークだけで待ち受けます。
-LLM_BASE_URL=http://host.docker.internal:11434/v1
+# VRT上のvLLMコンテナへ、同じDocker内部ネットワークから接続します。
+LLM_BACKEND=vllm
+LLM_BASE_URL=http://small-step-vllm:8000/v1
 LLM_ALLOW_EXTERNAL=true
-LLM_MODEL=<VRTで動かすモデル名>
+LLM_MODEL=Qwen/Qwen3-32B
+```
+
+`LLM_ALLOW_EXTERNAL=true` は、ここではDockerサービス名を許可するために必要です。
+LLMをインターネットへ公開する設定ではありません。vLLMのホスト側ポートは
+`127.0.0.1:8001:8000` のままにし、`small-step-vllm` と `gpu-worker` だけを
+`small-step-ai` ネットワークへ接続します。ネットワークが未作成の場合だけ、起動前に作成します。
+
+```bash
+sudo docker network inspect small-step-ai >/dev/null 2>&1 \
+  || sudo docker network create small-step-ai
 ```
 
 次でデータベース準備・API・GPUワーカーを一緒に起動できます。`compose.vrt.yaml` はMacでは使いません。空のDBでは`migrate`が初期構成を適用してから、APIと各ワーカーが順番に起動します。
@@ -223,8 +234,9 @@ mkdir -p data/edge-audio-inbox
 EDGE_AUDIO_INBOX_DIR=./data/edge-audio-inbox
 EDGE_AUDIO_DEVICE=cuda
 EDGE_AUDIO_COMPUTE_TYPE=float16
+LLM_BACKEND=vllm
 LLM_BASE_URL=http://127.0.0.1:8001/v1
-LLM_MODEL=<vLLMで起動したモデル名>
+LLM_MODEL=Qwen/Qwen3-32B
 LLM_ALLOW_EXTERNAL=false
 EDGE_API_URL=http://127.0.0.1:8000
 EDGE_API_KEY=<POST /api/v1/edge-devices で発行した端末専用キー>
