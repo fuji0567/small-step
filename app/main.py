@@ -14,7 +14,7 @@ FRONTEND_DIST = Path(__file__).parent / "frontend_dist"
 FRONTEND_REQUIRED_PATHS = (
     Path("200.html"),
     Path("_app"),
-    Path("guardian-next/index.html"),
+    Path("guardian/index.html"),
 )
 
 
@@ -71,23 +71,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path = request.url.path
         if path.startswith("/_app/"):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-        elif path == "/teacher-next" or path.startswith("/teacher-next/"):
+        elif path == "/teacher" or path.startswith("/teacher/"):
             response.headers["Cache-Control"] = "no-cache"
-        elif path == "/guardian-next" or path.startswith("/guardian-next/"):
+        elif path == "/guardian" or path.startswith("/guardian/"):
             response.headers["Cache-Control"] = "no-cache"
         return response
 
     application.include_router(router)
-    application.mount(
-        "/teacher",
-        StaticFiles(directory=Path(__file__).parent / "web", html=True),
-        name="teacher-web",
-    )
-    application.mount(
-        "/guardian",
-        StaticFiles(directory=Path(__file__).parent / "guardian", html=True),
-        name="guardian-web",
-    )
 
     if _should_serve_frontend(FRONTEND_DIST, production=runtime_settings.app_env == "production"):
         application.mount(
@@ -96,17 +86,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             name="svelte-assets",
         )
         application.mount(
-            "/guardian-next",
-            StaticFiles(directory=FRONTEND_DIST / "guardian-next", html=True),
-            name="guardian-next-web",
+            "/guardian",
+            StaticFiles(directory=FRONTEND_DIST / "guardian", html=True),
+            name="guardian-web",
         )
 
-        @application.get("/teacher-next", include_in_schema=False)
-        def redirect_teacher_preview() -> RedirectResponse:
-            return RedirectResponse(url="/teacher-next/")
+        @application.get("/teacher", include_in_schema=False)
+        def redirect_teacher_app() -> RedirectResponse:
+            return RedirectResponse(url="/teacher/")
 
-        @application.get("/teacher-next/{path:path}", include_in_schema=False)
-        def serve_teacher_preview() -> FileResponse:
+        @application.get("/teacher/{path:path}", include_in_schema=False)
+        def serve_teacher_app() -> FileResponse:
             return FileResponse(FRONTEND_DIST / "200.html", media_type="text/html")
 
     return application
