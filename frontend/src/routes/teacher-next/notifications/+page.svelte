@@ -1,9 +1,14 @@
 <script lang="ts">
-  import { PlaceholderPage } from '$lib/features/teacher-shell';
+  import { NotificationsView } from '$lib/features/notifications';
+  import { useTeacherShell } from '$lib/features/teacher-shell';
+
+  const shell = useTeacherShell();
 </script>
 
 <svelte:head><title>通知状況 | Small Step</title></svelte:head>
-<PlaceholderPage
-  title="通知状況"
-  description="保護者への配信予定、配信結果、再送が必要な通知を確認する画面です。"
+<NotificationsView
+  api={shell.api}
+  schoolId={shell.schools.schoolId}
+  isSchoolAdmin={shell.isSchoolAdmin}
+  controller={shell.controller}
 />

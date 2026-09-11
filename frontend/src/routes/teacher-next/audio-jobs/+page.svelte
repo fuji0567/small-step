@@ -1,9 +1,13 @@
 <script lang="ts">
-  import { PlaceholderPage } from '$lib/features/teacher-shell';
+  import { AudioJobsView } from '$lib/features/operations';
+  import { useTeacherShell } from '$lib/features/teacher-shell';
+
+  const shell = useTeacherShell();
 </script>
 
 <svelte:head><title>音声処理状況 | Small Step</title></svelte:head>
-<PlaceholderPage
-  title="音声処理状況"
-  description="明示的に有効化したクラウド音声処理の進行状況を確認する画面です。"
+<AudioJobsView
+  api={shell.api}
+  schoolId={shell.schools.schoolId}
+  controller={shell.controller}
 />

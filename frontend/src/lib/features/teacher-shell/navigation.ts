@@ -3,6 +3,7 @@ import type { AppShellNavItem } from '$lib/components';
 export const TEACHER_NAV_ITEMS = [
   { href: '/teacher-next/', label: 'ホーム', icon: 'home' },
   { href: '/teacher-next/review/', label: 'レビュー待ち', icon: 'review' },
+  { href: '/teacher-next/records/', label: '記録履歴', icon: 'history' },
   {
     href: '/teacher-next/notifications/',
     label: '通知状況',

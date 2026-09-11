@@ -31,9 +31,9 @@ describe('teacher shell navigation', () => {
   });
 
   it('一般の先生向け一覧に管理者用URLを含めない', () => {
-    expect(teacherNavItems(false).map((item) => item.href)).not.toContain(
-      '/teacher-next/settings/'
-    );
+    const hrefs = teacherNavItems(false).map((item) => item.href);
+    expect(hrefs).toContain('/teacher-next/records/');
+    expect(hrefs).not.toContain('/teacher-next/settings/');
   });
 
   it('一般の先生のDOMから管理者ナビを除去し、現在地を示す', () => {
