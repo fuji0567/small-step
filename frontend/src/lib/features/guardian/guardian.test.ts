@@ -34,10 +34,10 @@ describe('guardian archive token', () => {
   it('ssa_ tokenを保存し、APIで使う前にhashを消す', async () => {
     const events: string[] = [];
     const setItem = vi.fn(() => events.push('store'));
-    const replaceState = vi.fn(() => events.push('remove-hash'));
+    const replaceUrl = vi.fn(() => events.push('remove-hash'));
     const token = consumeGuardianArchiveToken({
       location: { hash: '#ssa_secret-value', pathname: '/guardian/' },
-      history: { replaceState },
+      replaceUrl,
       sessionStorage: { getItem: vi.fn(), setItem }
     });
 
@@ -58,23 +58,23 @@ describe('guardian archive token', () => {
       GUARDIAN_ARCHIVE_TOKEN_STORAGE_KEY,
       'ssa_secret-value'
     );
-    expect(replaceState).toHaveBeenCalledWith(null, '', '/guardian/');
+    expect(replaceUrl).toHaveBeenCalledWith('/guardian/');
     expect(events).toEqual(['store', 'remove-hash', 'fetch']);
   });
 
   it('hashにssa_ tokenがない場合はsessionStorageを読む', () => {
     const getItem = vi.fn(() => 'ssa_saved-value');
-    const replaceState = vi.fn();
+    const replaceUrl = vi.fn();
 
     expect(
       consumeGuardianArchiveToken({
         location: { hash: '', pathname: '/guardian/' },
-        history: { replaceState },
+        replaceUrl,
         sessionStorage: { getItem, setItem: vi.fn() }
       })
     ).toBe('ssa_saved-value');
     expect(getItem).toHaveBeenCalledWith(GUARDIAN_ARCHIVE_TOKEN_STORAGE_KEY);
-    expect(replaceState).not.toHaveBeenCalled();
+    expect(replaceUrl).not.toHaveBeenCalled();
   });
 });
 

@@ -2,12 +2,11 @@ export const GUARDIAN_ARCHIVE_TOKEN_STORAGE_KEY =
   'small-step.guardian-archive-token';
 
 type GuardianLocation = Pick<Location, 'hash' | 'pathname'>;
-type GuardianHistory = Pick<History, 'replaceState'>;
 type GuardianStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
 export interface GuardianBrowserState {
   location: GuardianLocation;
-  history: GuardianHistory;
+  replaceUrl: (pathname: string) => void;
   sessionStorage: GuardianStorage;
 }
 
@@ -17,13 +16,13 @@ export interface GuardianBrowserState {
  */
 export function consumeGuardianArchiveToken({
   location,
-  history,
+  replaceUrl,
   sessionStorage
 }: GuardianBrowserState): string | null {
   const tokenFromUrl = location.hash.slice(1);
   if (tokenFromUrl.startsWith('ssa_')) {
     sessionStorage.setItem(GUARDIAN_ARCHIVE_TOKEN_STORAGE_KEY, tokenFromUrl);
-    history.replaceState(null, '', location.pathname);
+    replaceUrl(location.pathname);
     return tokenFromUrl;
   }
 

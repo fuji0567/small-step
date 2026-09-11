@@ -4,6 +4,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import GuardianArchiveView from './GuardianArchiveView.svelte';
 import { GUARDIAN_ARCHIVE_TOKEN_STORAGE_KEY } from './token';
 
+const { replaceUrl } = vi.hoisted(() => ({
+  replaceUrl: vi.fn((pathname: string, state: Record<string, never>) => {
+    void state;
+    window.history.replaceState(null, '', pathname);
+  })
+}));
+
+vi.mock('$app/navigation', () => ({
+  replaceState: replaceUrl
+}));
+
 function responseJson(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
     ...init,
@@ -17,6 +28,7 @@ function openArchiveUrl(token: string): void {
 
 describe('GuardianArchiveView', () => {
   beforeEach(() => {
+    replaceUrl.mockClear();
     window.sessionStorage.clear();
   });
 
@@ -56,6 +68,7 @@ describe('GuardianArchiveView', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('成長の記録')).toBeInTheDocument();
     expect(window.location.hash).toBe('');
+    expect(replaceUrl).toHaveBeenCalledWith('/guardian/', {});
     expect(
       window.sessionStorage.getItem(GUARDIAN_ARCHIVE_TOKEN_STORAGE_KEY)
     ).toBe(token);

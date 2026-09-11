@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { replaceState } from '$app/navigation';
+  import { resolve } from '$app/paths';
+  import type { Pathname } from '$app/types';
   import { onMount } from 'svelte';
 
   import { Loading, Notice } from '$lib/components';
@@ -17,6 +20,8 @@
     | GuardianArchiveLoadResult;
 
   let state = $state<ViewState>({ status: 'loading' });
+  let started = false;
+  let requestController: AbortController | null = null;
 
   function formatDate(value: string): string {
     return new Intl.DateTimeFormat('ja-JP', {
@@ -37,27 +42,37 @@
   }
 
   onMount(() => {
-    const token = consumeGuardianArchiveToken({
-      location: window.location,
-      history: window.history,
-      sessionStorage: window.sessionStorage
-    });
-    if (!token) {
-      state = { status: 'missing-link' };
-      return;
-    }
+    const start = () => {
+      if (started) return;
+      started = true;
 
-    const controller = new AbortController();
-    const client = createGuardianArchiveClient(token);
-    void loadGuardianArchive(
-      client,
-      window.sessionStorage,
-      controller.signal
-    ).then((result) => {
-      if (result.status !== 'cancelled') state = result;
-    });
+      const token = consumeGuardianArchiveToken({
+        location: window.location,
+        replaceUrl: (pathname) =>
+          replaceState(resolve(pathname as Pathname), {}),
+        sessionStorage: window.sessionStorage
+      });
+      if (!token) {
+        state = { status: 'missing-link' };
+        return;
+      }
 
-    return () => controller.abort();
+      requestController = new AbortController();
+      const client = createGuardianArchiveClient(token);
+      void loadGuardianArchive(
+        client,
+        window.sessionStorage,
+        requestController.signal
+      ).then((result) => {
+        if (result.status !== 'cancelled') state = result;
+      });
+    };
+
+    const timer = globalThis.setTimeout(start, 0);
+    return () => {
+      globalThis.clearTimeout(timer);
+      requestController?.abort();
+    };
   });
 </script>
 
