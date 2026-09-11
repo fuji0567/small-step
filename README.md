@@ -189,6 +189,10 @@ docker compose -f compose.yaml -f compose.vrt.yaml up -d --build
 docker compose -f compose.yaml -f compose.vrt.yaml ps
 ```
 
+APIのホスト側ポートは安全な初期値として `127.0.0.1:8000` にだけ公開されます。
+外部端末から接続する前に、認証を有効化し、HTTPSのリバースプロキシを経由させてください。
+検証のために `8000` 番ポートをインターネットへ直接公開しないでください。
+
 `migrate`が`exited (0)`、`api`が`healthy`になったことを確認してください。`gpu-worker`は`api`が`healthy`になるまで待ってから起動します。`migrate`が止まった場合は、次で理由を確認してから対応します。データを消して再実行する必要はありません。
 
 ```bash
