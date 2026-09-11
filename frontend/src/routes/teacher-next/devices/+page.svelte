@@ -1,9 +1,14 @@
 <script lang="ts">
-  import { PlaceholderPage } from '$lib/features/teacher-shell';
+  import { DevicesView } from '$lib/features/devices';
+  import { useTeacherShell } from '$lib/features/teacher-shell';
+
+  const shell = useTeacherShell();
 </script>
 
 <svelte:head><title>録音端末 | Small Step</title></svelte:head>
-<PlaceholderPage
-  title="録音端末"
-  description="園内の録音端末と、一度だけ表示されるAPIキーを管理する画面です。"
+<DevicesView
+  api={shell.api}
+  appController={shell.controller}
+  schoolId={shell.schools.schoolId}
+  isSchoolAdmin={shell.isSchoolAdmin}
 />

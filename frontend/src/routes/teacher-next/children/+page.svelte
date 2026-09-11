@@ -1,9 +1,14 @@
 <script lang="ts">
-  import { PlaceholderPage } from '$lib/features/teacher-shell';
+  import { ChildrenView } from '$lib/features/children';
+  import { useTeacherShell } from '$lib/features/teacher-shell';
+
+  const shell = useTeacherShell();
 </script>
 
 <svelte:head><title>園児・保護者 | Small Step</title></svelte:head>
-<PlaceholderPage
-  title="園児・保護者"
-  description="園児の登録状況と保護者のLINE連携状況を確認する画面です。"
+<ChildrenView
+  api={shell.api}
+  appController={shell.controller}
+  schoolId={shell.schools.schoolId}
+  isSchoolAdmin={shell.isSchoolAdmin}
 />
