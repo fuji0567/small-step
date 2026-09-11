@@ -15,7 +15,7 @@ describe('NotFoundView', () => {
     expect(screen.getByText('404')).toBeInTheDocument();
     expect(
       screen.getByRole('link', { name: '先生用ホームへ戻る' })
-    ).toHaveAttribute('href', '/teacher-next/');
+    ).toHaveAttribute('href', '/teacher/');
     await waitFor(() => expect(heading).toHaveFocus());
   });
 });

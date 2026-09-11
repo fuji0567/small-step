@@ -155,7 +155,7 @@
   <header class="records-heading">
     <a
       class="records-link"
-      href={resolve('/teacher-next/review/')}
+      href={resolve('/teacher/review/')}
       onclick={requestBack}>レビュー待ち一覧へ戻る</a
     >
     <h2 id="manual-record-heading">日誌を手入力する</h2>

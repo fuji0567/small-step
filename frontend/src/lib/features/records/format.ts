@@ -41,5 +41,5 @@ export function dateBoundaryIso(
 }
 
 export function recordDetailPath(recordId: string): Pathname {
-  return `/teacher-next/review/${encodeURIComponent(recordId)}/` as Pathname;
+  return `/teacher/review/${encodeURIComponent(recordId)}/` as Pathname;
 }

@@ -4,7 +4,7 @@
 
   let {
     isSchoolAdmin = false,
-    currentPath = '/teacher-next/'
+    currentPath = '/teacher/'
   }: {
     isSchoolAdmin?: boolean;
     currentPath?: string;

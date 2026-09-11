@@ -1,37 +1,37 @@
 import type { AppShellNavItem } from '$lib/components';
 
 export const TEACHER_NAV_ITEMS = [
-  { href: '/teacher-next/', label: 'ホーム', icon: 'home' },
-  { href: '/teacher-next/review/', label: 'レビュー待ち', icon: 'review' },
-  { href: '/teacher-next/records/', label: '記録履歴', icon: 'history' },
+  { href: '/teacher/', label: 'ホーム', icon: 'home' },
+  { href: '/teacher/review/', label: 'レビュー待ち', icon: 'review' },
+  { href: '/teacher/records/', label: '記録履歴', icon: 'history' },
   {
-    href: '/teacher-next/notifications/',
+    href: '/teacher/notifications/',
     label: '通知状況',
     icon: 'notifications'
   },
   {
-    href: '/teacher-next/audio-jobs/',
+    href: '/teacher/audio-jobs/',
     label: '音声処理状況',
     icon: 'audio'
   },
-  { href: '/teacher-next/children/', label: '園児・保護者', icon: 'child' },
+  { href: '/teacher/children/', label: '園児・保護者', icon: 'child' },
   {
-    href: '/teacher-next/voice-consent/',
+    href: '/teacher/voice-consent/',
     label: '声紋設定',
     icon: 'microphone'
   }
 ] as const satisfies readonly AppShellNavItem[];
 
 export const ADMIN_NAV_ITEMS = [
-  { href: '/teacher-next/settings/', label: '園の設定', icon: 'schedule' },
-  { href: '/teacher-next/teachers/', label: '先生管理', icon: 'group' },
-  { href: '/teacher-next/devices/', label: '録音端末', icon: 'microphone' },
+  { href: '/teacher/settings/', label: '園の設定', icon: 'schedule' },
+  { href: '/teacher/teachers/', label: '先生管理', icon: 'group' },
+  { href: '/teacher/devices/', label: '録音端末', icon: 'microphone' },
   {
-    href: '/teacher-next/readiness/',
+    href: '/teacher/readiness/',
     label: '稼働準備チェック',
     icon: 'checklist'
   },
-  { href: '/teacher-next/audit/', label: '操作履歴', icon: 'privacy' }
+  { href: '/teacher/audit/', label: '操作履歴', icon: 'privacy' }
 ] as const satisfies readonly AppShellNavItem[];
 
 export function teacherNavItems(isSchoolAdmin: boolean): AppShellNavItem[] {
@@ -39,7 +39,7 @@ export function teacherNavItems(isSchoolAdmin: boolean): AppShellNavItem[] {
 }
 
 const ADMIN_ROUTE_PATTERN =
-  /^\/teacher-next\/(settings|teachers|devices|readiness|audit)(?:\/|$)/;
+  /^\/teacher\/(settings|teachers|devices|readiness|audit)(?:\/|$)/;
 
 export function isAdminRoute(pathname: string): boolean {
   return ADMIN_ROUTE_PATTERN.test(pathname);
@@ -53,11 +53,10 @@ export function canAccessTeacherRoute(
 }
 
 export function teacherPageTitle(pathname: string): string {
-  if (/^\/teacher-next\/review\/new\/?$/.test(pathname)) return '日誌の手入力';
-  if (/^\/teacher-next\/review\/[^/]+\/?$/.test(pathname))
-    return '日誌のレビュー';
+  if (/^\/teacher\/review\/new\/?$/.test(pathname)) return '日誌の手入力';
+  if (/^\/teacher\/review\/[^/]+\/?$/.test(pathname)) return '日誌のレビュー';
 
-  const segment = pathname.replace(/^\/teacher-next\/?/, '').split('/')[0];
+  const segment = pathname.replace(/^\/teacher\/?/, '').split('/')[0];
   return (
     {
       '': 'ホーム',

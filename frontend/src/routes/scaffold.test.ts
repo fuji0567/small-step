@@ -2,7 +2,7 @@ import { cleanup, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import TeacherPageFixture from '$lib/features/dashboard/DashboardPageFixture.test.svelte';
-import GuardianPage from './guardian-next/+page.svelte';
+import GuardianPage from './guardian/+page.svelte';
 
 afterEach(cleanup);
 
@@ -14,7 +14,7 @@ describe('preview routes', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole('link', { name: /レビュー待ち 0件/ })
-    ).toHaveAttribute('href', '/teacher-next/review/');
+    ).toHaveAttribute('href', '/teacher/review/');
   });
 
   it('renders the guardian preview shell', () => {

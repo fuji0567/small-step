@@ -64,7 +64,7 @@ describe('ReviewQueueView', () => {
     expect(await screen.findByText('山田 はな')).toBeInTheDocument();
     expect(
       screen.getByRole('link', { name: '内容を確認する' })
-    ).toHaveAttribute('href', '/teacher-next/review/record-1/');
+    ).toHaveAttribute('href', '/teacher/review/record-1/');
     expect(screen.getByLabelText('レビュー待ちの日誌1件')).toBeInTheDocument();
   });
 });
@@ -149,7 +149,7 @@ describe('RecordDetailView', () => {
     await fireEvent.click(confirmButtons.at(-1)!);
 
     await waitFor(() =>
-      expect(onNavigate).toHaveBeenCalledWith('/teacher-next/review/record-2/')
+      expect(onNavigate).toHaveBeenCalledWith('/teacher/review/record-2/')
     );
   });
 
@@ -178,7 +178,7 @@ describe('RecordDetailView', () => {
     await fireEvent.click(rejectButtons.at(-1)!);
 
     await waitFor(() =>
-      expect(onNavigate).toHaveBeenCalledWith('/teacher-next/review/')
+      expect(onNavigate).toHaveBeenCalledWith('/teacher/review/')
     );
   });
 });
@@ -211,7 +211,7 @@ describe('ManualRecordView', () => {
     );
 
     await waitFor(() =>
-      expect(onNavigate).toHaveBeenCalledWith('/teacher-next/review/record-1/')
+      expect(onNavigate).toHaveBeenCalledWith('/teacher/review/record-1/')
     );
     const createCall = fetchMock.mock.calls.find(([url]) =>
       String(url).endsWith('/records/manual')
@@ -247,6 +247,6 @@ describe('RecordHistoryView', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole('link', { name: '日誌の詳細を開く' })
-    ).toHaveAttribute('href', '/teacher-next/review/record-1/');
+    ).toHaveAttribute('href', '/teacher/review/record-1/');
   });
 });

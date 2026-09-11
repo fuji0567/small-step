@@ -34,7 +34,7 @@
   function isCurrent(item: AppShellNavItem): boolean {
     const href = resolve(item.href);
     if (currentPath === href) return true;
-    if (href === resolve('/teacher-next/')) return false;
+    if (href === resolve('/teacher/')) return false;
     return currentPath.startsWith(href);
   }
 </script>

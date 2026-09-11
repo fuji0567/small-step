@@ -182,9 +182,9 @@ describe('ConfirmDialog', () => {
 
 describe('AppShell', () => {
   const navItems: AppShellNavItem[] = [
-    { href: '/teacher-next/', label: 'ホーム', icon: 'home' },
+    { href: '/teacher/', label: 'ホーム', icon: 'home' },
     {
-      href: '/teacher-next/review/',
+      href: '/teacher/review/',
       label: 'レビュー待ち',
       icon: 'review',
       badge: '3件',
@@ -197,7 +197,7 @@ describe('AppShell', () => {
       title: '先生用',
       eyebrow: 'スモールステップ',
       navItems,
-      currentPath: '/teacher-next/review/record-1/',
+      currentPath: '/teacher/review/record-1/',
       children: textSnippet('<h2>記録の詳細</h2>')
     });
 
@@ -220,7 +220,7 @@ describe('AppShell', () => {
     render(AppShell, {
       title: '先生用',
       navItems,
-      currentPath: '/teacher-next/',
+      currentPath: '/teacher/',
       busy: true,
       children: textSnippet('<p>今日の状況</p>')
     });

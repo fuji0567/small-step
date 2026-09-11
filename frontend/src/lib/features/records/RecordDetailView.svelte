@@ -142,9 +142,7 @@
 
       const nextPending = await service.listPending(record.school_id);
       const next = nextPending.find((candidate) => candidate.id !== reviewedId);
-      await onNavigate(
-        next ? recordDetailPath(next.id) : '/teacher-next/review/'
-      );
+      await onNavigate(next ? recordDetailPath(next.id) : '/teacher/review/');
     } catch (error) {
       loadError(error);
       if (error instanceof ApiHttpError && error.status === 409) {
@@ -182,7 +180,7 @@
   <header class="records-heading">
     <a
       class="records-link"
-      href={resolve('/teacher-next/review/')}
+      href={resolve('/teacher/review/')}
       onclick={requestBack}>レビュー待ち一覧へ戻る</a
     >
     <h2 id="record-detail-heading">日誌のレビュー</h2>

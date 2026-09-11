@@ -12,7 +12,7 @@ function responseJson(body: unknown, init: ResponseInit = {}): Response {
 }
 
 function openArchiveUrl(token: string): void {
-  window.history.replaceState(null, '', `/guardian-next/#${token}`);
+  window.history.replaceState(null, '', `/guardian/#${token}`);
 }
 
 describe('GuardianArchiveView', () => {

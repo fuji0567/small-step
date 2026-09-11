@@ -40,7 +40,7 @@
   $effect(() => {
     if (!adminRouteDenied) return;
     redirectedFromAdmin = true;
-    void goto(resolve('/teacher-next/'), { replaceState: true });
+    void goto(resolve('/teacher/'), { replaceState: true });
   });
 
   afterNavigate(() => {
@@ -56,7 +56,7 @@
   function logout(): void {
     shell.logout();
     redirectedFromAdmin = false;
-    void goto(resolve('/teacher-next/'), { replaceState: true });
+    void goto(resolve('/teacher/'), { replaceState: true });
   }
 </script>
 

@@ -74,7 +74,7 @@
       tone={records.length ? 'warning' : 'neutral'}
     />
     <div class="records-actions">
-      <a class="records-link" href={resolve('/teacher-next/review/new/')}
+      <a class="records-link" href={resolve('/teacher/review/new/')}
         >手入力で追加</a
       >
       <Button variant="secondary" onclick={() => load()} disabled={loading}>

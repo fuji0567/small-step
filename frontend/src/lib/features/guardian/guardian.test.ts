@@ -36,7 +36,7 @@ describe('guardian archive token', () => {
     const setItem = vi.fn(() => events.push('store'));
     const replaceState = vi.fn(() => events.push('remove-hash'));
     const token = consumeGuardianArchiveToken({
-      location: { hash: '#ssa_secret-value', pathname: '/guardian-next/' },
+      location: { hash: '#ssa_secret-value', pathname: '/guardian/' },
       history: { replaceState },
       sessionStorage: { getItem: vi.fn(), setItem }
     });
@@ -58,7 +58,7 @@ describe('guardian archive token', () => {
       GUARDIAN_ARCHIVE_TOKEN_STORAGE_KEY,
       'ssa_secret-value'
     );
-    expect(replaceState).toHaveBeenCalledWith(null, '', '/guardian-next/');
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/guardian/');
     expect(events).toEqual(['store', 'remove-hash', 'fetch']);
   });
 
@@ -68,7 +68,7 @@ describe('guardian archive token', () => {
 
     expect(
       consumeGuardianArchiveToken({
-        location: { hash: '', pathname: '/guardian-next/' },
+        location: { hash: '', pathname: '/guardian/' },
         history: { replaceState },
         sessionStorage: { getItem, setItem: vi.fn() }
       })

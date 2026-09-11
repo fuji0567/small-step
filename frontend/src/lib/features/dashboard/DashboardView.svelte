@@ -171,13 +171,13 @@
   {/if}
 
   <div class="dashboard__grid" aria-live="polite" aria-busy={loading}>
-    <a class="dashboard__card" href={resolve('/teacher-next/review/')}>
+    <a class="dashboard__card" href={resolve('/teacher/review/')}>
       <span class="dashboard__label">レビュー待ち</span>
       <strong>{summary.pendingRecords}<span>件</span></strong>
       <span>先生の確認が必要な日誌です</span>
     </a>
 
-    <a class="dashboard__card" href={resolve('/teacher-next/notifications/')}>
+    <a class="dashboard__card" href={resolve('/teacher/notifications/')}>
       <span class="dashboard__label">通知状況</span>
       <strong>{summary.pendingNotifications}<span>件</span></strong>
       <span>送信済み {summary.sentNotifications}件</span>
@@ -188,7 +188,7 @@
       {/if}
     </a>
 
-    <a class="dashboard__card" href={resolve('/teacher-next/audio-jobs/')}>
+    <a class="dashboard__card" href={resolve('/teacher/audio-jobs/')}>
       <span class="dashboard__label">音声処理中</span>
       <strong>{summary.activeAudioJobs}<span>件</span></strong>
       <span>安全な処理メタデータだけを表示します</span>
@@ -199,14 +199,14 @@
       {/if}
     </a>
 
-    <a class="dashboard__card" href={resolve('/teacher-next/children/')}>
+    <a class="dashboard__card" href={resolve('/teacher/children/')}>
       <span class="dashboard__label">在籍中の園児</span>
       <strong>{summary.activeChildren}<span>人</span></strong>
       <span>保護者LINE未連携 {summary.unlinkedChildren}人</span>
     </a>
 
     {#if isSchoolAdmin}
-      <a class="dashboard__card" href={resolve('/teacher-next/children/')}>
+      <a class="dashboard__card" href={resolve('/teacher/children/')}>
         <span class="dashboard__label">有効なLINE招待</span>
         <strong>{summary.activeInvitations}<span>件</span></strong>
         <span>招待コード未発行 {summary.invitationsNotIssued}件</span>

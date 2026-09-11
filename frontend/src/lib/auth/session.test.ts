@@ -52,7 +52,7 @@ describe('session helpers', () => {
     const session = initializeGuardianSession({
       storage,
       hash: '#ssa_archive-secret',
-      pathname: '/guardian-next/',
+      pathname: '/guardian/',
       replaceUrl
     });
 
@@ -60,7 +60,7 @@ describe('session helpers', () => {
     expect(storage.getItem(GUARDIAN_ARCHIVE_TOKEN_KEY)).toBe(
       'ssa_archive-secret'
     );
-    expect(replaceUrl).toHaveBeenCalledWith('/guardian-next/');
+    expect(replaceUrl).toHaveBeenCalledWith('/guardian/');
   });
 
   it('不正なhashを保存せず、既存の保護者sessionを復元する', async () => {
@@ -73,7 +73,7 @@ describe('session helpers', () => {
     const session = initializeGuardianSession({
       storage,
       hash: '#not-an-archive-token',
-      pathname: '/guardian-next/',
+      pathname: '/guardian/',
       replaceUrl
     });
 

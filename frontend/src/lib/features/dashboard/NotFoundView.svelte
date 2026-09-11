@@ -13,7 +13,7 @@
     ページが見つかりません
   </h2>
   <p>URLが正しいか確認するか、ホームから目的の画面を選んでください。</p>
-  <a href={resolve('/teacher-next/')}>先生用ホームへ戻る</a>
+  <a href={resolve('/teacher/')}>先生用ホームへ戻る</a>
 </section>
 
 <style>

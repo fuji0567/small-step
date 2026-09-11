@@ -81,14 +81,14 @@ describe('DashboardView', () => {
     expect(await screen.findByText('招待コード未発行 1件')).toBeInTheDocument();
     expect(
       screen.getByRole('link', { name: /レビュー待ち 1件/ })
-    ).toHaveAttribute('href', '/teacher-next/review/');
+    ).toHaveAttribute('href', '/teacher/review/');
     expect(screen.getByRole('link', { name: /通知状況 1件/ })).toHaveAttribute(
       'href',
-      '/teacher-next/notifications/'
+      '/teacher/notifications/'
     );
     expect(
       screen.getByRole('link', { name: /音声処理中 1件/ })
-    ).toHaveAttribute('href', '/teacher-next/audio-jobs/');
+    ).toHaveAttribute('href', '/teacher/audio-jobs/');
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/line/link-invitations/active?school_id=school-1',
       expect.any(Object)
