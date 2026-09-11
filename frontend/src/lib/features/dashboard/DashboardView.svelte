@@ -22,7 +22,7 @@
   let { api, schoolId, isSchoolAdmin, controller }: Props = $props();
   const service = $derived(new DashboardService(api));
   let data = $state.raw<DashboardData>({ ...EMPTY_DASHBOARD_DATA });
-  let loadingScopes = $state.raw<ReadonlySet<DashboardScope>>(new Set());
+  let loadingScopes = $state.raw<readonly DashboardScope[]>([]);
   let errors = $state.raw<Partial<Record<DashboardScope, string>>>({});
   const versions: Record<DashboardScope, number> = {
     records: 0,
@@ -40,7 +40,7 @@
   ] as const satisfies readonly DashboardScope[];
 
   const summary = $derived(summarizeDashboard(data));
-  const loading = $derived(loadingScopes.size > 0);
+  const loading = $derived(loadingScopes.length > 0);
   const errorCount = $derived(Object.keys(errors).length);
   const attentionCount = $derived(
     summary.pendingRecords +
@@ -50,16 +50,16 @@
   );
 
   function beginLoading(scope: DashboardScope): void {
-    loadingScopes = new Set([...loadingScopes, scope]);
+    if (!loadingScopes.includes(scope)) {
+      loadingScopes = [...loadingScopes, scope];
+    }
     const nextErrors = { ...errors };
     delete nextErrors[scope];
     errors = nextErrors;
   }
 
   function endLoading(scope: DashboardScope): void {
-    const next = new Set(loadingScopes);
-    next.delete(scope);
-    loadingScopes = next;
+    loadingScopes = loadingScopes.filter((item) => item !== scope);
   }
 
   async function loadScope(
@@ -121,7 +121,7 @@
     for (const scope of scopes) versions[scope] += 1;
     data = { ...EMPTY_DASHBOARD_DATA };
     errors = {};
-    loadingScopes = new Set();
+    loadingScopes = [];
     const request = new AbortController();
     void untrack(() => loadAll(request.signal));
     return () => request.abort();
