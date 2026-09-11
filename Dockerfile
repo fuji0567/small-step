@@ -1,4 +1,19 @@
-FROM python:3.12-slim
+FROM node:24.19.0-bookworm-slim AS frontend-build
+
+WORKDIR /build/frontend
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend ./
+RUN mkdir -p /build/app \
+    && npm run format:check \
+    && npm run lint \
+    && npm run check \
+    && npm run test:unit \
+    && npm run build
+
+FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -9,6 +24,7 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY alembic.ini ./
 COPY app ./app
+COPY --from=frontend-build /build/app/frontend_dist ./app/frontend_dist
 COPY migrations ./migrations
 COPY scripts ./scripts
 RUN pip install --upgrade pip && pip install .[postgres]

@@ -6,3 +6,9 @@ __pycache__/
 .pytest_cache/
 data/
 *.egg-info/
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+app/frontend_dist/
