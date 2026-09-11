@@ -13,7 +13,9 @@ COPY migrations ./migrations
 COPY scripts ./scripts
 RUN pip install --upgrade pip && pip install .[postgres]
 
-RUN useradd --create-home --uid 10001 appuser
+RUN useradd --create-home --uid 10001 appuser \
+    && mkdir --parents /app/data \
+    && chown appuser:appuser /app/data
 USER appuser
 
 EXPOSE 8000
