@@ -1,0 +1,130 @@
+.records-page {
+  display: grid;
+  gap: var(--ss-space-3);
+}
+
+.records-heading,
+.records-section,
+.records-card,
+.records-form,
+.records-fields {
+  display: grid;
+  gap: var(--ss-space-2);
+}
+
+.records-heading h2,
+.records-heading p,
+.records-card h3,
+.records-card p,
+.records-section h3,
+.records-section p {
+  margin: 0;
+}
+
+.records-heading p,
+.records-meta,
+.records-support {
+  color: var(--ss-color-text-muted);
+}
+
+.records-toolbar,
+.records-actions,
+.records-card-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ss-space-2);
+}
+
+.records-toolbar {
+  justify-content: space-between;
+}
+
+.records-list {
+  display: grid;
+  gap: var(--ss-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.records-card {
+  border: 2px solid var(--ss-color-border);
+  border-radius: var(--ss-radius-large);
+  padding: var(--ss-space-3);
+  background: var(--ss-color-surface);
+}
+
+.records-card-header {
+  justify-content: space-between;
+}
+
+.records-link {
+  color: var(--ss-color-action-hover);
+  font-weight: var(--ss-font-weight-bold);
+  text-underline-offset: 0.2em;
+}
+
+.records-link:focus-visible,
+.records-control:focus-visible {
+  outline: 4px solid var(--ss-color-focus-inner);
+  outline-offset: 0;
+  box-shadow: 0 0 0 6px var(--ss-color-focus-outer);
+}
+
+.records-field {
+  display: grid;
+  gap: var(--ss-space-1);
+}
+
+.records-field label,
+.records-legend {
+  font-weight: var(--ss-font-weight-bold);
+}
+
+.records-control {
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+  border: 2px solid var(--ss-color-border);
+  border-radius: var(--ss-radius-medium);
+  padding: var(--ss-space-1) var(--ss-space-2);
+  color: var(--ss-color-text);
+  background: var(--ss-color-surface);
+  font: inherit;
+}
+
+textarea.records-control {
+  min-height: 8rem;
+  resize: vertical;
+}
+
+.records-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--ss-space-2);
+  padding: 0;
+  border: 0;
+  margin: 0;
+}
+
+.records-empty {
+  border: 2px dashed var(--ss-color-border);
+  border-radius: var(--ss-radius-large);
+  padding: var(--ss-space-4);
+  text-align: center;
+}
+
+.records-danger-note {
+  color: var(--ss-color-error-text);
+  font-weight: var(--ss-font-weight-bold);
+}
+
+@media (max-width: 47.999rem) {
+  .records-toolbar,
+  .records-actions,
+  .records-card-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
