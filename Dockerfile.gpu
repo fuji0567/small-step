@@ -6,19 +6,22 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    HF_HOME=/var/lib/small-step/models/huggingface
+    HF_HOME=/var/lib/small-step/models/huggingface \
+    PATH=/opt/venv/bin:$PATH
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends python3 python3-pip \
+    && apt-get install --yes --no-install-recommends ffmpeg python3 python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv /opt/venv
 
 WORKDIR /app
 
 COPY pyproject.toml ./
 COPY app ./app
 COPY scripts ./scripts
-RUN python3 -m pip install --break-system-packages --upgrade pip \
-    && python3 -m pip install --break-system-packages '.[postgres,edge-audio,speaker-diarization]'
+RUN python3 -m pip install --upgrade pip \
+    && python3 -m pip install '.[postgres,edge-audio,speaker-diarization]'
 
 RUN useradd --create-home --uid 10001 appuser \
     && mkdir --parents /var/lib/small-step/cloud-audio-jobs /var/lib/small-step/models \
