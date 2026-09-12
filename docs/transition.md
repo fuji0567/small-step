@@ -1,9 +1,9 @@
 # 画面遷移図
 
-> **状態: Svelte 移行計画のレビュー用ドラフト**
+> **状態: `ChangeToSvelte` ブランチで Svelte 切り替え実装済み（2026-09-12）**
 >
-> この文書の前半は、[Svelte 移行作業手順書](svelte-migration-runbook.md)に基づく移行後の目標状態を示します。まだ実装済みではありません。
-> 移行完了までは、後半の「参考: 移行前の現行実装」が現在の挙動です。調査で差分が見つかった場合は、実装より先にこの図と受け入れ条件を更新します。
+> この文書の前半は現在の Svelte 画面と canonical URL を示します。実運用環境へのデプロイ確認は未完了です。
+> 後半の「参考: 移行前の現行実装」はロールバック判断のために残す履歴であり、現在はマウントされていません。
 
 ## 1. 移行後の全体構成
 
@@ -67,7 +67,7 @@ flowchart TD
     MANUAL -->|"作成成功"| DETAIL
 ```
 
-URL には日誌の不透明な UUID だけを使用し、園児名、本文、LINE ID、token を含めません。preview 中は `/teacher/` を `/teacher-next/`、`/guardian/` を `/guardian-next/` と読み替えます。
+URL には日誌の不透明な UUID だけを使用し、園児名、本文、LINE ID、token を含めません。
 
 ### 共通操作
 
@@ -146,7 +146,7 @@ stateDiagram-v2
     次の日誌 --> 詳細: URLを次のrecordIdへ変更
 ```
 
-日誌詳細は一覧取得結果から探索せず、追加予定の `GET /api/v1/records/{record_id}` で取得します。これにより、一覧の取得上限外にある日誌でも直接 URL、再読み込み、Back、Forwardから復元できます。
+日誌詳細は一覧取得結果から探索せず、`GET /api/v1/records/{record_id}` で取得します。これにより、一覧の取得上限外にある日誌でも直接 URL、再読み込み、Back、Forwardから復元できます。
 
 承認時の本文、会話のきっかけ、園児、配信予定時刻の編集、および承認・却下前の確認ダイアログは現行仕様を維持します。
 
@@ -224,25 +224,20 @@ stateDiagram-v2
 
 hash は API 呼び出し前にアドレスバーから消し、失敗時は sessionStorage の token も消去します。`no-referrer` の指定を維持します。
 
-## 9. 調査完了時に確定する項目
+## 9. 実装・検証状況
 
-実装へ進む前に、並列調査の結果をこのドラフトへ反映します。
-
-- 各 route への入場時取得と、更新後に無効化するデータの対応。
-- 一般先生と管理者で異なる遷移、DOM、API認可結果。
-- 一度きりの秘密が現行実装で消去される正確なタイミング。
-- 401、403、404、409、readiness 503、timeout の表示と復帰先。
-- 未保存変更を確認する画面と、確認不要な一時状態。
-- mobile、keyboard only、読み上げ時のフォーカス順序。
-
-調査結果がこの図と異なる場合は、無理に現行実装を図へ合わせません。まず「維持すべき仕様」「修正する既知不具合」「移行で追加する改善」に分類し、計画書と受け入れテストを更新します。
+- route ごとの取得、園切り替え、共有 invalidation、一般先生と管理者の DOM 差分を実装済みです。
+- 401、403、404、readiness 503、timeout と空状態を日本語で表示します。
+- 日誌の直接 URL、reload、Back、Forward、保護者 hash 除去を Playwright で確認しています。
+- keyboard、フォーカス、mobile reflow、重大な axe 違反がないことを自動確認しています。
+- 実運用環境へのデプロイ、実サービスを使う smoke test、ロールバック image tag の記録は未完了です。
 
 ---
 
 ## 参考: 移行前の現行実装
 
-Small Step のフロントエンドは、ビルド工程を持たない素の HTML/CSS/JavaScript で構成された 2 つの静的アプリです。
-FastAPI が `StaticFiles` としてマウントしています（`app/main.py`）。
+移行前のフロントエンドは、ビルド工程を持たない素の HTML/CSS/JavaScript で構成された 2 つの静的アプリでした。
+ファイルは `app/web/` と `app/guardian/` にロールバック用として保持していますが、現在はマウントされていません。
 
 マウント先とディレクトリの対応は [architecture/frontend.md](architecture/frontend.md) にあります。
 
@@ -501,7 +496,7 @@ stateDiagram-v2
 
 - 先生用アプリ: `app/web/index.html`, `app/web/app.js`, `app/web/styles.css`
 - 保護者用アプリ: `app/guardian/index.html`, `app/guardian/app.js`, `app/guardian/styles.css`
-- 静的マウント: `app/main.py`
+- 現行の Svelte 静的配信: `app/main.py`, `app/frontend_dist/`
 - フロントエンドの実装方針: [architecture/frontend.md](architecture/frontend.md)
 - 認証の分岐: [architecture/auth.md](architecture/auth.md)
 - 技術構成の索引: [architecture.md](architecture.md)

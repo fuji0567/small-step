@@ -11,10 +11,12 @@ GPU が必要なのはクラウド音声処理モードのワーカーだけで�
 
 | ファイル | ベース | 用途 |
 | --- | --- | --- |
-| `Dockerfile` | `python:3.12-slim` | API と CPU 側ワーカー（`migrate` / `line-worker`）に共用 |
+| `Dockerfile` | `node:24.19.0-bookworm-slim` → `python:3.12-slim` | SvelteKit を検証・ビルドし、生成物を含む API / CPU ワーカーを作成 |
 | `Dockerfile.gpu` | `nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04` | GPU ワーカー専用 |
 
-どちらも UID 10001 の非 root ユーザー `appuser` で動きます。
+`Dockerfile` は multi-stage build です。Node stage で `npm ci`、`format:check`、lint、check、unit、build を実行し、
+`app/frontend_dist/` だけを Python runtime stage へコピーします。Node.js と `node_modules` は runtime image に含めません。
+実行時コンテナは UID 10001 の非 root ユーザー `appuser` で動きます。
 GPU イメージだけが `edge-audio` / `speaker-diarization` の extras を入れるため、
 API イメージは小さいまま保てます。
 
@@ -108,6 +110,20 @@ VRT ホスト上で動かす Ollama / vLLM をコンテナから参照するた�
 
 ## ローカルでの起動
 
+FastAPI が配信する Svelte 生成物は事前ビルドが必須です。Node.js 24.19.0 を使います。
+`APP_ENV=production` では生成物が欠けていると起動時に失敗し、旧 UI へは自動で戻りません。
+
+```bash
+cd frontend
+npm ci
+npm run format:check
+npm run lint
+npm run check
+npm run test:unit
+npm run build
+cd ..
+```
+
 ```bash
 python -m venv .venv
 .venv/Scripts/activate        # Windows。macOS / Linux は source .venv/bin/activate
@@ -118,6 +134,13 @@ uvicorn app.main:app --reload
 - 先生用画面 … <http://127.0.0.1:8000/teacher>
 - 保護者用画面 … <http://127.0.0.1:8000/guardian>
 - API ドキュメント … <http://127.0.0.1:8000/docs>
+
+`/teacher/*` は `app/frontend_dist/200.html` への先生用限定 SPA fallback、`/guardian/` は prerender 済み静的ページ、
+`/_app/immutable/*` は content hash 付き asset です。HTML は `no-cache`、immutable asset は 1 年 cache で配信します。
+API、欠損 asset、`/guardian/` 配下の不明なパスを SPA fallback へ渡してはいけません。
+
+この構成のローカル build と配信契約テストは確認済みですが、実運用環境へのデプロイとロールバックは
+まだ確認していません。実施手順と判定条件は [Svelte 移行作業手順書](../svelte-migration-runbook.md) を参照してください。
 
 SQLite の移行は起動時に自動適用されるため、事前準備は不要です。
 テストは `pytest`（`testpaths = ["tests"]`）で実行します。

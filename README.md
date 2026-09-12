@@ -12,6 +12,7 @@
 - 重複するエッジイベントの拒否
 - Supabase Authの先生ログインと園単位の認可
 - ローカル音声処理を呼び出すMCPサーバーの土台
+- SvelteKitによる先生用の画面別URLと保護者用配信アーカイブ
 
 既定では生音声・生の文字起こしをこのAPIに送らない設計です。園内エッジで話者識別・文字起こし・匿名化を済ませ、`POST /api/v1/records` には要約などの加工済みデータだけを送ります。高火力 VRT を使うクラウド音声モードは明示的に有効化した場合だけ利用でき、生音声はVRTの非公開ディレクトリへ一時保存して処理後に削除します。
 
@@ -22,6 +23,41 @@
 バックエンド起動中に `http://127.0.0.1:8000/teacher/` を開くと、ホームでレビュー待ち・送信待ち・送信済みの件数を確認できます。一般の先生は自分が担当した記録と通知だけを確認・承認・却下できます。「記録履歴」では、園児・状態・種別・発生日・キーワードで、承認済みや配信済みを含む過去の記録を検索できます。学校管理者は現在の検索条件に合う最大1,000件をCSVで出力できます。CSVには園児名と記録内容を含むため、共有端末や第三者への共有は避けてください。LINE ID、音声、文字起こし、内部IDはCSVに含みません。通知の再送予約、Notionへの記録、Notionページの表示は`school_admin`の先生だけが操作できます。
 
 `AUTH_MODE=development` では、ローカル開発を速く進めるためログインなしで表示します。`AUTH_MODE=supabase` ではメールアドレスとパスワードのログイン画面が表示されます。アクセストークンはブラウザを閉じると消える `sessionStorage` にだけ保存し、パスワードとSupabaseのsecret keyはこの画面やFastAPIに保存しません。
+
+先生用画面は SvelteKit のファイルベースルーティングを使います。レビュー待ち一覧は
+`/teacher/review/`、日誌 1 件は `/teacher/review/{recordId}/` です。深い URL を直接開いた場合も、
+認証・認可後にその日誌を取得します。保護者用画面は `/guardian/#ssa_...` を入口とする
+prerender 済み静的ページです。画面の一覧は [画面遷移図](docs/transition.md)、実装構成は
+[フロントエンド設計](docs/architecture/frontend.md)を参照してください。
+
+### フロントエンド開発
+
+Node.js 24.19.0 を使用します。依存を lockfile どおりに入れ、FastAPI をポート 8000 で起動したうえで、
+別ターミナルから SvelteKit の開発サーバーを起動します。開発サーバーは `/api/v1` を FastAPI へ proxy します。
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+変更時の検証コマンドは次のとおりです。Playwright は初回だけ Chromium の導入が必要です。
+
+```bash
+npm run format
+npm run format:check
+npm run lint
+npm run check
+npm run test:unit
+npm run test:e2e:install
+npm run test:e2e
+npm run build
+```
+
+`npm run build` は `app/frontend_dist/` を生成します。FastAPI から `/teacher/` と `/guardian/` を確認する場合は、
+先にこのビルドを実行してください。Docker では Node の build stage が `npm ci` と検証・ビルドを実行し、
+Python runtime には生成物だけをコピーします。Node.js と `node_modules` は runtime image に含めません。
+配信と本番起動の契約は [デプロイ・運用](docs/architecture/deployment.md) を参照してください。
 
 レビュー時は、配信日時を空欄のまま承認すると既定ルールが使われます。成長記録は園ごとの配信時刻、怪我記録は即時の送信待ちです。必要な場合だけ「配信日時を指定する」を選び、保護者へ送る日時を予約できます。
 
@@ -341,11 +377,13 @@ uvicorn app.main:app --reload
 
 API仕様は起動後に `http://127.0.0.1:8000/docs` で確認できます。
 
-テスト:
+バックエンドのテスト:
 
 ```bash
 pytest
 ```
+
+SvelteKit の開発・テスト・ビルドは「[フロントエンド開発](#フロントエンド開発)」を参照してください。
 
 ## Supabase Authを有効にする
 

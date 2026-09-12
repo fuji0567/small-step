@@ -25,7 +25,7 @@ uvicorn app.main:app --reload                             # http://127.0.0.1:800
 - SQLite なら移行はアプリ起動時に自動適用されるので、事前準備は不要です。
 
 ```bash
-pytest                                                    # 全 51 件・約 20 秒
+pytest                                                    # 2026-09-12 実測: 57 passed, 1 skipped
 pytest tests/test_api.py::test_growth_record_is_reviewed_and_scheduled   # 単体
 pytest -k notion -q                                       # 名前で絞り込み
 ```
@@ -45,6 +45,25 @@ python -m app.mcp_server --streamable-http --port 8002          # MCP（ロー�
 docker compose up -d --build                                        # api のみ
 docker compose -f compose.yaml -f compose.vrt.yaml up -d --build    # migrate + gpu-worker + line-worker
 ```
+
+フロントエンドは Node.js 24.19.0 を使います。FastAPI を起動したうえで、別ターミナルから実行します。
+
+```bash
+cd frontend
+npm ci
+npm run dev                 # /api/v1 を FastAPI へ proxy
+npm run format
+npm run format:check
+npm run lint
+npm run check
+npm run test:unit
+npm run test:e2e:install    # 初回だけ
+npm run test:e2e
+npm run build               # ../app/frontend_dist を生成
+```
+
+日常の開発手順は [README](README.md#フロントエンド開発)、配信条件は
+[デプロイ設計](docs/architecture/deployment.md) を正とします。
 
 音声系の extras（`edge-audio` / `speaker-diarization`）は依存が重いため、
 README では別の venv（`.venv313`）へ入れる運用になっています。
@@ -88,17 +107,22 @@ README では別の venv（`.venv313`）へ入れる運用になっています�
 `scripts/prepare_database.py` を明示実行（Compose の `migrate` サービス）。
 移行ファイルは `migrations/`、Alembic 管理です。SQLite の自動適用は本番では使いません。
 
-### フロントエンドはビルド工程なし
+### フロントエンドは SvelteKit の静的ビルド
 
-`app/web/`（先生用）と `app/guardian/`（保護者用）を `StaticFiles` でマウントするだけの、
-素の HTML/CSS/JS です。Node のツールチェーンは前提にしていません。
+`frontend/` は Svelte 5 runes、TypeScript、SvelteKit で構成し、Node.js 24.19.0 でビルドします。
+`@sveltejs/adapter-static` の生成先は `app/frontend_dist/` です。FastAPI は `/guardian/` の
+prerender 済みページと `/_app/*` を静的配信し、`/teacher/*` だけを `200.html` へ SPA fallback します。
 
-- 先生用は単一ページ内で `hidden` を切り替える SPA。URL ルーティングは持たず、`changeView()` が唯一の遷移点。
-- アイコンは外部フォントを読まず、`replaceIconPlaceholders()` が起動時にインライン SVG へ置換します。
-  **先生用画面は外部ネットワークへ一切リクエストを出しません。**
-- トークンは `sessionStorage`（`small-step.access-token`）にのみ保持します。
+- 先生用は `/teacher/` 以下のファイルベースルーティングを使います。日誌 1 件にも
+  `/teacher/review/{recordId}/` があり、直接表示・再読み込み・Back / Forward を復元します。
+- 保護者用は `/guardian/` の静的ページです。`#ssa_...` はルートではなく資格情報であり、
+  `sessionStorage` へ保存して URL から消してから API を呼びます。
+- API は同一オリジンの `/api/v1` を呼び、認可の本体は引き続き FastAPI です。
+- 先生用のアクセストークンは `sessionStorage`（`small-step.access-token`）にのみ保持します。
+- 外部フォントや CDN は使わず、アイコンはローカル SVG です。先生用画面は外部オリジンへ通信しません。
 
-`app/web/app.js` は 2,918 行の単一ファイルで、分割の分岐点に来ています。
+`app/web/` と `app/guardian/` はロールバック用にファイルを保持していますが、現在の URL にはマウントされません。
+構成とテスト責務の詳細は `docs/architecture/frontend.md` を参照してください。
 
 ### 音声パイプライン
 

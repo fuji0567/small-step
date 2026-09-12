@@ -1,5 +1,13 @@
 # Svelte 移行作業手順書
 
+> **実施状況（2026-09-12）:** `ChangeToSvelte` ブランチで Svelte 5 / SvelteKit の実装と
+> canonical URL への切り替えは完了しています。
+> 本文に残る `/teacher-next/`、`/guardian-next/`、preview の記述は段階移行時の履歴です。現在の URL は
+> `/teacher/*` と `/guardian/` です。未完了なのは実運用環境へのデプロイ確認、実サービスを使う smoke test、
+> ロールバック手順の実地確認と image tag の記録です。ローカル実測は unit 149 件、E2E 7 件、
+> Python 57 件成功・1 件 skip、FastAPI 配信契約 5 件成功です。現行構成は [フロントエンド](architecture/frontend.md)、
+> 現行の画面遷移は [画面遷移図](transition.md) を正とします。
+
 ## 目的
 
 `app/web/`（先生用）と `app/guardian/`（保護者用）を Svelte 5 / SvelteKit へ段階的に移行する。
@@ -538,7 +546,7 @@ refactor(styles): reduce spacing scale to DADS rhythm
 
 ### 6. テストを段階的に置き換える
 
-現在の `tests/test_api.py` は旧 HTML の ID や旧 JavaScript 関数名を文字列で多数検査している。Svelte 化後にそれらを新 bundle の文字列へ置き換えてはならない。責務別に次へ移す。
+移行前の `tests/test_api.py` は旧 HTML の ID や旧 JavaScript 関数名を文字列で多数検査していた。Svelte 化後にそれらを新 bundle の文字列へ置き換えず、責務別に次へ移した。
 
 #### unit / component
 
@@ -606,7 +614,7 @@ docker compose up -d --build
 
 テスト失敗を抱えたまま次のコミットへ進まない。環境要因で実行できないテストは「未実施」としてコマンドと理由を引き渡し報告に残し、成功扱いにしない。
 
-### 7. preview から本番 URL へ切り替える
+### 7. 移行履歴: preview から本番 URL へ切り替える
 
 1. `/teacher-next/` と `/guardian-next/` で受け入れテストを完了する。
 2. route directory と FastAPI の限定 fallback prefix を `/teacher/` と `/guardian/` に変更し、旧 UI の 2 mount を外して Svelte build へ切り替える。
