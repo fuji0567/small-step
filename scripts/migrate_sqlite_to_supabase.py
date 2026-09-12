@@ -55,6 +55,20 @@ def copy_items(source_items: Iterable[object], model: type[object]) -> list[obje
     return [model(**{field: getattr(item, field) for field in fields}) for item in source_items]
 
 
+def copy_application_data(source, target) -> dict[str, int]:
+    """Copy every table and flush each dependency layer before continuing."""
+
+    copied_counts: dict[str, int] = {}
+    for model in MODELS_IN_DEPENDENCY_ORDER:
+        items = source.scalars(select(model)).all()
+        target.add_all(copy_items(items, model))
+        # The models intentionally do not define ORM relationships. Flushing
+        # here guarantees that referenced rows exist before dependent tables.
+        target.flush()
+        copied_counts[model.__tablename__] = len(items)
+    return copied_counts
+
+
 def main() -> None:
     settings = Settings()
     if settings.database_url.startswith("sqlite"):
@@ -75,11 +89,7 @@ def main() -> None:
                     "Supabase側に既存データがあるため中止しました（上書きはしません）。"
                 )
 
-            copied_counts: dict[str, int] = {}
-            for model in MODELS_IN_DEPENDENCY_ORDER:
-                items = source.scalars(select(model)).all()
-                target.add_all(copy_items(items, model))
-                copied_counts[model.__tablename__] = len(items)
+            copied_counts = copy_application_data(source, target)
             target.commit()
 
         print("SQLiteからSupabase PostgreSQLへコピーしました。")
