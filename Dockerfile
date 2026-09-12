@@ -16,6 +16,7 @@ RUN pip install --upgrade pip && pip install .[postgres]
 
 RUN useradd --create-home --uid 10001 appuser \
     && mkdir --parents /app/data \
+    && chmod --recursive a+rX /app \
     && chown appuser:appuser /app/data
 USER appuser
 
