@@ -32,6 +32,9 @@ services:
     gpus: all
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - llm
     volumes:
       - api_data:/app/data
       - cloud_audio_jobs:/var/lib/small-step/cloud-audio-jobs
@@ -56,3 +59,8 @@ services:
 volumes:
   cloud_audio_jobs:
   gpu_model_cache:
+
+networks:
+  llm:
+    name: small-step-ai
+    external: true

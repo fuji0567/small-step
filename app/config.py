@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     speaker_diarization_token: str | None = None
     speaker_diarization_device: str = "cpu"
     speaker_diarization_low_volume_retry: bool = True
+    llm_backend: Literal["ollama", "vllm"] = "ollama"
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None

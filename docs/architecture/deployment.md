@@ -77,11 +77,15 @@ flowchart LR
 
 `GET /api/v1/health` は依存関係を見ない軽量な生存確認です。
 
-### ホスト上の LLM を使う
+APIのホスト側ポートは `127.0.0.1:8000` に限定します。外部端末には直接公開せず、
+本番認証を有効にしたうえでHTTPSのリバースプロキシを唯一の入口にします。
 
-`gpu-worker` は `extra_hosts` に `host.docker.internal:host-gateway` を持ちます。
-VRT ホスト上で動かす Ollama / vLLM をコンテナから参照するための設定です。
-ホスト側は外部公開せず、`127.0.0.1` か Docker の内部ネットワークだけで待ち受けてください。
+### Docker内部ネットワーク上の LLM を使う
+
+`gpu-worker` は外部ネットワーク `small-step-ai` に参加します。VRT上のvLLMコンテナも
+同じネットワークへ参加させ、`LLM_BASE_URL=http://small-step-vllm:8000/v1` で参照します。
+ホスト側の公開は `127.0.0.1:8001:8000` に限定し、LLMをインターネットへ公開しません。
+MacのOllamaを使う場合は、従来どおり `host.docker.internal:host-gateway` も利用できます。
 
 ---
 

@@ -2,7 +2,8 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app
 
 WORKDIR /app
 
@@ -13,7 +14,10 @@ COPY migrations ./migrations
 COPY scripts ./scripts
 RUN pip install --upgrade pip && pip install .[postgres]
 
-RUN useradd --create-home --uid 10001 appuser
+RUN useradd --create-home --uid 10001 appuser \
+    && mkdir --parents /app/data \
+    && chmod --recursive a+rX /app \
+    && chown appuser:appuser /app/data
 USER appuser
 
 EXPOSE 8000
