@@ -1909,6 +1909,8 @@ def approve_record(
     if payload.child_id:
         child = require_active_child_for_school(db, as_id(payload.child_id), record.school_id)
         record.child_id = as_id(payload.child_id)
+    if record.child_id is None:
+        raise HTTPException(status_code=422, detail="A child must be selected before approval")
     if payload.summary is not None:
         record.summary = payload.summary
     if payload.conversation_prompt is not None:
@@ -1916,8 +1918,8 @@ def approve_record(
 
     record.status = RecordStatus.approved
     record.reviewed_at = utc_now()
-    child = db.get(Child, record.child_id) if record.child_id else None
-    if child is not None and not child.is_active:
+    child = require_entity(db, Child, record.child_id, "Child")
+    if not child.is_active:
         raise HTTPException(status_code=409, detail="Child is archived")
     if payload.scheduled_for:
         scheduled_for = payload.scheduled_for
@@ -1928,13 +1930,13 @@ def approve_record(
         school = require_entity(db, School, record.school_id, "School")
         scheduled_for = get_next_digest_time(utc_now(), school.timezone or settings.timezone, school.digest_time)
 
-    recipient_line_user_id = child.guardian_line_user_id if child else None
+    recipient_line_user_id = child.guardian_line_user_id
     notification = Notification(
         record_id=record.id,
         recipient_line_user_id=recipient_line_user_id,
         status=(
             NotificationStatus.pending
-            if recipient_line_user_id or child is None
+            if recipient_line_user_id
             else NotificationStatus.waiting_guardian_link
         ),
         scheduled_for=scheduled_for,

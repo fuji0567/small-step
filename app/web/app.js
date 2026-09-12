@@ -2409,6 +2409,12 @@ async function submitReview(action) {
   const record = selectedRecord();
   if (!record) return;
   const actionLabel = action === "approve" ? "承認" : "却下";
+  const childId = action === "approve" ? elements.childSelect.value : "";
+  if (action === "approve" && !childId) {
+    setNotice("園児を選択してから承認してください。", true);
+    elements.childSelect.focus();
+    return;
+  }
   let scheduledFor = null;
   if (action === "approve" && elements.scheduledForEnabled.checked) {
     const value = elements.scheduledForInput.value;
@@ -2436,10 +2442,11 @@ async function submitReview(action) {
   elements.rejectButton.disabled = true;
   try {
     if (action === "approve") {
-      const payload = { summary: elements.summaryInput.value.trim() };
-      const childId = elements.childSelect.value;
+      const payload = {
+        child_id: childId,
+        summary: elements.summaryInput.value.trim(),
+      };
       const prompt = elements.promptInput.value.trim();
-      if (childId) payload.child_id = childId;
       if (prompt) payload.conversation_prompt = prompt;
       if (scheduledFor) payload.scheduled_for = scheduledFor;
       await api(`/records/${record.id}/approve`, {

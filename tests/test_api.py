@@ -925,6 +925,54 @@ def test_growth_record_is_reviewed_and_scheduled(tmp_path):
         assert len(ready.json()) == 1
 
 
+def test_record_cannot_be_approved_without_child(tmp_path):
+    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/test.db", auth_mode="development"))
+    with TestClient(app) as client:
+        school_id = client.post("/api/v1/schools", json={"name": "園児選択確認園"}).json()["id"]
+        teacher_id = client.post(
+            "/api/v1/teachers",
+            json={"school_id": school_id, "name": "確認先生", "email": "review@example.com"},
+        ).json()["id"]
+        record = client.post(
+            "/api/v1/records",
+            json={
+                "school_id": school_id,
+                "teacher_id": teacher_id,
+                "category": "growth",
+                "confidence": 0.9,
+                "occurred_at": datetime.now(timezone.utc).isoformat(),
+                "summary": "自分から遊びに挑戦しました。",
+            },
+        )
+        assert record.status_code == 201
+
+        approved = client.post(f"/api/v1/records/{record.json()['id']}/approve", json={})
+
+        assert approved.status_code == 422
+        assert approved.json()["detail"] == "A child must be selected before approval"
+        pending_record = client.get(
+            "/api/v1/records",
+            params={"school_id": school_id, "record_status": "pending_review"},
+        )
+        assert [item["id"] for item in pending_record.json()] == [record.json()["id"]]
+        assert client.get("/api/v1/notifications", params={"school_id": school_id}).json() == []
+
+        child_id = client.post(
+            "/api/v1/children",
+            json={"school_id": school_id, "display_name": "選択した園児"},
+        ).json()["id"]
+        approved_with_child = client.post(
+            f"/api/v1/records/{record.json()['id']}/approve",
+            json={"child_id": child_id},
+        )
+
+        assert approved_with_child.status_code == 200
+        assert approved_with_child.json()["child_id"] == child_id
+        notifications = client.get("/api/v1/notifications", params={"school_id": school_id}).json()
+        assert len(notifications) == 1
+        assert notifications[0]["status"] == "waiting_guardian_link"
+
+
 def test_school_digest_time_only_changes_future_growth_record_notifications(tmp_path):
     app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/test.db", auth_mode="development"))
     with TestClient(app) as client:
@@ -1035,11 +1083,20 @@ def test_injury_is_immediately_queued_after_approval(tmp_path):
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "佐藤先生", "email": "sato@example.com"},
         ).json()["id"]
+        child_id = client.post(
+            "/api/v1/children",
+            json={
+                "school_id": school_id,
+                "display_name": "けが記録確認園児",
+                "guardian_line_user_id": "U-injury-parent",
+            },
+        ).json()["id"]
         record = client.post(
             "/api/v1/records",
             json={
                 "school_id": school_id,
                 "teacher_id": teacher_id,
+                "child_id": child_id,
                 "category": "injury",
                 "confidence": 0.88,
                 "occurred_at": datetime.now(timezone.utc).isoformat(),
