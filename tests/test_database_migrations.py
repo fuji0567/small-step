@@ -1,7 +1,19 @@
+from alembic.script import ScriptDirectory
 from sqlalchemy import inspect
 
 from app.database import create_database_engine, initialise_database
-from app.database_migrations import migration_revision, prepare_database, upgrade_database
+from app.database_migrations import (
+    build_alembic_config,
+    migration_revision,
+    prepare_database,
+    upgrade_database,
+)
+
+
+def test_revision_identifiers_fit_the_postgresql_version_column():
+    script = ScriptDirectory.from_config(build_alembic_config("sqlite://"))
+
+    assert all(len(revision.revision) <= 128 for revision in script.walk_revisions())
 
 
 def test_initial_migration_creates_the_current_schema(tmp_path):
