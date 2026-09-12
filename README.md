@@ -514,6 +514,8 @@ docker compose run --rm api python scripts/send_pending_line_notifications.py --
 
 FreeプランでローカルPCやIPv4のサーバーから接続するときは、Supabase Dashboard の **Connect → Direct → Session pooler** を選びます。表示された URI はチャットに貼り付けず、ローカルで次を実行してください。
 
+Small StepはSupabaseのData APIから業務テーブルを直接操作しません。PostgreSQL向けの移行では、`public`スキーマの業務テーブルでRLSを有効化し、ブラウザ用の`anon`・`authenticated`ロールから直接操作権限を外します。先生Web画面はSupabase Authでログインし、業務データは認証済みのFastAPIだけを経由します。
+
 ```bash
 .venv/bin/python -m pip install "psycopg[binary]>=3.2.0"
 .venv/bin/python scripts/configure_supabase_database.py
