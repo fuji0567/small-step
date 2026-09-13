@@ -1,6 +1,8 @@
 export * from './auth';
 export * from './context';
 export * from './navigation';
+export * from './navigation-badges';
+export * from './navigation-badges.svelte';
 export * from './teacher-shell.svelte';
 export type * from './types';
 export { default as BootstrapPanel } from './BootstrapPanel.svelte';

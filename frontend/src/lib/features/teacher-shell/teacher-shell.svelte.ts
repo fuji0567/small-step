@@ -8,6 +8,7 @@ import {
 } from '$lib/state';
 
 import { signInWithSupabasePassword } from './auth';
+import { NavigationBadgeState } from './navigation-badges.svelte';
 import type {
   AuthClientConfig,
   TeacherProfile,
@@ -15,9 +16,40 @@ import type {
   TeacherShellSnapshot
 } from './types';
 
+const NAVIGATION_BADGE_REFRESH_SCOPES = new Set<InvalidationScope>([
+  'records',
+  'notifications',
+  'audioJobs',
+  'children',
+  'invitations',
+  'runtimeReadiness'
+]);
+
+class TeacherShellController extends AppController {
+  readonly #refreshNavigationBadges: () => Promise<void>;
+
+  constructor(refreshNavigationBadges: () => Promise<void>) {
+    super();
+    this.#refreshNavigationBadges = refreshNavigationBadges;
+  }
+
+  override async refresh(scopes: Iterable<InvalidationScope>): Promise<void> {
+    const requestedScopes = [...scopes];
+    await super.refresh(requestedScopes);
+    if (
+      requestedScopes.some((scope) =>
+        NAVIGATION_BADGE_REFRESH_SCOPES.has(scope)
+      )
+    ) {
+      await this.#refreshNavigationBadges();
+    }
+  }
+}
+
 export class TeacherShellState {
   readonly schools = new SchoolContext();
-  readonly controller = new AppController();
+  readonly navigationBadges: NavigationBadgeState;
+  readonly controller: AppController;
   #phase = $state<TeacherShellPhase>('initializing');
   #config = $state<AuthClientConfig | null>(null);
   #teacher = $state<TeacherProfile | null>(null);
@@ -34,6 +66,11 @@ export class TeacherShellState {
       accessToken: () => this.#accessToken,
       fetch: fetchFn
     });
+    this.navigationBadges = new NavigationBadgeState(this.api);
+    this.controller = new TeacherShellController(() =>
+      this.#refreshNavigationBadges()
+    );
+    this.schools.onSchoolChangeReset(() => this.navigationBadges.reset());
   }
 
   get phase(): TeacherShellPhase {
@@ -220,6 +257,11 @@ export class TeacherShellState {
     this.#bootstrapSchools = [];
     this.schools.setSchools([]);
     this.schools.selectSchool(null);
+  }
+
+  async #refreshNavigationBadges(): Promise<void> {
+    if (this.#phase !== 'ready' || !this.schools.schoolId) return;
+    await this.navigationBadges.refresh(this.schools.schoolId);
   }
 
   async #requireJson<T>(

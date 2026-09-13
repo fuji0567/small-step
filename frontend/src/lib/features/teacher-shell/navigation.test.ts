@@ -8,6 +8,7 @@ import {
   teacherNavItems,
   teacherPageTitle
 } from './navigation';
+import type { NavigationBadgeCounts } from './navigation-badges';
 
 describe('teacher shell navigation', () => {
   it('管理者専用routeだけを識別する', () => {
@@ -45,5 +46,73 @@ describe('teacher shell navigation', () => {
       'aria-current',
       'page'
     );
+  });
+
+  it('ナビ該当項目へ通常・注意バッジを渡す', () => {
+    const counts: NavigationBadgeCounts = {
+      pending_review_records: 3,
+      notification_attention: 4,
+      failed_audio_jobs: 2,
+      invitations_not_issued: 1,
+      readiness_issues: 5
+    };
+    const items = teacherNavItems(true, counts);
+    const byHref = new Map(items.map((item) => [item.href, item]));
+
+    expect(byHref.get('/teacher/review/')?.badge).toBe('3件');
+    expect(byHref.get('/teacher/review/')?.badgeTone).toBe('default');
+    expect(byHref.get('/teacher/review/')?.badgeAriaLabel).toBe(
+      'レビュー待ち3件'
+    );
+    expect(byHref.get('/teacher/notifications/')?.badge).toBe('!4件');
+    expect(byHref.get('/teacher/notifications/')?.badgeTone).toBe('warning');
+    expect(byHref.get('/teacher/audio-jobs/')?.badge).toBe('!2件');
+    expect(byHref.get('/teacher/children/')?.badge).toBe('1件');
+    expect(byHref.get('/teacher/readiness/')?.badge).toBe('!5項目');
+  });
+
+  it('ゼロは非表示、100以上は99+表示でaria-labelに正確な件数を残す', () => {
+    const counts: NavigationBadgeCounts = {
+      pending_review_records: 0,
+      notification_attention: 100,
+      failed_audio_jobs: 123,
+      invitations_not_issued: 0,
+      readiness_issues: 100
+    };
+    const byHref = new Map(
+      teacherNavItems(true, counts).map((item) => [item.href, item])
+    );
+
+    expect(byHref.get('/teacher/review/')?.badge).toBeUndefined();
+    expect(byHref.get('/teacher/children/')?.badge).toBeUndefined();
+    expect(byHref.get('/teacher/notifications/')?.badge).toBe('!99+');
+    expect(byHref.get('/teacher/notifications/')).toMatchObject({
+      badgeAriaLabel: '通知状況の要確認100件'
+    });
+    expect(byHref.get('/teacher/audio-jobs/')).toMatchObject({
+      badge: '!99+',
+      badgeAriaLabel: '音声処理の失敗123件'
+    });
+    expect(byHref.get('/teacher/readiness/')).toMatchObject({
+      badge: '!99+',
+      badgeAriaLabel: '稼働準備で確認が必要な項目100項目'
+    });
+  });
+
+  it('一般の先生には管理者用バッジを渡さない', () => {
+    const counts: NavigationBadgeCounts = {
+      pending_review_records: 1,
+      notification_attention: 1,
+      failed_audio_jobs: 1,
+      invitations_not_issued: 9,
+      readiness_issues: 9
+    };
+    const byHref = new Map(
+      teacherNavItems(false, counts).map((item) => [item.href, item])
+    );
+
+    expect(byHref.get('/teacher/children/')?.badge).toBeUndefined();
+    expect(byHref.get('/teacher/children/')?.badgeTone).toBeUndefined();
+    expect(byHref.has('/teacher/readiness/')).toBe(false);
   });
 });

@@ -24,9 +24,12 @@
 
   let session = $state<ReturnType<typeof initializeTeacherSession>>(null);
   let redirectedFromAdmin = $state(false);
+  let previousPath: string | null = null;
   const currentPath = $derived(page.url.pathname);
   const title = $derived(teacherPageTitle(currentPath));
-  const navItems = $derived(teacherNavItems(shell.isSchoolAdmin));
+  const navItems = $derived(
+    teacherNavItems(shell.isSchoolAdmin, shell.navigationBadges.counts)
+  );
   const adminRouteDenied = $derived(
     shell.phase === 'ready' &&
       !canAccessTeacherRoute(currentPath, shell.isSchoolAdmin)
@@ -43,7 +46,28 @@
     void goto(resolve('/teacher/'), { replaceState: true });
   });
 
+  $effect(() => {
+    const currentPhase = shell.phase;
+    const currentSchoolId = shell.schools.schoolId;
+    const currentRole = shell.isSchoolAdmin;
+    void currentRole;
+    if (currentPhase !== 'ready' || !currentSchoolId) {
+      shell.navigationBadges.reset();
+      return;
+    }
+
+    const request = new AbortController();
+    void shell.navigationBadges.load(currentSchoolId, request.signal);
+    return () => request.abort();
+  });
+
   afterNavigate(() => {
+    const navigatedPath = page.url.pathname;
+    const pathChanged = previousPath !== null && previousPath !== navigatedPath;
+    previousPath = navigatedPath;
+    if (pathChanged && shell.phase === 'ready' && shell.schools.schoolId) {
+      void shell.navigationBadges.refresh(shell.schools.schoolId);
+    }
     globalThis.requestAnimationFrame(() => {
       document.querySelector<HTMLElement>('#main-content')?.focus();
     });
