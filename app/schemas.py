@@ -84,6 +84,16 @@ class RuntimeReadinessRead(BaseModel):
     line_delivery_configured: bool
 
 
+class NavigationBadgeSummaryRead(BaseModel):
+    """Authorised, count-only summary for the teacher navigation badges."""
+
+    pending_review_records: int = Field(ge=0)
+    notification_attention: int = Field(ge=0)
+    failed_audio_jobs: int = Field(ge=0)
+    invitations_not_issued: int = Field(ge=0)
+    readiness_issues: int = Field(ge=0)
+
+
 class AuthBootstrapTeacherCreate(BaseModel):
     school_id: UUID
     name: str = Field(min_length=1, max_length=120)

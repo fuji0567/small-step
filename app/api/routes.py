@@ -8,7 +8,7 @@ import httpx
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, text, update
+from sqlalchemy import exists, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -72,6 +72,7 @@ from app.schemas import (
     LineLinkInvitationCredential,
     LineLinkInvitationRead,
     ManualRecordCreate,
+    NavigationBadgeSummaryRead,
     NotificationOverviewRead,
     NotificationRead,
     NotificationReschedule,
@@ -364,6 +365,49 @@ def cloud_audio_storage(request: Request) -> CloudAudioJobStorage:
     )
 
 
+def runtime_readiness_summary(request: Request, db: Session) -> RuntimeReadinessRead:
+    """Compute the public readiness flags shared by health and navigation APIs."""
+
+    settings = request.app.state.settings
+    database_ready = False
+    database_migration_current = False
+    try:
+        db.execute(text("SELECT 1"))
+        database_ready = True
+        database_migration_current = migration_revision(settings.database_url) == latest_migration_revision()
+    except Exception:
+        # Do not disclose database connection or migration errors publicly.
+        database_ready = False
+        database_migration_current = False
+
+    cloud_audio_job_storage_ready: bool | None = None
+    cloud_audio_llm_configured: bool | None = None
+    if settings.cloud_audio_enabled:
+        cloud_audio_llm_configured = bool(settings.llm_base_url and settings.llm_model)
+        try:
+            cloud_audio_storage(request).ensure_directory()
+            cloud_audio_job_storage_ready = True
+        except (CloudAudioStorageError, OSError):
+            cloud_audio_job_storage_ready = False
+
+    return RuntimeReadinessRead(
+        status="ready"
+        if database_ready
+        and database_migration_current
+        and (
+            not settings.cloud_audio_enabled
+            or (cloud_audio_job_storage_ready is True and cloud_audio_llm_configured is True)
+        )
+        else "not_ready",
+        database_ready=database_ready,
+        database_migration_current=database_migration_current,
+        cloud_audio_enabled=settings.cloud_audio_enabled,
+        cloud_audio_job_storage_ready=cloud_audio_job_storage_ready,
+        cloud_audio_llm_configured=cloud_audio_llm_configured,
+        line_delivery_configured=bool(settings.line_channel_secret and settings.line_channel_access_token),
+    )
+
+
 def voice_consent_is_active(consent: VoiceEnrollmentConsent, now: datetime | None = None) -> bool:
     if consent.revoked_at is not None:
         return False
@@ -411,47 +455,101 @@ def readiness_check(request: Request, db: Session = Depends(get_db)) -> RuntimeR
     model names, uploaded-audio paths, or other private settings.
     """
 
-    settings = request.app.state.settings
-    database_ready = False
-    database_migration_current = False
-    try:
-        db.execute(text("SELECT 1"))
-        database_ready = True
-        database_migration_current = migration_revision(settings.database_url) == latest_migration_revision()
-    except Exception:
-        # Do not disclose database connection or migration errors publicly.
-        database_ready = False
-        database_migration_current = False
-
-    cloud_audio_job_storage_ready: bool | None = None
-    cloud_audio_llm_configured: bool | None = None
-    if settings.cloud_audio_enabled:
-        cloud_audio_llm_configured = bool(settings.llm_base_url and settings.llm_model)
-        try:
-            cloud_audio_storage(request).ensure_directory()
-            cloud_audio_job_storage_ready = True
-        except (CloudAudioStorageError, OSError):
-            cloud_audio_job_storage_ready = False
-
-    result = RuntimeReadinessRead(
-        status="ready"
-        if database_ready
-        and database_migration_current
-        and (
-            not settings.cloud_audio_enabled
-            or (cloud_audio_job_storage_ready is True and cloud_audio_llm_configured is True)
-        )
-        else "not_ready",
-        database_ready=database_ready,
-        database_migration_current=database_migration_current,
-        cloud_audio_enabled=settings.cloud_audio_enabled,
-        cloud_audio_job_storage_ready=cloud_audio_job_storage_ready,
-        cloud_audio_llm_configured=cloud_audio_llm_configured,
-        line_delivery_configured=bool(settings.line_channel_secret and settings.line_channel_access_token),
-    )
+    result = runtime_readiness_summary(request, db)
     if result.status == "ready":
         return result
     return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content=result.model_dump(mode="json"))
+
+
+@router.get("/navigation-badges", response_model=NavigationBadgeSummaryRead, tags=["system"])
+def navigation_badge_summary(
+    school_id: str,
+    request: Request,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> NavigationBadgeSummaryRead:
+    """Return count-only navigation indicators within the caller's school scope."""
+
+    assert_school_access(current_teacher, school_id)
+
+    pending_review_query = filtered_records_query(
+        db=db,
+        school_id=school_id,
+        record_status=RecordStatus.pending_review,
+        category=None,
+        child_id=None,
+        search=None,
+        occurred_from=None,
+        occurred_to=None,
+        current_teacher=current_teacher,
+    )
+    pending_review_records = db.scalar(
+        select(func.count()).select_from(pending_review_query.subquery())
+    ) or 0
+
+    notification_query = (
+        select(func.count(Notification.id))
+        .join(Record, Notification.record_id == Record.id)
+        .where(Record.school_id == school_id)
+        .where(
+            Notification.status.in_(
+                [NotificationStatus.failed, NotificationStatus.waiting_guardian_link]
+            )
+        )
+    )
+    if not current_teacher.is_development and not current_teacher.is_school_admin:
+        notification_query = notification_query.where(Record.teacher_id == current_teacher.teacher.id)
+    notification_attention = db.scalar(notification_query) or 0
+
+    audio_query = (
+        select(func.count(CloudAudioJob.id))
+        .where(CloudAudioJob.school_id == school_id)
+        .where(CloudAudioJob.status == CloudAudioJobStatus.failed)
+    )
+    if not current_teacher.is_development and not current_teacher.is_school_admin:
+        audio_query = audio_query.where(CloudAudioJob.teacher_id == current_teacher.teacher.id)
+    failed_audio_jobs = db.scalar(audio_query) or 0
+
+    invitations_not_issued = 0
+    readiness_issues = 0
+    if current_teacher.is_school_admin:
+        now = utc_now()
+        active_invitation = exists().where(
+            LineLinkInvitation.child_id == Child.id,
+            LineLinkInvitation.used_at.is_(None),
+            LineLinkInvitation.revoked_at.is_(None),
+            LineLinkInvitation.expires_at > now,
+        )
+        invitations_not_issued = db.scalar(
+            select(func.count(Child.id))
+            .where(Child.school_id == school_id)
+            .where(Child.is_active.is_(True))
+            .where(Child.guardian_line_user_id.is_(None))
+            .where(~active_invitation)
+        ) or 0
+
+        readiness = runtime_readiness_summary(request, db)
+        readiness_checks = [
+            readiness.database_ready,
+            readiness.database_migration_current,
+            readiness.line_delivery_configured,
+        ]
+        if readiness.cloud_audio_enabled:
+            readiness_checks.extend(
+                [
+                    readiness.cloud_audio_job_storage_ready is True,
+                    readiness.cloud_audio_llm_configured is True,
+                ]
+            )
+        readiness_issues = sum(not check for check in readiness_checks)
+
+    return NavigationBadgeSummaryRead(
+        pending_review_records=pending_review_records,
+        notification_attention=notification_attention,
+        failed_audio_jobs=failed_audio_jobs,
+        invitations_not_issued=invitations_not_issued,
+        readiness_issues=readiness_issues,
+    )
 
 
 @router.post("/line/webhook", tags=["line"])
