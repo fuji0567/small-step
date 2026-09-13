@@ -64,6 +64,26 @@ class Settings(BaseSettings):
     guardian_archive_enabled: bool = False
     guardian_archive_base_url: str = "http://127.0.0.1:8000"
     guardian_archive_link_ttl_hours: int = Field(default=168, ge=1, le=720)
+    operations_monitor_enabled: bool = False
+    operations_alert_line_user_id: str | None = None
+    operations_monitor_poll_seconds: float = Field(default=60.0, ge=10.0, le=3_600.0)
+    operations_alert_after_seconds: float = Field(default=180.0, ge=30.0, le=86_400.0)
+    operations_alert_repeat_seconds: float = Field(default=21_600.0, ge=300.0, le=604_800.0)
+    operations_check_timeout_seconds: float = Field(default=10.0, ge=1.0, le=60.0)
+    operations_api_readiness_url: str = "http://127.0.0.1:8000/api/v1/readiness"
+    operations_vllm_health_url: str = "http://127.0.0.1:8001/health"
+    operations_backup_dir: str = "./data/database-backups"
+    operations_backup_max_age_hours: float = Field(default=26.0, ge=1.0, le=720.0)
+    operations_min_disk_free_gb: float = Field(default=10.0, ge=1.0)
+    operations_disk_paths: str = "./data"
+    operations_monitor_state_path: str = "./data/operations-monitor-state.json"
+    database_backup_dir: str = "./data/database-backups"
+    database_backup_time: str = Field(
+        default="03:00",
+        pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$",
+    )
+    database_backup_worker_poll_seconds: float = Field(default=300.0, ge=30.0, le=3_600.0)
+    database_backup_retention_count: int = Field(default=0, ge=0, le=365)
 
     @model_validator(mode="after")
     def reject_unsafe_production_configuration(self) -> "Settings":

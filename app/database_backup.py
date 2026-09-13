@@ -14,8 +14,9 @@ import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.engine import URL, make_url
 
@@ -197,6 +198,24 @@ def checksum_path(archive_path: Path) -> Path:
     return Path(f"{archive_path}.sha256")
 
 
+def backup_checksum_is_valid(archive_path: Path) -> bool:
+    """Validate one archive/checksum pair without invoking PostgreSQL tools."""
+
+    if archive_path.is_symlink() or not archive_path.is_file():
+        return False
+    digest_path = checksum_path(archive_path)
+    if digest_path.is_symlink() or not digest_path.is_file():
+        return False
+    try:
+        parts = digest_path.read_text(encoding="ascii").strip().split(maxsplit=1)
+        if len(parts) != 2 or parts[1] != archive_path.name or len(parts[0]) != 64:
+            return False
+        actual_digest = _sha256(archive_path)
+    except (OSError, UnicodeError):
+        return False
+    return hmac.compare_digest(parts[0], actual_digest)
+
+
 def _assert_core_tables(table_names: frozenset[str]) -> None:
     missing = sorted(CORE_APPLICATION_TABLES - table_names)
     if missing:
@@ -303,6 +322,71 @@ def latest_database_backup(output_dir: Path) -> Path:
     if not backups:
         raise DatabaseBackupError("確認できるデータベースバックアップがありません。")
     return backups[-1]
+
+
+def scheduled_backup_due(
+    output_dir: Path,
+    *,
+    backup_time: str,
+    timezone_name: str,
+    now: datetime | None = None,
+) -> bool:
+    """Return whether the latest scheduled daily backup is still missing."""
+
+    try:
+        hour, minute = (int(part) for part in backup_time.split(":"))
+        if hour not in range(24) or minute not in range(60):
+            raise ValueError
+        local_timezone = ZoneInfo(timezone_name)
+    except (TypeError, ValueError, ZoneInfoNotFoundError) as error:
+        raise DatabaseBackupError("バックアップ時刻またはタイムゾーンが正しくありません。") from error
+
+    current_time = now or datetime.now(timezone.utc)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=timezone.utc)
+    local_now = current_time.astimezone(local_timezone)
+    latest_schedule = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if local_now < latest_schedule:
+        latest_schedule -= timedelta(days=1)
+
+    try:
+        latest_archive = latest_database_backup(output_dir)
+        if not backup_checksum_is_valid(latest_archive):
+            return True
+        modified_at = datetime.fromtimestamp(latest_archive.stat().st_mtime, tz=timezone.utc)
+    except (DatabaseBackupError, OSError):
+        return True
+    return modified_at < latest_schedule.astimezone(timezone.utc)
+
+
+def prune_database_backup_generations(
+    output_dir: Path,
+    *,
+    retention_count: int,
+) -> tuple[Path, ...]:
+    """Remove complete archive/checksum pairs beyond an explicit local limit."""
+
+    if retention_count < 0:
+        raise DatabaseBackupError("バックアップ保持世代数は0以上にしてください。")
+    if retention_count == 0:
+        return ()
+
+    archives = sorted(
+        archive
+        for archive in output_dir.glob("small-step-public-*.dump")
+        if archive.is_file()
+        and not archive.is_symlink()
+        and checksum_path(archive).is_file()
+        and not checksum_path(archive).is_symlink()
+    )
+    candidates = archives[:-retention_count]
+    removed: list[Path] = []
+    for archive in candidates:
+        digest_path = checksum_path(archive)
+        archive.unlink()
+        digest_path.unlink()
+        removed.append(archive)
+    return tuple(removed)
 
 
 def _query_integer(

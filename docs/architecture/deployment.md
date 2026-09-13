@@ -166,8 +166,16 @@ SQLite の移行は起動時に自動適用されるため、事前準備は不�
 | `process_cloud_audio_jobs.py` | GPU ワーカー（Compose の `gpu-worker`） |
 | `watch_edge_audio.py` | エッジ音声インボックスの監視（園内で常駐） |
 | `record_edge_audio.py` | マイクからの連続録音（園内で常駐） |
+| `monitor_operations.py --watch` | VRT内の障害監視と運用責任者へのLINE通知 |
+| `schedule_database_backups.py --watch` | 検証済みPostgreSQLバックアップの日次作成 |
 
 残りは一度きりの管理コマンドです。
+
+`operations-monitor`は`monitoring`プロファイルで明示的に起動します。API停止中にも検知できるよう
+`depends_on`を持たず、Dockerソケットにもアクセスしません。APIの秘密情報を返さないreadiness、vLLMの
+health、バックアップのSHA-256、マウント済み領域の空き容量だけを確認します。監視状態には問題コード、
+時刻、LINEの再試行キーだけを専用ボリュームへ保存し、園児・音声・通知本文・接続先は含めません。
+バックアップを読める権限は持ちますが、業務DB、Supabase、話者分離の認証情報は渡しません。
 
 ---
 
@@ -183,5 +191,6 @@ SQLite の移行は起動時に自動適用されるため、事前準備は不�
 6. LINE のチャネル設定と Webhook URL を登録する
 7. `check_runtime_readiness.py` で不足している設定を確認する
 8. 画面の「稼働準備チェック」がすべて緑になったら運用開始
+9. `backup-worker`と`operations-monitor`を各プロファイルで起動する
 
 手順の詳細は `README.md` に記載しています。

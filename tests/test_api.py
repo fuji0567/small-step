@@ -2239,6 +2239,28 @@ def test_line_push_uses_a_bearer_token_and_notification_retry_key(monkeypatch):
     }
 
 
+def test_line_push_treats_an_already_accepted_retry_as_success(monkeypatch):
+    def fake_post(*_args, **_kwargs):
+        return httpx.Response(
+            409,
+            headers={"x-line-accepted-request-id": "line-request-already-accepted"},
+            json={"message": "The retry key is already accepted"},
+        )
+
+    monkeypatch.setattr("app.line.httpx.post", fake_post)
+    from app.line import push_text_message
+
+    request_id = push_text_message(
+        channel_access_token="test-access-token",
+        recipient_line_user_id="U-operator",
+        text="運用警告",
+        retry_key="53d268f1-ae35-4ebd-8793-d87d84556361",
+        timeout_seconds=3,
+    )
+
+    assert request_id == "line-request-already-accepted"
+
+
 def test_line_link_invitation_binds_a_guardian_without_storing_message_text(tmp_path):
     secret = "line-channel-secret"
     app = create_app(

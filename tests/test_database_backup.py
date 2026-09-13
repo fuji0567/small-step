@@ -1,6 +1,7 @@
 import hashlib
+import os
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -9,10 +10,13 @@ from app.database_backup import (
     CORE_APPLICATION_TABLES,
     DatabaseBackupError,
     archive_table_names,
+    backup_checksum_is_valid,
     checksum_path,
     create_database_backup,
     postgres_environment,
+    prune_database_backup_generations,
     rehearse_database_restore,
+    scheduled_backup_due,
     verify_database_backup,
 )
 
@@ -109,8 +113,97 @@ def test_verify_database_backup_rejects_modified_archive(tmp_path):
     )
     archive.write_bytes(b"after")
 
+    assert backup_checksum_is_valid(archive) is False
     with pytest.raises(DatabaseBackupError, match="一致しません"):
         verify_database_backup(archive)
+
+
+def test_daily_backup_is_due_only_after_the_local_schedule(tmp_path):
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    archive = backup_dir / "small-step-public-20260913T080000000000Z.dump"
+    archive.write_bytes(b"backup")
+    checksum_path(archive).write_text(
+        f"{hashlib.sha256(b'backup').hexdigest()}  {archive.name}\n",
+        encoding="ascii",
+    )
+    last_backup = datetime(2026, 9, 13, 8, 0, tzinfo=timezone.utc)
+    os.utime(archive, (last_backup.timestamp(), last_backup.timestamp()))
+
+    assert scheduled_backup_due(
+        backup_dir,
+        backup_time="03:00",
+        timezone_name="Asia/Tokyo",
+        now=datetime(2026, 9, 14, 2, 59, tzinfo=timezone(timedelta(hours=9))),
+    ) is False
+    assert scheduled_backup_due(
+        backup_dir,
+        backup_time="03:00",
+        timezone_name="Asia/Tokyo",
+        now=datetime(2026, 9, 14, 3, 1, tzinfo=timezone(timedelta(hours=9))),
+    ) is True
+
+
+def test_daily_backup_is_due_immediately_when_no_backup_exists(tmp_path):
+    assert scheduled_backup_due(
+        tmp_path / "missing",
+        backup_time="03:00",
+        timezone_name="Asia/Tokyo",
+        now=datetime(2026, 9, 14, tzinfo=timezone.utc),
+    ) is True
+
+
+def test_daily_backup_is_due_when_latest_archive_has_no_checksum(tmp_path):
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    archive = backup_dir / "small-step-public-20260914T020000000000Z.dump"
+    archive.write_bytes(b"incomplete")
+
+    assert scheduled_backup_due(
+        backup_dir,
+        backup_time="03:00",
+        timezone_name="Asia/Tokyo",
+        now=datetime(2026, 9, 14, 4, 0, tzinfo=timezone(timedelta(hours=9))),
+    ) is True
+
+
+def test_daily_backup_is_due_when_latest_archive_checksum_is_invalid(tmp_path):
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    archive = backup_dir / "small-step-public-20260914T020000000000Z.dump"
+    archive.write_bytes(b"modified")
+    checksum_path(archive).write_text(
+        f"{hashlib.sha256(b'original').hexdigest()}  {archive.name}\n",
+        encoding="ascii",
+    )
+
+    assert scheduled_backup_due(
+        backup_dir,
+        backup_time="03:00",
+        timezone_name="Asia/Tokyo",
+        now=datetime(2026, 9, 14, 4, 0, tzinfo=timezone(timedelta(hours=9))),
+    ) is True
+
+
+def test_backup_retention_is_disabled_by_default_and_removes_complete_pairs(tmp_path):
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    archives = []
+    for index in range(4):
+        archive = backup_dir / f"small-step-public-2026091{index}T030000000000Z.dump"
+        archive.write_bytes(f"backup-{index}".encode())
+        checksum_path(archive).write_text("checksum\n", encoding="ascii")
+        archives.append(archive)
+
+    assert prune_database_backup_generations(backup_dir, retention_count=0) == ()
+    assert all(archive.exists() for archive in archives)
+
+    removed = prune_database_backup_generations(backup_dir, retention_count=2)
+
+    assert removed == tuple(archives[:2])
+    assert all(not archive.exists() for archive in archives[:2])
+    assert all(not checksum_path(archive).exists() for archive in archives[:2])
+    assert all(archive.exists() for archive in archives[2:])
 
 
 def test_dump_client_must_not_be_older_than_server(tmp_path):

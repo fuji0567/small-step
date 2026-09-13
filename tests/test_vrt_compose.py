@@ -54,3 +54,40 @@ def test_database_backup_tools_are_one_shot_and_restore_database_is_disposable()
     assert "/var/lib/postgresql/data" in restore_db
     assert "database-recovery" in restore_db
     assert 'restart: "no"' in restore_db
+
+
+def test_operations_monitor_is_separate_private_and_restartable():
+    compose = VRT_COMPOSE.read_text(encoding="utf-8")
+    monitor = compose.split("  operations-monitor:", maxsplit=1)[1].split(
+        "  backup-worker:", maxsplit=1
+    )[0]
+
+    assert "monitoring" in monitor
+    assert "scripts/monitor_operations.py" in monitor
+    assert "http://api:8000/api/v1/readiness" in monitor
+    assert "http://small-step-vllm:8000/health" in monitor
+    assert ":/backups:ro" in monitor
+    assert 'user: "0:0"' in monitor
+    assert "operations_monitor_data:/app/data" in monitor
+    assert "no-new-privileges:true" in monitor
+    assert "docker.sock" not in monitor
+    assert "DATABASE_URL" not in monitor
+    assert "SUPABASE" not in monitor
+    assert "SPEAKER_DIARIZATION_TOKEN" not in monitor
+    assert "depends_on:" not in monitor
+    assert "restart: unless-stopped" in monitor
+
+
+def test_backup_worker_is_scheduled_hardened_and_uses_the_private_backup_mount():
+    compose = VRT_COMPOSE.read_text(encoding="utf-8")
+    backup_worker = compose.split("  backup-worker:", maxsplit=1)[1].split(
+        "  database-tools:", maxsplit=1
+    )[0]
+
+    assert "backup" in backup_worker
+    assert "Dockerfile.database-tools" in backup_worker
+    assert "scripts/schedule_database_backups.py" in backup_worker
+    assert "DATABASE_BACKUP_HOST_DIR" in backup_worker
+    assert "no-new-privileges:true" in backup_worker
+    assert "read_only: true" in backup_worker
+    assert "restart: unless-stopped" in backup_worker

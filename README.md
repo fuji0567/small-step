@@ -673,6 +673,28 @@ sudo docker compose \
   run --rm database-tools
 ```
 
+手動確認に成功したら、`.env`の`DATABASE_BACKUP_TIME`へ毎日の作成時刻を設定し、日次ワーカーを
+起動します。既定は日本時間の03:00です。起動時に当日分がなければ予定時刻を待たずに1件作成し、
+失敗した場合は既定で5分後に再試行します。API、GPU、LINE処理は停止しません。
+
+```bash
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile backup \
+  up -d --build backup-worker
+
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile backup \
+  ps backup-worker
+```
+
+`DATABASE_BACKUP_RETENTION_COUNT=0`は自動削除なしです。暗号化された外部保管先へのコピーと復元確認が
+運用化されるまでは`0`を維持してください。保持数を1以上へ変更した場合も、完全なアーカイブと
+チェックサムの組だけが古い順に削除対象となります。
+
 保存先は既定でホストの`./data/database-backups`です。変更するときだけ`.env`の
 `DATABASE_BACKUP_HOST_DIR`へ絶対パスを設定します。NVMeのモデルキャッシュ領域は、障害時に
 同時に失う可能性があるため指定しないでください。
@@ -719,8 +741,62 @@ sudo docker compose \
 VRT内に1部あるだけではVRT障害への備えにならないため、作成後は暗号化された外部保管先へ複製します。
 復元リハーサルに成功したファイルだけを正式な世代として扱い、世代削除は外部保管を確認してから行います。
 
+## VRTの障害をLINEで受け取る
+
+`operations-monitor`はAPIとは別コンテナで動き、API、データベース更新、GPU音声処理、vLLM、LINE送信処理、
+最新バックアップの更新時刻とチェックサム、保存領域の空き容量を1分ごとに確認します。園児名、音声、通知文、
+URL、接続情報はLINE通知にも状態ファイルにも保存しません。
+
+一時的な再起動で通知しないよう、同じ異常が既定で3分続いた場合だけ管理者へLINE通知します。同じ状態の
+連続通知は6時間に1回までで、すべて正常に戻ると復旧通知を1回送ります。LINEへの送信結果が不明な場合は、
+[LINE公式の再試行仕様](https://developers.line.biz/ja/docs/messaging-api/retrying-api-request/)に従い、
+24時間の管理期限内は永続化した同じ再試行キーを使うため重複送信を抑えます。
+
+VRTの`.env`へ次を設定します。`OPERATIONS_ALERT_LINE_USER_ID`は通知を受ける運用責任者本人のLINEユーザーIDで、
+Gitへ追加したりチャットへ貼ったりしないでください。
+
+```dotenv
+OPERATIONS_MONITOR_ENABLED=true
+OPERATIONS_ALERT_LINE_USER_ID=ここへ運用責任者のLINEユーザーID
+```
+
+最初にLINE送信なしで稼働状態を確認し、次に個人情報を含まないテスト通知を1回送ります。テスト通知が届き、
+`運用監視: 正常`になれば常駐監視を起動できます。
+
+```bash
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile monitoring \
+  run --rm --no-deps operations-monitor \
+  python scripts/monitor_operations.py --dry-run
+
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile monitoring \
+  run --rm --no-deps operations-monitor \
+  python scripts/monitor_operations.py --send-test-notification
+
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile monitoring \
+  up -d --build operations-monitor
+
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile monitoring \
+  ps operations-monitor
+```
+
+最新バックアップが26時間を超えると警告になるため、日次ワーカーが停止した場合も検知できます。監視自体が
+VRT内で動く都合上、VRT全体の停止やインターネット回線断はLINEへ送れません。その検知は固定HTTPS URLへ
+切り替えた後、外部の稼働監視を追加します。
+
 ## 次に実装するもの
 
 1. 複数話者・雑音・声量差を含む匿名テストセットを収録し、一括評価レポートで精度を確認する
 2. ESP32-S3録音端末を実機へ書き込み、PSRAM・マイク配線・無音しきい値・再送を確認する
-3. VRT上でバックアップ復元リハーサルを実行し、Quick Tunnelから固定HTTPS URLへ切り替えて障害通知を確認する
+3. VRTのLINE障害通知を実機確認し、Quick Tunnelから固定HTTPS URLと外部監視へ切り替える

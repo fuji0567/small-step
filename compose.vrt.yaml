@@ -97,6 +97,62 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  operations-monitor:
+    profiles:
+      - monitoring
+    build: .
+    user: "0:0"
+    environment:
+      TIMEZONE: ${TIMEZONE:-Asia/Tokyo}
+      LINE_CHANNEL_ACCESS_TOKEN: ${LINE_CHANNEL_ACCESS_TOKEN:-}
+      LINE_API_TIMEOUT_SECONDS: ${LINE_API_TIMEOUT_SECONDS:-10}
+      OPERATIONS_MONITOR_ENABLED: ${OPERATIONS_MONITOR_ENABLED:-false}
+      OPERATIONS_ALERT_LINE_USER_ID: ${OPERATIONS_ALERT_LINE_USER_ID:-}
+      OPERATIONS_MONITOR_POLL_SECONDS: ${OPERATIONS_MONITOR_POLL_SECONDS:-60}
+      OPERATIONS_ALERT_AFTER_SECONDS: ${OPERATIONS_ALERT_AFTER_SECONDS:-180}
+      OPERATIONS_ALERT_REPEAT_SECONDS: ${OPERATIONS_ALERT_REPEAT_SECONDS:-21600}
+      OPERATIONS_CHECK_TIMEOUT_SECONDS: ${OPERATIONS_CHECK_TIMEOUT_SECONDS:-10}
+      OPERATIONS_API_READINESS_URL: http://api:8000/api/v1/readiness
+      OPERATIONS_VLLM_HEALTH_URL: http://small-step-vllm:8000/health
+      OPERATIONS_BACKUP_DIR: /backups
+      OPERATIONS_BACKUP_MAX_AGE_HOURS: ${OPERATIONS_BACKUP_MAX_AGE_HOURS:-26}
+      OPERATIONS_MIN_DISK_FREE_GB: ${OPERATIONS_MIN_DISK_FREE_GB:-10}
+      OPERATIONS_DISK_PATHS: /app/data,/backups
+      OPERATIONS_MONITOR_STATE_PATH: /app/data/operations-monitor-state.json
+    command: ["python", "scripts/monitor_operations.py", "--watch"]
+    networks:
+      - default
+      - llm
+    volumes:
+      - operations_monitor_data:/app/data
+      - ${DATABASE_BACKUP_HOST_DIR:-./data/database-backups}:/backups:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  backup-worker:
+    profiles:
+      - backup
+    build:
+      context: .
+      dockerfile: Dockerfile.database-tools
+    env_file:
+      - .env
+    environment:
+      DATABASE_BACKUP_DIR: /backups
+    command: ["python", "scripts/schedule_database_backups.py", "--watch"]
+    volumes:
+      - ${DATABASE_BACKUP_HOST_DIR:-./data/database-backups}:/backups
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
   database-tools:
     profiles:
       - operations
@@ -145,6 +201,7 @@ services:
 volumes:
   cloud_audio_jobs:
   gpu_model_cache:
+  operations_monitor_data:
 
 networks:
   llm:

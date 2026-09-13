@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from app.config import Settings
@@ -11,7 +10,7 @@ from app.database_backup import DatabaseBackupError, create_database_backup
 
 def main() -> None:
     settings = Settings()
-    output_dir = Path(os.getenv("DATABASE_BACKUP_DIR", "./data/database-backups"))
+    output_dir = Path(settings.database_backup_dir)
     try:
         result = create_database_backup(settings.database_url, output_dir)
     except DatabaseBackupError as error:
