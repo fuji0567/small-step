@@ -12,7 +12,8 @@ Small Step（お便りAI）は、園内の音声を **園内で匿名化して�
 | 音声パイプライン | [architecture/audio-pipeline.md](architecture/audio-pipeline.md) | 録音、文字起こし、匿名化、話者分離、GPU ワーカー |
 | 認証・認可 | [architecture/auth.md](architecture/auth.md) | Supabase JWT、端末 APIキー、アーカイブトークン、園スコープ |
 | 外部連携 | [architecture/integrations.md](architecture/integrations.md) | LINE、Notion、保護者アーカイブ |
-| フロントエンド | [architecture/frontend.md](architecture/frontend.md) | 2 つの静的アプリの構成と実装方針 |
+| フロントエンド | [architecture/frontend.md](architecture/frontend.md) | SvelteKit の route、状態、静的配信、テスト |
+| Svelte 移行手順 | [svelte-migration-runbook.md](svelte-migration-runbook.md) | 実装履歴、並列分担、テスト、切り替え、ロールバック |
 | デプロイ・運用 | [architecture/deployment.md](architecture/deployment.md) | Docker、Compose、環境変数、運用スクリプト |
 | 画面遷移 | [transition.md](transition.md) | 画面一覧と遷移図 |
 | 参考デザインシステム | [design-system-digital-agency.md](design-system-digital-agency.md) | デジタル庁デザインシステムへの案内とトークンの値。考え方の原文は [reference/dads/](reference/dads/ABOUT-THIS-COPY.md) に無改変で複製 |
@@ -34,8 +35,8 @@ flowchart TB
 
     subgraph CLOUD["サーバー（Docker Compose）"]
         API["FastAPI<br/>prefix /api/v1"]
-        WEB["/teacher 静的配信"]
-        GWEB["/guardian 静的配信"]
+        WEB["/teacher/*<br/>Svelte SPA fallback"]
+        GWEB["/guardian/<br/>Svelte prerender"]
         DB[("データベース<br/>SQLite / PostgreSQL")]
         LINEW["line-worker"]
         JOBS[("短命ジョブ保管<br/>data/cloud-audio-jobs")]
@@ -102,7 +103,7 @@ flowchart TB
 | API | Python 3.11+, FastAPI, Uvicorn, Pydantic v2 |
 | ORM / マイグレーション | SQLAlchemy 2.0, Alembic |
 | データベース | SQLite（ローカル） / PostgreSQL・Supabase（本番） |
-| フロントエンド | 素の HTML / CSS / JavaScript（ビルド工程なし） |
+| フロントエンド | Svelte 5 runes、TypeScript、SvelteKit、adapter-static |
 | 認証 | Supabase Auth（パスワード） |
 | 音声 | faster-whisper, pyannote.audio |
 | LLM | OpenAI 互換ローカルサーバー（Ollama / vLLM） |

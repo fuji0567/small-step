@@ -1893,6 +1893,19 @@ def export_record_history_csv(
     )
 
 
+@router.get("/records/{record_id}", response_model=RecordRead, tags=["records"])
+def get_record(
+    record_id: str,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> Record:
+    """Return one record when the current teacher is allowed to review it."""
+
+    record = require_entity(db, Record, record_id, "Record")
+    assert_record_access(current_teacher, record)
+    return record
+
+
 @router.post("/records/{record_id}/approve", response_model=RecordRead, tags=["records"])
 def approve_record(
     record_id: str,

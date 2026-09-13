@@ -1,0 +1,100 @@
+.devices-page,
+.devices-heading,
+.devices-form,
+.devices-field,
+.devices-card,
+.device-credential {
+  display: grid;
+  gap: var(--ss-space-2);
+}
+
+.devices-heading h2,
+.devices-heading p,
+.devices-card h3,
+.devices-card p,
+.device-credential h3,
+.devices-empty p {
+  margin: 0;
+}
+
+.devices-form {
+  grid-template-columns: 1fr 1fr auto;
+  align-items: end;
+  border: 2px solid var(--ss-color-border);
+  border-radius: var(--ss-radius-large);
+  padding: var(--ss-space-3);
+  background: var(--ss-color-surface);
+}
+
+.devices-field label {
+  font-weight: var(--ss-font-weight-bold);
+}
+
+.devices-field input,
+.devices-field select {
+  min-height: 44px;
+  box-sizing: border-box;
+  border: 2px solid var(--ss-color-border);
+  border-radius: var(--ss-radius-medium);
+  padding: var(--ss-space-1) var(--ss-space-2);
+  background: var(--ss-color-surface);
+}
+
+.devices-field input:focus-visible,
+.devices-field select:focus-visible {
+  outline: 4px solid var(--ss-color-focus-inner);
+  outline-offset: 0;
+  box-shadow: 0 0 0 6px var(--ss-color-focus-outer);
+}
+
+.devices-toolbar,
+.devices-card-heading,
+.devices-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ss-space-2);
+}
+
+.devices-toolbar,
+.devices-card-heading {
+  justify-content: space-between;
+}
+
+.devices-list {
+  display: grid;
+  gap: var(--ss-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.devices-card,
+.devices-empty,
+.device-credential {
+  border: 2px solid var(--ss-color-border);
+  border-radius: var(--ss-radius-large);
+  padding: var(--ss-space-3);
+  background: var(--ss-color-surface);
+}
+
+.devices-card--inactive {
+  background: var(--ss-color-page);
+}
+
+.device-credential {
+  border-color: var(--ss-color-warning-border);
+  background: var(--ss-color-warning-background);
+}
+
+.device-credential output {
+  overflow-wrap: anywhere;
+  font-family: var(--ss-font-mono);
+  font-weight: var(--ss-font-weight-bold);
+}
+
+@media (max-width: 63.999rem) {
+  .devices-form {
+    grid-template-columns: 1fr;
+  }
+}

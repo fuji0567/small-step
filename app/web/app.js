@@ -78,6 +78,9 @@ const elements = {
   rejectButton: document.querySelector("#reject-button"),
   approveButton: document.querySelector("#approve-button"),
   navButtons: document.querySelectorAll(".nav-button"),
+  reviewNavCount: document.querySelector("#review-nav-count"),
+  notificationNavCount: document.querySelector("#notification-nav-count"),
+  childInvitationNavCount: document.querySelector("#child-invitation-nav-count"),
   homeView: document.querySelector("#home-view"),
   reviewView: document.querySelector("#review-view"),
   recordHistoryView: document.querySelector("#record-history-view"),
@@ -521,8 +524,17 @@ function renderSchoolSettings() {
   elements.schoolTimezoneNote.textContent = `園のタイムゾーン: ${school.timezone}`;
 }
 
+// ナビの「レビュー待ち」に添える件数。0 件のときはバッジを隠して、
+// 先生の確認が必要な記録があるときだけ目に入るようにします。
+function renderReviewNavCount() {
+  const count = state.records.length;
+  elements.reviewNavCount.textContent = `${count}件`;
+  elements.reviewNavCount.hidden = count === 0;
+}
+
 function renderRecordList() {
   elements.recordCount.textContent = String(state.records.length);
+  renderReviewNavCount();
   elements.recordList.replaceChildren();
   if (!state.records.length) {
     const text = document.createElement("p");
@@ -638,7 +650,25 @@ function renderHome() {
   );
 }
 
+// ナビの「園児・保護者」に添える、招待コードがまだ出ていない園児の件数。
+// 配信はここが埋まるまで始まらないので、在籍中の園児だけを数えます。
+// 発行できるのは管理者だけ（サーバー側も assert_school_admin）なので、
+// 一般の先生には出しません。
+// 「3件」だけでは何の件数か分からないため、読み上げ用に aria-label を添えます。
+function renderChildInvitationNavCount() {
+  const count = state.isSchoolAdmin
+    ? state.children.filter(
+      (child) => !child.guardian_line_user_id
+        && !state.lineLinkInvitations.some((invitation) => invitation.child_id === child.id),
+    ).length
+    : 0;
+  elements.childInvitationNavCount.textContent = `${count}件`;
+  elements.childInvitationNavCount.setAttribute("aria-label", `招待コード未発行${count}件`);
+  elements.childInvitationNavCount.hidden = count === 0;
+}
+
 function renderChildManagement() {
+  renderChildInvitationNavCount();
   elements.childCount.textContent = String(state.children.length);
   elements.childForm.hidden = !state.isSchoolAdmin;
   elements.childRoleNote.hidden = state.isSchoolAdmin;
@@ -1180,7 +1210,19 @@ function render() {
   renderVoiceConsent();
 }
 
+// ナビの「通知状況」に添える送信失敗の件数。すぐ手当てが必要なものなので、
+// 一覧の絞り込み結果ではなく園全体の件数を出し、0 件のときは隠します。
+// 見た目は「！3件」と短くしますが、それだけでは何の件数か分からないので、
+// 読み上げ用に aria-label で「送信失敗3件」と補います。
+function renderNotificationNavCount() {
+  const count = state.notifications.filter((item) => item.status === "failed").length;
+  elements.notificationNavCount.textContent = `！${count}件`;
+  elements.notificationNavCount.setAttribute("aria-label", `送信失敗${count}件`);
+  elements.notificationNavCount.hidden = count === 0;
+}
+
 function renderNotifications() {
+  renderNotificationNavCount();
   const statusFilter = elements.notificationStatusSelect.value;
   const search = elements.notificationSearch.value.trim().toLocaleLowerCase("ja-JP");
   const notifications = state.notifications.filter((notification) => {

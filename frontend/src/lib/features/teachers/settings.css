@@ -1,0 +1,37 @@
+.settings-page,
+.settings-page header,
+.settings-card,
+.settings-field {
+  display: grid;
+  gap: var(--ss-space-2);
+}
+
+.settings-page h2,
+.settings-page p {
+  margin: 0;
+}
+
+.settings-card {
+  justify-items: start;
+  border: 2px solid var(--ss-color-border);
+  border-radius: var(--ss-radius-large);
+  padding: var(--ss-space-3);
+  background: var(--ss-color-surface);
+}
+
+.settings-field label {
+  font-weight: var(--ss-font-weight-bold);
+}
+
+.settings-field input {
+  min-height: 44px;
+  border: 2px solid var(--ss-color-border);
+  border-radius: var(--ss-radius-medium);
+  padding: var(--ss-space-1) var(--ss-space-2);
+}
+
+.settings-field input:focus-visible {
+  outline: 4px solid var(--ss-color-focus-inner);
+  outline-offset: 0;
+  box-shadow: 0 0 0 6px var(--ss-color-focus-outer);
+}

@@ -368,6 +368,38 @@ h3 {
   color: var(--primary-800);
 }
 
+/* ナビの「レビュー待ち」に添える件数。ナビ項目の背景は通常時 (surface) と
+   hover / 選択中 (Primary-50) で変わるため、どちらに載っても境界が 3:1 を
+   満たす Primary-600 の塗りにしています（白に対して 6.31:1、Primary-50 に
+   対して 5.75:1）。白のラベルは Primary-600 に対して 6.31:1 で、DADS の
+   「プライマリーカラーの塗り + 白ラベル」のステートスタイルに揃えています。
+   件数は数字と「件」で示すので、色だけに依存した表現にはなりません。 */
+.nav-count {
+  display: inline-flex;
+  min-height: 1.5rem;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--primary-600);
+  color: var(--neutral-0);
+  margin-inline-start: var(--space-1);
+  padding: 0 var(--space-1);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  vertical-align: -0.15em;
+}
+
+/* 送信失敗は一覧側の `.delivery-status.is-failed` が error 系なので、ナビの
+   件数も同じ系統に揃えます（ナビと一覧で色が食い違わないようにするため）。
+   Error-700 の塗りは白のラベルに対して 6.53:1、形状は白背景に対して 6.53:1、
+   Primary-50 に対して 5.95:1 です。レビュー待ちとの区別は色だけでなく先頭の
+   「！」が担います（一覧側の `.is-failed::before` と同じ手がかり）。 */
+.nav-count.is-failed {
+  background: var(--error-700);
+}
+
 /* 画面が広いときは、タブ列ではなく左のサイドパネルへ切り替えます。
    1024px 未満は従来どおり横並びのままにして、狭い画面の挙動を変えません。 */
 @media (min-width: 64rem) {
@@ -397,13 +429,27 @@ h3 {
     overflow-y: auto;
   }
 
+  /* white-space と flex-wrap は対で入れています。件数が入りきらないときに
+     項目名を「通知状/況」と途中で折らず、件数だけを次の行へ落とすためです。
+     現在のラベルの長さでは 3 桁でも 1 行に収まりますが、フォントの差や
+     項目名の変更で崩れないようにこの組み合わせを残しています。 */
   .nav-button {
+    display: flex;
+    flex-wrap: wrap;
     width: 100%;
+    align-items: center;
+    white-space: nowrap;
     text-align: left;
     border-bottom: 0;
     border-left: 4px solid transparent;
     border-radius: var(--radius-sm);
     padding: 0.5rem var(--space-2);
+  }
+
+  /* サイドパネルでは項目の幅が揃うので、件数を行末に寄せると縦に並んで
+     読み取りやすくなります。横並びのタブ列では文字のすぐ右のままです。 */
+  .nav-count {
+    margin-inline-start: auto;
   }
 
   .nav-button.is-active,
@@ -2367,6 +2413,11 @@ dialog p {
   .record-item.is-selected,
   .record-item[aria-current="true"] {
     border-color: Highlight;
+  }
+
+  /* 塗りは強制カラーで打ち消されるため、枠線でバッジの形を残します。 */
+  .nav-count {
+    border-color: ButtonText;
   }
 
   .loading-indicator::before,

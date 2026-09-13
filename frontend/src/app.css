@@ -1,0 +1,44 @@
+@import '$lib/design/tokens.css';
+
+:root {
+  font-family: var(--ss-font-sans);
+  color: var(--ss-color-text);
+  background: var(--ss-color-surface);
+}
+
+html {
+  min-width: 20rem;
+  background: var(--ss-color-page);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  line-height: 1.7;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+a:focus-visible,
+button:focus-visible {
+  outline: 4px solid var(--ss-color-focus-inner);
+  outline-offset: 0;
+  box-shadow: 0 0 0 6px var(--ss-color-focus-outer);
+}
+
+@media (forced-colors: active) {
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: 2px !important;
+    box-shadow: none !important;
+  }
+}

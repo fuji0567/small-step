@@ -1,0 +1,46 @@
+:root {
+  color-scheme: light;
+
+  --ss-color-page: #f2f2f2;
+  --ss-color-surface: #ffffff;
+  --ss-color-text: #1a1a1a;
+  --ss-color-text-muted: #666666;
+  --ss-color-border: #8c8c8c;
+  --ss-color-action: #3460fb;
+  --ss-color-action-hover: #0031d8;
+  --ss-color-action-soft: #e8f1fe;
+  --ss-color-focus-inner: #ffd43d;
+  --ss-color-focus-outer: #000000;
+
+  --ss-color-success-background: #e6f5ec;
+  --ss-color-success-border: #259d63;
+  --ss-color-success-text: #197a4b;
+  --ss-color-warning-background: #fbf5e0;
+  --ss-color-warning-border: #af8900;
+  --ss-color-warning-text: #8a6b00;
+  --ss-color-error-background: #fdeeee;
+  --ss-color-error-border: #ec0000;
+  --ss-color-error-text: #ce0000;
+
+  --ss-space-1: 0.5rem;
+  --ss-space-2: 1rem;
+  --ss-space-3: 1.5rem;
+  --ss-space-4: 2rem;
+  --ss-space-5: 3rem;
+
+  --ss-font-sans:
+    'Noto Sans JP', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', sans-serif;
+  --ss-font-mono: 'Noto Sans Mono', ui-monospace, 'Cascadia Mono', monospace;
+  --ss-font-size-small: 0.875rem;
+  --ss-font-size-body: 1rem;
+  --ss-font-size-subtitle: 1.125rem;
+  --ss-font-size-heading: 1.5rem;
+  --ss-font-size-display: 2.25rem;
+  --ss-font-weight-normal: 400;
+  --ss-font-weight-bold: 700;
+
+  --ss-radius-small: 0.25rem;
+  --ss-radius-medium: 0.5rem;
+  --ss-radius-large: 0.75rem;
+  --ss-radius-full: 9999px;
+}

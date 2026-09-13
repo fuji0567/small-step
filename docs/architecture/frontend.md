@@ -2,137 +2,166 @@
 
 - 索引: [../architecture.md](../architecture.md)
 - 画面一覧と遷移図: [../transition.md](../transition.md)
+- 移行時の判断と履歴: [../svelte-migration-runbook.md](../svelte-migration-runbook.md)
 
-ビルド工程を持たない素の HTML / CSS / JavaScript です。
-FastAPI が `StaticFiles` としてそのまま配信します。
+現在のフロントエンドは `frontend/` の Svelte 5 runes、TypeScript、SvelteKit で構成します。
+`@sveltejs/adapter-static` が `app/frontend_dist/` へ生成した静的ファイルを FastAPI が配信します。
+SvelteKit のサーバーへ業務ロジックを移しておらず、API と認可の本体は引き続き FastAPI です。
 
-| マウントパス | ディレクトリ | 対象利用者 | 規模 |
+| URL | SvelteKit route | 配信方式 | 対象利用者 |
 | --- | --- | --- | --- |
-| `/teacher` | `app/web/` | 先生・先生管理者 | HTML 805 行 / JS 2,918 行 / CSS 2,382 行 |
-| `/guardian` | `app/guardian/` | 保護者 | HTML 30 行 / JS 91 行 / CSS 124 行 |
+| `/teacher/*` | `frontend/src/routes/teacher/` | CSR。`200.html` への先生用限定 SPA fallback | 先生・先生管理者 |
+| `/guardian/` | `frontend/src/routes/guardian/` | prerender 済み静的ページ | 保護者 |
+| `/_app/*` | SvelteKit の content hash 付き asset | `StaticFiles` | 両画面 |
+
+`app/web/` と `app/guardian/` の旧 HTML / CSS / JavaScript は、切り替え後のロールバック用に
+ファイルを保持しています。ただし現在の `/teacher/` と `/guardian/` にはマウントされません。
 
 ---
 
-## ビルド工程を持たない理由
+## route 構成
 
-- 園の PC で `docker compose up` だけで動かせるようにするため、Node のツールチェーンを前提にしない。
-- 画面数が十数程度で、フレームワークの導入コストが機能の複雑さに見合わない。
-- 依存が増えないぶん、供給網まわりの検討事項も増えない。
+先生用は `frontend/src/routes/teacher/+layout.svelte` が認証、園選択、ナビゲーション、権限確認を共通で担当し、
+各 `+page.svelte` は機能コンポーネントへ route parameter と共有状態を渡します。
 
-代償として `app/web/app.js` が 2,918 行の単一ファイルになっています。
-これ以上増えるなら、ビューごとのモジュール分割か軽量フレームワークの導入を検討する分岐点です。
+| URL | route | 主な機能 |
+| --- | --- | --- |
+| `/teacher/` | `teacher/+page.svelte` | 選択園のレビュー、通知、音声処理、園児、招待の概要 |
+| `/teacher/review/` | `teacher/review/+page.svelte` | レビュー待ち一覧 |
+| `/teacher/review/{recordId}/` | `teacher/review/[recordId]/+page.svelte` | 日誌 1 件の取得、承認、却下 |
+| `/teacher/review/new/` | `teacher/review/new/+page.svelte` | 日誌の手入力 |
+| `/teacher/records/` | `teacher/records/+page.svelte` | 記録履歴、管理者の CSV 出力 |
+| `/teacher/notifications/` | `teacher/notifications/+page.svelte` | 通知状況、管理者操作 |
+| `/teacher/audio-jobs/` | `teacher/audio-jobs/+page.svelte` | 安全な音声処理メタデータ |
+| `/teacher/children/` | `teacher/children/+page.svelte` | 園児・保護者 LINE 連携 |
+| `/teacher/voice-consent/` | `teacher/voice-consent/+page.svelte` | 声紋利用への同意 |
+| `/teacher/settings/` | `teacher/settings/+page.svelte` | 園設定（管理者） |
+| `/teacher/teachers/` | `teacher/teachers/+page.svelte` | 先生管理（管理者） |
+| `/teacher/devices/` | `teacher/devices/+page.svelte` | 録音端末（管理者） |
+| `/teacher/readiness/` | `teacher/readiness/+page.svelte` | 稼働準備（管理者） |
+| `/teacher/audit/` | `teacher/audit/+page.svelte` | 操作履歴（管理者） |
+| `/teacher/*` の未定義 URL | `teacher/[...path]/+page.svelte` | 認証シェル内の日本語 404 |
+| `/guardian/#ssa_...` | `guardian/+page.svelte` | 保護者用配信アーカイブ |
+
+日誌の詳細 URL には不透明な `recordId` だけを含めます。`GET /api/v1/records/{record_id}` で単体取得するため、
+一覧取得の上限に依存せず、直接表示、再読み込み、Back、Forward で同じ日誌を復元できます。
 
 ---
 
-## 先生用アプリ（`app/web/`）
+## 実装の分割
 
-### 実行時の構造
-
-`app.js` は単一スコープで、次の順に並んでいます。
-
-| 区画 | 内容 |
-| --- | --- |
-| 定数 | `apiBase = "/api/v1"`, `accessTokenStorageKey` |
-| `state` | 画面が持つ全状態を 1 つのオブジェクトに集約 |
-| `elements` | `document.querySelector` の結果をまとめたキャッシュ |
-| ヘルパー | `api()`, `fetchWithTimeout()`, `formatDate()`, ラベル変換など |
-| 描画関数 | `render*()` — `state` を読んで DOM を組み立てる |
-| 取得関数 | `load*()` — API を叩いて `state` を更新し `render*()` を呼ぶ |
-| 操作関数 | 承認・却下・発行・無効化など |
-| `changeView()` | ビューの表示切り替えと入場時の再取得 |
-| イベント登録 | ページ末尾でまとめて `addEventListener` |
-| 起動 | `replaceIconPlaceholders()` → `changeView()` → `start()` |
-
-`state` は 1 か所にまとまっています（園、園児、先生、記録、通知、音声ジョブ、監査ログ、
-選択中の記録、編集中の園児、現在のビュー、認証情報、`isSchoolAdmin` など）。
-状態の置き場所を分散させないことで、フレームワークなしでも追える構造を保っています。
-
-### API 呼び出し
-
-```js
-async function api(path, options = {}) { … }
+```text
+frontend/src/
+  lib/
+    api/                 # 同一オリジンAPI client、型、安全なエラー
+    auth/                # sessionStorage とtokenの初期化
+    components/          # AppShell、Button、Notice、Dialogなど
+    design/              # DADSに基づくCSS token
+    state/               # SchoolContext、AppController、無効化scope
+    features/            # dashboard、records、children等の機能単位
+  routes/
+    teacher/             # 先生用CSR routes
+    guardian/            # 保護者用prerender route
+  testsは対象実装の近くに *.test.ts として配置
+frontend/tests/e2e/      # Playwrightの横断シナリオ
 ```
 
-- `Authorization: Bearer` はトークンがあるときだけ付与します。
-- 成功時は `204` なら `null`、それ以外は JSON を返します。
-- 失敗時は `detail` が文字列のときだけそれをエラーメッセージにし、
-  それ以外は汎用文言にフォールバックします（想定外のレスポンス本文を画面に出さないため）。
-- `error.status` に状態コードを載せます。認証フローの 403 / 404 分岐がこれを使います。
-- `fetchWithTimeout()` がタイムアウトを掛け、切れたときは「FastAPI のターミナルを確認して再試行してください」と案内します。
-
-### 認証状態
-
-アクセストークンの保持場所とその理由、認証の分岐は [auth.md](auth.md) にあります。
-このファイルが受け持つのはログアウト時のふるまいだけです。`state` の内容を明示的に空にしてから
-画面を戻します（発行済みの招待コードや APIキーが画面に残らないようにするため）。
-
-画面の状態遷移は [../transition.md](../transition.md) を参照してください。
-
-### アイコン
-
-HTML には `<span class="material-symbols-outlined button-icon">fact_check</span>` のような
-プレースホルダを書き、起動時に `replaceIconPlaceholders()` がインライン SVG へ置き換えます。
-図形は `localIconPaths` に定義した `<path>` の `d` 属性の配列です。
-
-- **アイコンフォントを外部から読み込みません。** 先生用画面は外部ネットワークへ一切リクエストを出しません。
-- フォント読み込み待ちによるアイコンの遅延表示（いわゆる豆腐）が起きません。
-- 未定義の名前は `localIconPaths.default` にフォールバックします。
-- すべて `aria-hidden="true"` で、意味はテキストラベル側が担います。
-
-動的に作るボタンは `setButtonLabel(button, iconName, label)` でアイコンとラベルを同時に差し替えます。
-
-### スタイル
-
-`styles.css` は `:root` のカスタムプロパティから始まります。
-
-- **文字** … `--font-sans` / `--font-mono`（Web フォントは読み込まず、OS のフォントを優先）
-- **余白** … `--space-1` 〜 `--space-8` の 8px スケール
-- **色** … `--neutral-*` / `--primary-*` / `--success-*` / `--warning-*` / `--error-*` の意味づけ済みトークン
-
-対応しているメディアクエリ:
-
-| クエリ | 対応内容 |
-| --- | --- |
-| `max-width: 767px` | スマートフォン向けレイアウト |
-| `forced-colors: active` | Windows のハイコントラストモード |
-| `prefers-reduced-motion: reduce` | アニメーションの抑制 |
-
-### アクセシビリティ
-
-- 冒頭に「本文へ移動」のスキップリンク、`<main id="main-content" tabindex="-1">`。
-- 各ビューは `<section class="app-view" aria-label="...">` で、非表示は `hidden` 属性。
-- ナビゲーションの現在地は `aria-current="page"`。
-- ナビは 1024px 以上（`@media (min-width: 64rem)`）で左のサイドパネル、それ未満では横並びの帯になります。
-  現在地の指標も、サイドパネルでは下線ではなく左の縦帯です。
-- 先生管理者専用の 5 ビューは、一般の先生では `hidden` を立てるだけでなく
-  `applySchoolAdminVisibility()` がナビとビュー本体を DOM から取り除きます。詳細は [../transition.md](../transition.md)。
-- 非同期に更新される領域（記録一覧、通知一覧、読み込み表示、文字数カウンタなど）は `aria-live="polite"`。
-- 通知メッセージは種類に応じて `role="status"` と `role="alert"` を出し分けます。
-- 破壊的な操作は `<dialog>` の `showModal()` による確認を挟み、ESC・キャンセル・背景クリックは
-  すべて「実行しない」に倒れます。
-
-`index.html` には 83 か所の `aria-*` 属性があります。
+画面固有の API 呼び出し、型、表示、テストは `lib/features/<feature>/` にまとめます。
+route は薄く保ち、巨大な global store や DOM の手組み、`{@html}` は使いません。
 
 ---
 
-## 保護者用アプリ（`app/guardian/`）
+## API と状態管理
 
-ログイン画面を持ちません。
-トークンの解決から一覧表示・エラー画面までの流れは [../transition.md](../transition.md) の
-状態遷移図、トークン自体の性質は [auth.md](auth.md) を参照してください。
+`lib/api/ApiClient` は同一オリジンの `/api/v1` だけを受け付けます。
 
-このファイルが受け持つのは次の2点だけです。
+- token があるときだけ `Authorization: Bearer` を付けます。
+- JSON、text、Blob、204 を型ごとに処理します。
+- caller の cancel と 15 秒 timeout を区別します。
+- 想定外のレスポンス本文や秘密情報をそのままエラー表示しません。
+- 先生用画面から外部 CDN、外部フォント、テレメトリへ通信しません。
 
-- 失敗時は `sessionStorage` のトークンを破棄し、「園から届いた最新の URL を開いてください」と案内します。
-- **先生用と違い、Google Fonts（Zen Maru Gothic / Zen Old Mincho）を読み込みます。**
-  先生用画面が外部へ一切リクエストを出さないのとは対照的です。
+選択園は `SchoolContext` が持ち、園を切り替えると画面固有の選択・編集中状態を消して再取得します。
+更新後の横断的な再取得は `AppController` と `InvalidationScope` で接続します。
+コンポーネントは mount 中だけ更新 handler を登録し、離脱時に解除します。
+
+Svelte 5 の実装は runes（`$state`、`$derived`、`$effect`、`$props`）を使います。
+effect の依存は入力となる状態だけに限定し、非同期読み込みで更新する内部状態を意図せず追跡しないようにします。
 
 ---
 
-## 開発時の確認
+## 認証と認可
 
-静的ファイルなのでビルドもウォッチも要りません。API を起動してブラウザで開くだけです
-（起動手順は [deployment.md](deployment.md)、`AUTH_MODE` のふるまいは [auth.md](auth.md)）。
+先生用の起動フローは `teacher/+layout.svelte` と `lib/features/teacher-shell/` が担当します。
 
-既定の `AUTH_MODE=development` では権限による表示差分が出ません。
-一般の先生の画面を確認したいときは `AUTH_MODE=supabase` にして実際にログインしてください。
+1. `GET /api/v1/auth/config` で development / Supabase を判定する。
+2. Supabase モードではメール・パスワードで Supabase へ直接ログインする。
+3. access token を `sessionStorage` の `small-step.access-token` にだけ保存する。
+4. `GET /api/v1/auth/me`、必要なら先生の紐付けまたは初回管理者設定を行う。
+5. 認証後に要求された route を表示する。
+
+一般の先生には管理者専用ナビゲーションと操作を DOM へ出しません。管理者専用 URL を直接開いた場合は
+ホームへ移動して案内します。ただし UI の非表示や redirect は補助であり、認可は各 FastAPI handler の
+`assert_school_access` / `assert_school_admin` / `assert_record_access` が必ず行います。
+
+保護者用はログイン画面を持ちません。`#ssa_...` を `sessionStorage` の
+`small-step.guardian-archive-token` へ保存し、SvelteKit の `$app/navigation.replaceState` で hash を消してから
+`GET /api/v1/guardian/archive` を呼びます。router 初期化後に実行し、hash は SvelteKit のルーティングには使いません。
+無効な token は保存領域からも破棄し、ページは `no-referrer` を指定します。
+
+---
+
+## 配信
+
+`npm run build` は `app/frontend_dist/` に次を生成します。
+
+- `200.html`: 先生用 CSR の起動ページ
+- `guardian/index.html`: 保護者用 prerender ページ
+- `_app/immutable/*`: content hash 付き JavaScript / CSS
+
+FastAPI は生成物が揃っている場合だけ Svelte UI を有効にします。配信順は API、`/_app/*`、`/guardian/`、
+`/teacher/*` の順です。`/teacher` は `/teacher/` へ redirect し、深い先生用 URL と未定義の先生用 URL だけを
+`200.html` へ渡します。欠損 asset、API、`/guardian/` 配下の不明な URL は fallback せず 404 にします。
+
+HTML は `Cache-Control: no-cache`、`/_app/immutable/*` は
+`Cache-Control: public, max-age=31536000, immutable` です。
+
+Dockerfile は Node.js 24.19.0 の build stage で `npm ci` と検証・ビルドを実行し、Python runtime stage には
+`app/frontend_dist/` だけをコピーします。実運用環境へのデプロイ確認は別途必要です。
+
+---
+
+## 開発とテスト
+
+Node.js 24.19.0 を使用します。FastAPI をポート 8000 で起動し、別ターミナルで次を実行します。
+Vite 開発サーバーは `/api/v1` を FastAPI へ proxy します。
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+検証コマンド:
+
+```bash
+npm run format:check
+npm run lint
+npm run check
+npm run test:unit
+npm run test:e2e:install  # 初回だけ
+npm run test:e2e
+npm run build
+```
+
+2026-09-12 の切り替え確認では、Vitest 149 件、Playwright 7 件、format、lint、Svelte check、build が成功しました。
+Playwright は API をブラウザで intercept し、次を検査します。
+
+- ホームから各 route への URL 遷移
+- `/teacher/review/{recordId}/` の直接表示、reload、Back、Forward
+- 先生用の日本語 404
+- 保護者 token の hash 除去、再読み込み、無効化
+- keyboard、focus、mobile reflow、重大・致命的な axe 違反
+
+FastAPI の配信契約は `tests/test_frontend_delivery.py` で、先生用限定 fallback、guardian の静的配信、
+欠損 asset の 404、cache header、外部オリジン参照がないことを検査します。

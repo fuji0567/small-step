@@ -1,0 +1,66 @@
+.voice-page,
+.voice-heading,
+.voice-panel,
+.voice-form,
+.voice-field {
+  display: grid;
+  gap: var(--ss-space-2);
+}
+
+.voice-page {
+  gap: var(--ss-space-3);
+}
+
+.voice-heading h2,
+.voice-heading p,
+.voice-panel p {
+  margin: 0;
+}
+
+.voice-panel {
+  max-width: 48rem;
+  border: 1px solid var(--ss-color-border);
+  border-radius: var(--ss-radius-large);
+  padding: var(--ss-space-3);
+  background: var(--ss-color-surface);
+}
+
+.voice-field label,
+.voice-confirmation span {
+  font-weight: var(--ss-font-weight-bold);
+}
+
+.voice-field input {
+  min-height: 44px;
+  width: 10rem;
+  box-sizing: border-box;
+  border: 2px solid var(--ss-color-border);
+  border-radius: var(--ss-radius-medium);
+  padding: var(--ss-space-1) var(--ss-space-2);
+}
+
+.voice-field input:focus-visible,
+.voice-confirmation input:focus-visible {
+  outline: 4px solid var(--ss-color-focus-inner);
+  outline-offset: 0;
+  box-shadow: 0 0 0 6px var(--ss-color-focus-outer);
+}
+
+.voice-confirmation {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--ss-space-1) var(--ss-space-2);
+  align-items: start;
+}
+
+.voice-confirmation input {
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 0;
+}
+
+.voice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+}

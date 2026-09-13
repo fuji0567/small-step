@@ -7,3 +7,9 @@ __pycache__/
 .DS_Store
 data/
 outputs/
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+app/frontend_dist/
