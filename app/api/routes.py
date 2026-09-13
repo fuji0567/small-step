@@ -532,7 +532,6 @@ def navigation_badge_summary(
         readiness_checks = [
             readiness.database_ready,
             readiness.database_migration_current,
-            readiness.line_delivery_configured,
         ]
         if readiness.cloud_audio_enabled:
             readiness_checks.extend(

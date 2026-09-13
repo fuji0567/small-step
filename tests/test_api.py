@@ -97,6 +97,32 @@ def test_readiness_requires_cloud_audio_storage_and_llm_configuration(tmp_path):
     }
 
 
+def test_navigation_badges_do_not_count_optional_line_delivery_as_readiness_issue(tmp_path):
+    app = create_app(
+        Settings(
+            database_url=f"sqlite:///{tmp_path}/test.db",
+            auth_mode="development",
+            cloud_audio_enabled=True,
+            cloud_audio_job_dir=str(tmp_path / "cloud-audio-jobs"),
+            llm_base_url="http://127.0.0.1:11434",
+            llm_model="test-model",
+            line_channel_secret="",
+            line_channel_access_token="",
+        )
+    )
+    with TestClient(app) as client:
+        school_id = client.post("/api/v1/schools", json={"name": "LINE任意設定テスト園"}).json()["id"]
+
+        readiness = client.get("/api/v1/readiness")
+        badges = client.get("/api/v1/navigation-badges", params={"school_id": school_id})
+
+    assert readiness.status_code == 200
+    assert readiness.json()["status"] == "ready"
+    assert readiness.json()["line_delivery_configured"] is False
+    assert badges.status_code == 200
+    assert badges.json()["readiness_issues"] == 0
+
+
 def test_navigation_badges_count_each_school_admin_indicator(tmp_path):
     app = create_app(
         Settings(
