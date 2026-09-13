@@ -30,6 +30,7 @@ export type AppShellNavItem = {
   icon?: IconName;
   badge?: string;
   badgeAriaLabel?: string;
+  badgeTone?: 'default' | 'warning';
 };
 
 export type OptionalSnippet = Snippet | undefined;

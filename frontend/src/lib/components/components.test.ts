@@ -230,4 +230,78 @@ describe('AppShell', () => {
       screen.getByRole('status', { name: '読み込み中です' })
     ).toBeInTheDocument();
   });
+
+  it('renders default and warning badge tones without changing their labels', () => {
+    render(AppShell, {
+      title: '先生用',
+      navItems: [
+        {
+          href: '/teacher/review/',
+          label: 'レビュー待ち',
+          badge: '3件',
+          badgeAriaLabel: 'レビュー待ち3件'
+        },
+        {
+          href: '/teacher/notifications/',
+          label: '通知',
+          badge: '!99+',
+          badgeTone: 'warning',
+          badgeAriaLabel: '未処理通知99件以上'
+        },
+        {
+          href: '/teacher/history/',
+          label: '履歴',
+          badge: '999+'
+        },
+        { href: '/teacher/children/', label: '園児' }
+      ],
+      currentPath: '/teacher/',
+      children: textSnippet('<p>今日の状況</p>')
+    });
+
+    const defaultBadge = screen.getByText('3件');
+    expect(defaultBadge).toHaveClass(
+      'ss-app-shell__badge',
+      'ss-app-shell__badge--default'
+    );
+    expect(defaultBadge).toHaveAttribute('aria-label', 'レビュー待ち3件');
+
+    const warningBadge = screen.getByText('!99+');
+    expect(warningBadge).toHaveClass(
+      'ss-app-shell__badge',
+      'ss-app-shell__badge--warning'
+    );
+    expect(warningBadge).toHaveAttribute('aria-label', '未処理通知99件以上');
+    expect(warningBadge).toHaveTextContent('!99+');
+
+    const visibleOnlyBadge = screen.getByText('999+');
+    expect(visibleOnlyBadge).not.toHaveAttribute('aria-label');
+    expect(screen.getByRole('link', { name: '履歴 999+' })).toBeInTheDocument();
+
+    const childrenLink = screen.getByRole('link', { name: '園児' });
+    expect(childrenLink.querySelector('.ss-app-shell__badge')).toBeNull();
+  });
+
+  it('uses the full badge aria-label once as the link accessible name', () => {
+    render(AppShell, {
+      title: '先生用',
+      navItems: [
+        {
+          href: '/teacher/review/',
+          label: 'レビュー待ち',
+          badge: '3件',
+          badgeAriaLabel: 'レビュー待ち3件'
+        }
+      ],
+      currentPath: '/teacher/',
+      children: textSnippet('<p>今日の状況</p>')
+    });
+
+    expect(
+      screen.getByRole('link', { name: 'レビュー待ち レビュー待ち3件' })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'レビュー待ち 3件 レビュー待ち3件' })
+    ).not.toBeInTheDocument();
+  });
 });

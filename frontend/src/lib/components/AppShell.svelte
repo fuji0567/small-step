@@ -70,7 +70,7 @@
               <span>{item.label}</span>
               {#if item.badge}
                 <span
-                  class="ss-app-shell__badge"
+                  class={`ss-app-shell__badge ss-app-shell__badge--${item.badgeTone ?? 'default'}`}
                   aria-label={item.badgeAriaLabel}>{item.badge}</span
                 >
               {/if}
@@ -221,12 +221,24 @@
   }
 
   .ss-app-shell__badge {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
     margin-left: auto;
-    border: 1px solid currentColor;
+    border: 1px solid var(--ss-color-border, #8c8c8c);
     border-radius: var(--ss-radius-full, 9999px);
     padding-inline: var(--ss-space-1, 0.5rem);
+    color: var(--ss-color-text, #1a1a1a);
+    background: var(--ss-color-surface, #ffffff);
     font-size: var(--ss-font-size-small, 0.875rem);
     line-height: 1.5;
+    white-space: nowrap;
+  }
+
+  .ss-app-shell__badge--warning {
+    border-color: var(--ss-color-warning-border, #af8900);
+    color: var(--ss-color-warning-text, #8a6b00);
+    background: var(--ss-color-warning-background, #fbf5e0);
   }
 
   .ss-app-shell__main {
