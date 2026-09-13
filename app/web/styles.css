@@ -871,6 +871,10 @@ input:focus-visible {
   background: var(--primary-100);
 }
 
+.record-item.is-low-confidence {
+  border-left-color: var(--warning-600);
+}
+
 .record-item strong,
 .record-item small {
   display: block;
@@ -938,6 +942,16 @@ input:focus-visible {
   padding: 0.75rem var(--space-2);
   color: var(--neutral-800);
   font-size: 0.9375rem;
+  line-height: 1.7;
+}
+
+.review-confidence-warning {
+  margin: 0;
+  border-left: 6px solid var(--warning-600);
+  background: var(--warning-50);
+  padding: 0.75rem var(--space-2);
+  color: var(--warning-800);
+  font-weight: 700;
   line-height: 1.7;
 }
 

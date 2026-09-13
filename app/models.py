@@ -51,6 +51,15 @@ class CloudAudioJobStatus(str, enum.Enum):
     expired = "expired"
 
 
+class WorkerHeartbeat(Base):
+    """A data-free liveness marker written by a long-running worker."""
+
+    __tablename__ = "worker_heartbeats"
+
+    worker_name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class AuditEventAction(str, enum.Enum):
     """Safe operational events that never contain audio, transcripts, or secrets."""
 

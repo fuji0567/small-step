@@ -9,7 +9,7 @@ import httpx
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, text, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import (
@@ -89,6 +89,11 @@ from app.schemas import (
     TeacherRoleUpdate,
     VoiceConsentCreate,
     VoiceConsentRead,
+)
+from app.worker_heartbeat import (
+    GPU_AUDIO_WORKER_NAME,
+    LINE_DELIVERY_WORKER_NAME,
+    worker_is_alive,
 )
 
 router = APIRouter(prefix="/api/v1")
@@ -425,6 +430,7 @@ def readiness_check(request: Request, db: Session = Depends(get_db)) -> RuntimeR
 
     cloud_audio_job_storage_ready: bool | None = None
     cloud_audio_llm_configured: bool | None = None
+    cloud_audio_worker_ready: bool | None = None
     if settings.cloud_audio_enabled:
         cloud_audio_llm_configured = bool(settings.llm_base_url and settings.llm_model)
         try:
@@ -432,6 +438,29 @@ def readiness_check(request: Request, db: Session = Depends(get_db)) -> RuntimeR
             cloud_audio_job_storage_ready = True
         except (CloudAudioStorageError, OSError):
             cloud_audio_job_storage_ready = False
+        if database_ready and database_migration_current:
+            try:
+                cloud_audio_worker_ready = worker_is_alive(
+                    db=db,
+                    worker_name=GPU_AUDIO_WORKER_NAME,
+                    stale_after=timedelta(seconds=settings.worker_heartbeat_stale_seconds),
+                )
+            except SQLAlchemyError:
+                db.rollback()
+                cloud_audio_worker_ready = False
+
+    line_delivery_configured = bool(settings.line_channel_secret and settings.line_channel_access_token)
+    line_delivery_worker_ready: bool | None = None
+    if line_delivery_configured and database_ready and database_migration_current:
+        try:
+            line_delivery_worker_ready = worker_is_alive(
+                db=db,
+                worker_name=LINE_DELIVERY_WORKER_NAME,
+                stale_after=timedelta(seconds=settings.worker_heartbeat_stale_seconds),
+            )
+        except SQLAlchemyError:
+            db.rollback()
+            line_delivery_worker_ready = False
 
     result = RuntimeReadinessRead(
         status="ready"
@@ -439,15 +468,22 @@ def readiness_check(request: Request, db: Session = Depends(get_db)) -> RuntimeR
         and database_migration_current
         and (
             not settings.cloud_audio_enabled
-            or (cloud_audio_job_storage_ready is True and cloud_audio_llm_configured is True)
+            or (
+                cloud_audio_job_storage_ready is True
+                and cloud_audio_llm_configured is True
+                and cloud_audio_worker_ready is True
+            )
         )
+        and (not line_delivery_configured or line_delivery_worker_ready is True)
         else "not_ready",
         database_ready=database_ready,
         database_migration_current=database_migration_current,
         cloud_audio_enabled=settings.cloud_audio_enabled,
         cloud_audio_job_storage_ready=cloud_audio_job_storage_ready,
         cloud_audio_llm_configured=cloud_audio_llm_configured,
-        line_delivery_configured=bool(settings.line_channel_secret and settings.line_channel_access_token),
+        cloud_audio_worker_ready=cloud_audio_worker_ready,
+        line_delivery_configured=line_delivery_configured,
+        line_delivery_worker_ready=line_delivery_worker_ready,
     )
     if result.status == "ready":
         return result

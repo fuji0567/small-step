@@ -25,7 +25,7 @@ uvicorn app.main:app --reload                             # http://127.0.0.1:800
 - SQLite なら移行はアプリ起動時に自動適用されるので、事前準備は不要です。
 
 ```bash
-pytest                                                    # 全 51 件・約 20 秒
+pytest                                                    # 全テスト
 pytest tests/test_api.py::test_growth_record_is_reviewed_and_scheduled   # 単体
 pytest -k notion -q                                       # 名前で絞り込み
 ```
@@ -102,9 +102,11 @@ README では別の venv（`.venv313`）へ入れる運用になっています�
 
 ### 音声パイプライン
 
-`EDGE_AUDIO_PROCESSING_MODE=local`（既定）は園内で文字起こし・話者分離・匿名化まで完了させ、
+`EDGE_AUDIO_PROCESSING_MODE=local`（既定）は園内で文字起こし・匿名化まで完了させ、
 テキストだけを送ります。`cloud` は `CLOUD_AUDIO_ENABLED=true` も必要な明示的オプトインで、
 音声は短命ジョブ保管に置かれ処理後に削除されます。
+`SPEAKER_DIARIZATION_TOKEN` が設定されている場合は、両モードとも匿名話者分離を文字起こしへ統合します。
+具体的な園児の出来事がない音声は記録を作らず、クラウドジョブだけを正常完了にします。
 `LLM_ALLOW_EXTERNAL=false`（既定）のとき `LLM_BASE_URL` はループバックに限定され、
 それ以外は `EdgeAudioError` で拒否されます。
 
@@ -123,6 +125,8 @@ README では別の venv（`.venv313`）へ入れる運用になっています�
   明示して各テストでアプリを作りますが、指定しなかった項目は実際の `.env` の値が入ります。
 - **重複防止は一意制約で担保されています。** `records(school_id, source_event_id)`、
   `notifications.record_id`、`notion_syncs.record_id`、GPU ジョブの `claim_token` 排他取得。
+- **Docker health と readiness を混同しない。** `/health` はAPIとDBの起動順だけに使い、
+  `/readiness` は `worker_heartbeats` を含む運用開始判断に使います。ワーカーは音声や本文をheartbeatへ保存しません。
 
 ## 画面を作るとき・レビューするとき
 

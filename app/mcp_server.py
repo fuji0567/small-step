@@ -34,7 +34,7 @@ def build_mcp_server(
         instructions=(
             "Use only files already placed in the configured local audio inbox. "
             "Audio is processed locally and deleted by default. Submitting a candidate "
-            "creates a teacher-review record only; it never sends a LINE message."
+            "creates a teacher-review record only for a concrete event; it never sends a LINE message."
         ),
     )
 
@@ -52,7 +52,7 @@ def build_mcp_server(
 
     @mcp.tool()
     def submit_analyzed_audio_file(audio_path: str, child_id: str | None = None) -> dict[str, object]:
-        """Create one pending-review record from local audio; a teacher must still approve it."""
+        """Create a pending-review record only for a concrete event; a teacher must still approve it."""
 
         return edge_audio.submit_analyzed_audio_file(audio_path=audio_path, child_id=child_id).as_dict()
 

@@ -27,8 +27,15 @@ def test_initial_migration_creates_the_current_schema(tmp_path):
     finally:
         engine.dispose()
 
-    assert {"alembic_version", "schools", "cloud_audio_jobs", "audit_events", "notion_syncs"} <= tables
-    assert migration_revision(database_url) == "0016_protect_supabase_tables"
+    assert {
+        "alembic_version",
+        "schools",
+        "cloud_audio_jobs",
+        "audit_events",
+        "notion_syncs",
+        "worker_heartbeats",
+    } <= tables
+    assert migration_revision(database_url) == "0017_worker_heartbeats"
 
 
 def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_path):
@@ -42,4 +49,4 @@ def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_pat
     message = prepare_database(database_url)
 
     assert "登録しました" in message
-    assert migration_revision(database_url) == "0016_protect_supabase_tables"
+    assert migration_revision(database_url) == "0017_worker_heartbeats"

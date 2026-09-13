@@ -81,7 +81,9 @@ class RuntimeReadinessRead(BaseModel):
     cloud_audio_enabled: bool
     cloud_audio_job_storage_ready: bool | None
     cloud_audio_llm_configured: bool | None
+    cloud_audio_worker_ready: bool | None
     line_delivery_configured: bool
+    line_delivery_worker_ready: bool | None
 
 
 class AuthBootstrapTeacherCreate(BaseModel):

@@ -26,6 +26,7 @@ from app.models import (
     School,
     Teacher,
     VoiceEnrollmentConsent,
+    WorkerHeartbeat,
 )
 
 
@@ -43,6 +44,7 @@ MODELS_IN_DEPENDENCY_ORDER = (
     CloudAudioJob,
     Notification,
     NotionSync,
+    WorkerHeartbeat,
 )
 
 

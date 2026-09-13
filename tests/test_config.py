@@ -44,3 +44,11 @@ def test_guardian_archive_requires_https_only_in_production():
         )
     )
     assert settings.app_env == "production"
+
+
+def test_worker_heartbeat_stale_window_must_exceed_update_interval():
+    with pytest.raises(ValidationError, match="WORKER_HEARTBEAT_STALE_SECONDS"):
+        Settings(
+            worker_heartbeat_interval_seconds=30,
+            worker_heartbeat_stale_seconds=30,
+        )

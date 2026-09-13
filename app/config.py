@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     cloud_audio_job_retention_minutes: int = Field(default=15, ge=1, le=1_440)
     cloud_audio_processing_timeout_minutes: int = Field(default=10, ge=1, le=1_440)
     cloud_audio_worker_poll_seconds: float = Field(default=2.0, gt=0)
+    worker_heartbeat_interval_seconds: float = Field(default=30.0, ge=5.0, le=3_600.0)
+    worker_heartbeat_stale_seconds: float = Field(default=90.0, ge=10.0, le=7_200.0)
     speaker_diarization_model: str = "pyannote/speaker-diarization-community-1"
     speaker_diarization_token: str | None = None
     speaker_diarization_device: str = "cpu"
@@ -67,6 +69,10 @@ class Settings(BaseSettings):
     def reject_unsafe_production_configuration(self) -> "Settings":
         """Keep local defaults from accidentally becoming a public deployment."""
 
+        if self.worker_heartbeat_stale_seconds <= self.worker_heartbeat_interval_seconds:
+            raise ValueError(
+                "WORKER_HEARTBEAT_STALE_SECONDS must be greater than WORKER_HEARTBEAT_INTERVAL_SECONDS"
+            )
         if self.app_env != "production":
             return self
 

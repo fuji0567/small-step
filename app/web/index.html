@@ -268,6 +268,10 @@
                 <span id="record-category" class="category"></span>
               </div>
 
+              <p id="record-confidence-warning" class="review-confidence-warning" hidden>
+                AIの判定に迷いがある候補です。園児、内容、配信先を特に丁寧に確認してください。
+              </p>
+
               <label for="child-select">
                 園児
                 <select id="child-select" required></select>
@@ -440,7 +444,7 @@
             </div>
             <span id="audio-job-count" class="count">0</span>
           </div>
-          <p class="audio-jobs-note">音声の内容・元ファイル名・保存場所は表示しません。処理が終わると、レビュー待ちの記録が作成されます。</p>
+          <p class="audio-jobs-note">音声の内容・元ファイル名・保存場所は表示しません。具体的な出来事が確認できた場合だけ、レビュー待ちの記録が作成されます。</p>
           <div id="audio-job-list" class="audio-job-list" aria-live="polite"></div>
         </div>
       </section>
@@ -724,9 +728,19 @@
               <p id="runtime-llm-note" class="runtime-check-note">クラウド音声処理を使う場合だけ確認します。</p>
             </article>
             <article class="runtime-readiness-card">
-              <h3>LINE配信</h3>
+              <h3>GPU音声処理</h3>
+              <p id="runtime-gpu-worker-status" class="runtime-check-status">未確認</p>
+              <p id="runtime-gpu-worker-note" class="runtime-check-note">クラウド音声処理を使う場合だけ確認します。</p>
+            </article>
+            <article class="runtime-readiness-card">
+              <h3>LINE配信設定</h3>
               <p id="runtime-line-status" class="runtime-check-status">未確認</p>
               <p id="runtime-line-note" class="runtime-check-note">LINEの送信設定が入っているかだけを確認します。</p>
+            </article>
+            <article class="runtime-readiness-card">
+              <h3>LINE送信処理</h3>
+              <p id="runtime-line-worker-status" class="runtime-check-status">未確認</p>
+              <p id="runtime-line-worker-note" class="runtime-check-note">LINEの送信設定後に確認します。</p>
             </article>
           </div>
           <div class="runtime-actions">

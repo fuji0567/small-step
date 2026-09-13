@@ -70,12 +70,17 @@ flowchart LR
 
 ### ヘルスチェック
 
-`api` サービスは `GET /api/v1/readiness` を 10 秒間隔で叩きます
-（タイムアウト 5 秒、6 回まで、起動猶予 15 秒）。
-このエンドポイントは先生用画面の「稼働準備チェック」ビューと同じ内容を返し、
-`scripts/check_runtime_readiness.py` からも実行できます。
+`api` サービスのDockerヘルスチェックは `GET /api/v1/health` を10秒間隔で叩きます
+（タイムアウト5秒、6回まで、起動猶予15秒）。DB接続とAPI応答だけを見る軽量な確認で、
+この結果を待って `gpu-worker` と `line-worker` が起動します。
 
-`GET /api/v1/health` は依存関係を見ない軽量な生存確認です。
+`GET /api/v1/readiness` は運用開始判断用です。DB移行、一時音声保存、LLM設定に加えて、
+GPU音声処理とLINE送信処理の最終heartbeatが既定90秒以内かを確認します。
+先生用画面の「稼働準備チェック」と `scripts/check_runtime_readiness.py` はこの結果を使います。
+LINEが未設定の開発環境ではLINEワーカーを必須にせず、LINE設定済みの環境では稼働を必須にします。
+
+`worker_heartbeats` に保存するのは固定のワーカー名と最終確認時刻だけです。SupabaseのData APIからは
+参照できないよう、移行時にRLSを有効化して `anon`、`authenticated`、`service_role` の権限を取り消します。
 
 APIのホスト側ポートは `127.0.0.1:8000` に限定します。外部端末には直接公開せず、
 本番認証を有効にしたうえでHTTPSのリバースプロキシを唯一の入口にします。

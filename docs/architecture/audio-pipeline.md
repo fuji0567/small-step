@@ -29,9 +29,12 @@ flowchart LR
     INBOX --> WATCH["watch_edge_audio.py"]
     WATCH --> TRANS["faster-whisper<br/>文字起こし"]
     TRANS --> DIAR["app/speaker_diarization.py<br/>話者分離"]
-    DIAR --> LLM["ローカルLLM<br/>匿名化と要約"]
-    LLM --> POST["POST /api/v1/edge/records"]
+    DIAR --> LLM["ローカルLLM<br/>記録対象判定・匿名化・要約"]
+    LLM --> JUDGE{"具体的な出来事あり?"}
+    JUDGE -->|あり| POST["POST /api/v1/edge/records"]
+    JUDGE -->|なし| SKIP["記録を作らず正常完了"]
     POST --> DEL["音声ファイルを削除"]
+    SKIP --> DEL
 ```
 
 | ステップ | 実装 | 補足 |
@@ -39,8 +42,8 @@ flowchart LR
 | 録音 | `app/edge_recorder.py` | `EDGE_AUDIO_RECORD_CHUNK_SECONDS`（既定 30 秒）で分割 |
 | 監視 | `scripts/watch_edge_audio.py` | `EDGE_AUDIO_WATCH_POLL_SECONDS` ごとに走査。書き込み途中を避けるため `EDGE_AUDIO_WATCH_MIN_AGE_SECONDS` を待つ |
 | 文字起こし | `app/edge_audio.py` | faster-whisper。既定は `small` / `cpu` / `int8` |
-| 話者分離 | `app/speaker_diarization.py` | pyannote。ラベルは `speaker_01` 形式の一時 ID のみ |
-| 匿名化 | `app/edge_audio.py` → ローカル LLM | OpenAI 互換 API。園児名などを含まない候補文を生成 |
+| 話者分離 | `app/speaker_diarization.py` | トークン設定時だけpyannoteを実行。Whisperの単語時刻を`speaker_01`形式の一時ラベルへ対応付ける |
+| 対象判定・匿名化 | `app/edge_audio.py` → ローカル LLM | 無音はLLMを呼ばず対象外にする。発話があっても具体的な出来事がある場合だけ候補文を生成 |
 | 送信 | `POST /edge/records` | 端末 APIキーで認証。本文・種別・信頼度・発生時刻を送る |
 | 後始末 | `EDGE_AUDIO_DELETE_AFTER_PROCESSING` | 既定 `true`。処理済みの音声を削除 |
 
@@ -74,8 +77,13 @@ sequenceDiagram
     API->>Store: ランダムキーで保存（元ファイル名は破棄）
     API-->>Edge: job_id / status=queued
     GPU->>API: ジョブ要求（claim_token で排他）
-    GPU->>Store: 音声を取得して文字起こし・匿名化
-    GPU->>API: 記録を作成して完了報告
+    GPU->>Store: 音声を取得して文字起こし・匿名話者分離
+    GPU->>GPU: 記録対象判定・匿名化・要約
+    alt 具体的な出来事あり
+        GPU->>API: 記録を作成して完了報告
+    else 記録対象外
+        GPU->>API: record_idなしで正常完了を報告
+    end
     API->>Store: 音声を削除
     Note over API,Store: 成否にかかわらず保持期限（既定 15 分）で失効
 ```
@@ -85,11 +93,21 @@ sequenceDiagram
 | 短命保管 | `app/cloud_audio.py` | ランダムなサーバー側キーで保存。アップロード時のファイル名は残さない |
 | 排他取得 | `app/cloud_audio_worker.py` の `claim_token` | 複数ワーカーが同じジョブを処理しない |
 | 重複排除 | `X-Edge-Upload-Id`（UUID） | 再送されても同じジョブを返す |
+| 連続区間の統合 | `app/cloud_audio_worker.py` | 同じ園児・端末・種別で2分以内の未承認候補がほぼ同文なら、既存記録へまとめる |
 | 期限切れ | `CLOUD_AUDIO_JOB_RETENTION_MINUTES`（既定 15 分） | 処理されなかった音声も必ず消える |
 | 処理タイムアウト | `CLOUD_AUDIO_PROCESSING_TIMEOUT_MINUTES`（既定 10 分） | 落ちたワーカーが掴んだジョブを解放 |
+| 稼働確認 | `worker_heartbeats`（既定 30 秒ごと、90 秒で停止判定） | 長時間のGPU処理中もバックグラウンドで生存を通知 |
 
 データベースには `cloud_audio_jobs` のメタデータだけが入り、音声バイトは一切保存されません。
 先生用画面の「音声処理状況」ビューは `GET /audio-jobs` でこのメタデータを表示します。
+`completed` かつ `record_id` がないジョブは、失敗ではなく「記録対象外」と表示します。
+
+園児ID付きのジョブでは、同じ園児の直近5件の承認済み・配信済み記録を各500文字まで取得し、
+匿名の参考情報としてローカルLLMへ渡します。現在の音声と過去記録の両方に根拠がある場合だけ、
+以前との変化を候補文へ含めます。園児名・ID、未承認記録、別園児の履歴は渡しません。
+
+AIが返した信頼度が70%未満でも候補自体は捨てません。先生画面で「要確認」として強調し、
+承認時にも再確認を促します。誤配信を抑えながら、聞き取りづらい場面の見逃しを避けるためです。
 
 ---
 
@@ -104,6 +122,8 @@ sequenceDiagram
   再試行の結果を採用するのは、話者が増え、かつ増えた話者に十分な発話長がある場合だけです
   （`should_use_low_volume_retry_result()`）。雑音による誤検出を採用しないための条件です。
 - モデルの取得には Hugging Face のトークン（`SPEAKER_DIARIZATION_TOKEN`）が必要です。
+- トークンが設定されている場合だけ通常の文字起こしへ自動統合し、未設定時は話者分離を省略します。
+- Whisperの単語時刻と話者区間を突き合わせた後、LLMへ渡すのは匿名ラベル付き本文だけです。時刻と区間は保存しません。
 
 単体で試すには `scripts/diarize_edge_audio.py` を使います。
 
@@ -138,6 +158,21 @@ sequenceDiagram
 
 APIキーは発行・再発行の応答でのみ平文が返り、データベースにはハッシュだけが残ります。
 最終通信時刻（`last_seen_at`）は先生用画面の「録音端末」ビューに表示されます。
+
+### ESP32-S3 実機
+
+`firmware/esp32-s3-recorder` は、EV_INMP621-FXのPDM音声をESP32-S3内で
+16 kHz・モノラル・16 bit PCMへ変換し、30秒単位のWAVとしてクラウドGPU処理モードへ送ります。
+園児を音声から推測せず、通常は園児IDを空のまま送って先生のレビュー時に選択します。
+
+録音中のPCMはPSRAMだけに置き、無音判定を通った区間だけHTTPSで送信します。
+VRTが受理した場合は端末へ音声を保存しません。通信失敗時だけ1件をSPIFFSへ待避し、
+保存済みの`X-Edge-Upload-Id`を変えずに再送します。待避中は新しい録音を止めるため、
+古い音声を上書きしたり、停止中に端末内へ音声が増え続けたりしません。
+
+Wi-Fi、公開URL、端末APIキーはGit管理外の`main/secrets.h`だけに設定します。
+配線・書き込み・実機確認の手順は
+[`../../firmware/esp32-s3-recorder/README.md`](../../firmware/esp32-s3-recorder/README.md)を参照します。
 
 ---
 
