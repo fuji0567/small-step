@@ -76,10 +76,13 @@ describe('navigation badges', () => {
     expect(state.counts).toEqual(validCounts);
 
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ ...validCounts, pending_review_records: 9 }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' }
-      })
+      new Response(
+        JSON.stringify({ ...validCounts, pending_review_records: 9 }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      )
     );
     await state.refresh('school-1');
     expect(state.counts.pending_review_records).toBe(9);
