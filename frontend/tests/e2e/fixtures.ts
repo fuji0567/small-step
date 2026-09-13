@@ -73,6 +73,15 @@ export async function mockApi(
       case '/api/v1/records/record-1':
         await json(route, record);
         return;
+      case '/api/v1/navigation-badges':
+        await json(route, {
+          pending_review_records: 3,
+          notification_attention: 4,
+          failed_audio_jobs: 5,
+          invitations_not_issued: 6,
+          readiness_issues: 7
+        });
+        return;
       case '/api/v1/children':
         await json(route, [child]);
         return;
