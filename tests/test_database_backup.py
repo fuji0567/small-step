@@ -156,6 +156,8 @@ def test_restore_rehearsal_uses_only_empty_local_database(tmp_path):
 
     assert result.table_count == 12
     assert set(result.row_counts) == CORE_APPLICATION_TABLES - {"alembic_version"}
+    assert "--clean" in restore_commands[0]
+    assert "--if-exists" in restore_commands[0]
     assert "--single-transaction" in restore_commands[0]
     assert "db.example.test" not in " ".join(restore_commands[0])
 

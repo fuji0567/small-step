@@ -351,6 +351,8 @@ def rehearse_database_restore(
     _run_checked(
         [
             "pg_restore",
+            "--clean",
+            "--if-exists",
             "--exit-on-error",
             "--single-transaction",
             "--no-owner",
