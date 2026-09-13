@@ -189,19 +189,32 @@ LLM_BACKEND=vllm
 LLM_BASE_URL=http://small-step-vllm:8000/v1
 LLM_ALLOW_EXTERNAL=true
 LLM_MODEL=Qwen/Qwen3-32B
+
+# Composeが管理するvLLMのキャッシュ先。既存のNVMeキャッシュを再利用します。
+VLLM_MODEL_CACHE_DIR=/mnt/small-step-cache/huggingface
+VLLM_COMPILE_CACHE_DIR=/mnt/small-step-cache/vllm
 ```
 
 `LLM_ALLOW_EXTERNAL=true` は、ここではDockerサービス名を許可するために必要です。
-LLMをインターネットへ公開する設定ではありません。vLLMのホスト側ポートは
-`127.0.0.1:8001:8000` のままにし、`small-step-vllm` と `gpu-worker` だけを
-`small-step-ai` ネットワークへ接続します。ネットワークが未作成の場合だけ、起動前に作成します。
+LLMをインターネットへ公開する設定ではありません。ComposeがQwen3-32BのvLLMも管理し、
+ホスト側ポートは`127.0.0.1:8001:8000`だけに限定します。`small-step-vllm` と
+`gpu-worker`だけを`small-step-ai`ネットワークへ接続します。ネットワークが未作成の場合だけ、
+起動前に作成します。
 
 ```bash
 sudo docker network inspect small-step-ai >/dev/null 2>&1 \
   || sudo docker network create small-step-ai
 ```
 
-次でデータベース準備・API・GPUワーカーを一緒に起動できます。`compose.vrt.yaml` はMacでは使いません。空のDBでは`migrate`が初期構成を適用してから、APIと各ワーカーが順番に起動します。
+以前の手動`docker run`で`small-step-vllm`を起動しているVRTでは、最初の切り替え時だけ
+そのコンテナを削除します。モデルはNVMe側に残るため再ダウンロードされません。
+
+```bash
+sudo docker stop small-step-vllm
+sudo docker rm small-step-vllm
+```
+
+次でデータベース準備・vLLM・API・GPUワーカーを一緒に起動できます。`compose.vrt.yaml` はMacでは使いません。空のDBでは`migrate`が初期構成を適用し、vLLMとAPIがHealthyになってから各ワーカーが順番に起動します。Qwenの読込中は数分待ちます。
 
 ```bash
 docker compose -f compose.yaml -f compose.vrt.yaml config

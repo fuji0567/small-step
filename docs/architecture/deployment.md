@@ -40,18 +40,21 @@ docker compose -f compose.yaml -f compose.vrt.yaml up -d --build
 ```mermaid
 flowchart LR
     MIG["migrate<br/>prepare_database.py<br/>restart: no"] --> API["api<br/>uvicorn app.main:app"]
-    API -->|healthy| GPUW["gpu-worker<br/>process_cloud_audio_jobs.py"]
+    VLLM["small-step-vllm<br/>Qwen3-32B"] -->|healthy| GPUW["gpu-worker<br/>process_cloud_audio_jobs.py"]
+    API -->|healthy| GPUW
     API -->|healthy| LINEW["line-worker<br/>send_pending_line_notifications.py --watch"]
 
     VOL1[("api_data<br/>/app/data")] --- MIG & API & GPUW & LINEW
     VOL2[("cloud_audio_jobs<br/>/var/lib/small-step/cloud-audio-jobs")] --- API & GPUW
     VOL3[("gpu_model_cache<br/>/var/lib/small-step/models")] --- GPUW
+    NVME[("NVMe model cache")] --- VLLM
 ```
 
 | サービス | 役割 | 再起動 |
 | --- | --- | --- |
 | `api` | FastAPI（ポート 8000）。先生用・保護者用の静的配信も担う | `unless-stopped` |
 | `migrate` | 起動前に一度だけ移行を適用。完了を `api` が待つ | `no` |
+| `small-step-vllm` | Qwen3-32BをOpenAI互換APIとして提供 | `unless-stopped` |
 | `gpu-worker` | 短命ジョブの音声を処理（`gpus: all`） | `unless-stopped` |
 | `line-worker` | 配信予定を過ぎた通知を LINE へ送信 | `unless-stopped` |
 
@@ -66,7 +69,10 @@ flowchart LR
 | `cloud_audio_jobs` | 短命の音声ジョブ | `api`, `gpu-worker` |
 | `gpu_model_cache` | Hugging Face のモデルキャッシュ | `gpu-worker` |
 
-`gpu_model_cache` を分けているのは、コンテナを作り直すたびに数 GB のモデルを再取得しないためです。
+`gpu_model_cache` を分けているのは、コンテナを作り直すたびに音声モデルを再取得しないためです。
+Qwenのモデルとコンパイルキャッシュは、既定でNVMe上の
+`/mnt/small-step-cache/huggingface`と`/mnt/small-step-cache/vllm`をバインドします。
+保存場所は`VLLM_MODEL_CACHE_DIR`と`VLLM_COMPILE_CACHE_DIR`で変更できます。
 
 ### ヘルスチェック
 
@@ -87,10 +93,13 @@ APIのホスト側ポートは `127.0.0.1:8000` に限定します。外部端�
 
 ### Docker内部ネットワーク上の LLM を使う
 
-`gpu-worker` は外部ネットワーク `small-step-ai` に参加します。VRT上のvLLMコンテナも
-同じネットワークへ参加させ、`LLM_BASE_URL=http://small-step-vllm:8000/v1` で参照します。
+`gpu-worker` とCompose管理の `small-step-vllm` は外部ネットワーク `small-step-ai` に参加し、
+`LLM_BASE_URL=http://small-step-vllm:8000/v1` で参照します。
 ホスト側の公開は `127.0.0.1:8001:8000` に限定し、LLMをインターネットへ公開しません。
 MacのOllamaを使う場合は、従来どおり `host.docker.internal:host-gateway` も利用できます。
+
+vLLMは初回起動にモデル読込とGPU最適化で数分かかるため、ヘルスチェックには5分の起動猶予を
+設けています。`gpu-worker` はvLLMとAPIの両方がHealthyになってから起動します。
 
 ---
 
