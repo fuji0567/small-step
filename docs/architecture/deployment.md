@@ -13,10 +13,14 @@ GPU が必要なのはクラウド音声処理モードのワーカーだけで�
 | --- | --- | --- |
 | `Dockerfile` | `python:3.12-slim` | API と CPU 側ワーカー（`migrate` / `line-worker`）に共用 |
 | `Dockerfile.gpu` | `nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04` | GPU ワーカー専用 |
+| `Dockerfile.database-tools` | `postgres:18.6-bookworm` | PostgreSQLバックアップと復元リハーサル専用 |
 
-どちらも UID 10001 の非 root ユーザー `appuser` で動きます。
+API用とGPU用の2イメージは UID 10001 の非 root ユーザー `appuser` で動きます。
 GPU イメージだけが `edge-audio` / `speaker-diarization` の extras を入れるため、
 API イメージは小さいまま保てます。
+
+`database-tools`は一度だけ起動し、ホスト側に所有者だけが読めるバックアップを作るためrootで動きます。
+ルートファイルシステムは読み取り専用、権限昇格は禁止し、書き込み先を`/backups`と`/tmp`だけに限定します。
 
 | イメージ | インストールする extras |
 | --- | --- |
@@ -43,6 +47,8 @@ flowchart LR
     VLLM["small-step-vllm<br/>Qwen3-32B"] -->|healthy| GPUW["gpu-worker<br/>process_cloud_audio_jobs.py"]
     API -->|healthy| GPUW
     API -->|healthy| LINEW["line-worker<br/>send_pending_line_notifications.py --watch"]
+    DBTOOLS["database-tools<br/>one shot"] --> SUPABASE[("Supabase PostgreSQL")]
+    DBTOOLS --> RESTORE[("disposable restore-db")]
 
     VOL1[("api_data<br/>/app/data")] --- MIG & API & GPUW & LINEW
     VOL2[("cloud_audio_jobs<br/>/var/lib/small-step/cloud-audio-jobs")] --- API & GPUW
@@ -57,6 +63,8 @@ flowchart LR
 | `small-step-vllm` | Qwen3-32BをOpenAI互換APIとして提供 | `unless-stopped` |
 | `gpu-worker` | 短命ジョブの音声を処理（`gpus: all`） | `unless-stopped` |
 | `line-worker` | 配信予定を過ぎた通知を LINE へ送信 | `unless-stopped` |
+| `database-tools` | `public`スキーマのバックアップ・検証・復元確認。`operations`プロファイルで一度だけ実行 | `no` |
+| `restore-db` | 復元リハーサル専用。非公開ネットワークとtmpfs上でのみ起動 | `no` |
 
 依存関係は `condition: service_healthy` / `service_completed_successfully` で表現しています。
 移行が終わる前に API が立ち上がったり、API が応答する前にワーカーがポーリングを始めたりしません。
@@ -73,6 +81,11 @@ flowchart LR
 Qwenのモデルとコンパイルキャッシュは、既定でNVMe上の
 `/mnt/small-step-cache/huggingface`と`/mnt/small-step-cache/vllm`をバインドします。
 保存場所は`VLLM_MODEL_CACHE_DIR`と`VLLM_COMPILE_CACHE_DIR`で変更できます。
+
+データベースバックアップはモデルキャッシュと分離し、既定でホストの
+`./data/database-backups`へ保存します。Compose内では`/backups`として見えます。
+バックアップには個人データが含まれるためGit管理せず、復元確認後に暗号化された外部保管先へ複製します。
+`restore-db`のデータ領域はtmpfsなので、コンテナを削除すると復元したデータも消えます。
 
 ### ヘルスチェック
 

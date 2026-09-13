@@ -23,7 +23,9 @@ def test_initial_migration_creates_the_current_schema(tmp_path):
 
     engine = create_database_engine(database_url)
     try:
-        tables = set(inspect(engine).get_table_names())
+        inspector = inspect(engine)
+        tables = set(inspector.get_table_names())
+        columns = {column["name"] for column in inspector.get_columns("cloud_audio_jobs")}
     finally:
         engine.dispose()
 
@@ -35,7 +37,8 @@ def test_initial_migration_creates_the_current_schema(tmp_path):
         "notion_syncs",
         "worker_heartbeats",
     } <= tables
-    assert migration_revision(database_url) == "0017_worker_heartbeats"
+    assert {"detected_speaker_count", "used_low_volume_retry"} <= columns
+    assert migration_revision(database_url) == "0018_cloud_audio_quality_metrics"
 
 
 def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_path):
@@ -49,4 +52,4 @@ def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_pat
     message = prepare_database(database_url)
 
     assert "登録しました" in message
-    assert migration_revision(database_url) == "0017_worker_heartbeats"
+    assert migration_revision(database_url) == "0018_cloud_audio_quality_metrics"

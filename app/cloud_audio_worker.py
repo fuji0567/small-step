@@ -9,7 +9,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.cloud_audio import CloudAudioJobStorage
-from app.edge_audio import EdgeAudioCandidate, EdgeAudioError, EdgeAudioProcessor
+from app.edge_audio import EdgeAudioAnalysis, EdgeAudioCandidate, EdgeAudioError, EdgeAudioProcessor
 from app.models import (
     Child,
     CloudAudioJob,
@@ -253,10 +253,20 @@ def process_next_cloud_audio_job(
     owns_finalization = False
     try:
         audio_path = storage.path_for(job.storage_key)
-        candidate = processor.analyze_trusted_cloud_audio_file(
-            str(audio_path),
-            prior_context=_recent_approved_context(db=db, job=job),
-        )
+        prior_context = _recent_approved_context(db=db, job=job)
+        analyze_with_metrics = getattr(processor, "analyze_trusted_cloud_audio_file_with_metrics", None)
+        if callable(analyze_with_metrics):
+            analysis = analyze_with_metrics(str(audio_path), prior_context=prior_context)
+            if not isinstance(analysis, EdgeAudioAnalysis):
+                raise EdgeAudioError("Audio processor returned invalid analysis metadata")
+        else:
+            analysis = EdgeAudioAnalysis(
+                candidate=processor.analyze_trusted_cloud_audio_file(
+                    str(audio_path),
+                    prior_context=prior_context,
+                )
+            )
+        candidate = analysis.candidate
         record = None
         record_id = None
         if candidate.recordable:
@@ -278,6 +288,8 @@ def process_next_cloud_audio_job(
             .values(
                 status=CloudAudioJobStatus.completed,
                 record_id=record_id,
+                detected_speaker_count=analysis.detected_speaker_count,
+                used_low_volume_retry=analysis.used_low_volume_retry,
                 claim_token=None,
                 completed_at=utc_now(),
             )

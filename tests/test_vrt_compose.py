@@ -35,3 +35,22 @@ def test_vllm_healthcheck_has_long_model_startup_grace_period():
 
     assert "/health" in vllm
     assert "start_period: 300s" in vllm
+
+
+def test_database_backup_tools_are_one_shot_and_restore_database_is_disposable():
+    compose = VRT_COMPOSE.read_text(encoding="utf-8")
+    database_tools = compose.split("  database-tools:", maxsplit=1)[1].split(
+        "  restore-db:", maxsplit=1
+    )[0]
+    restore_db = compose.split("  restore-db:", maxsplit=1)[1].split(
+        "volumes:", maxsplit=1
+    )[0]
+
+    assert "Dockerfile.database-tools" in database_tools
+    assert "DATABASE_BACKUP_HOST_DIR" in database_tools
+    assert "no-new-privileges:true" in database_tools
+    assert 'restart: "no"' in database_tools
+    assert "postgres:18.6-bookworm" in restore_db
+    assert "/var/lib/postgresql/data" in restore_db
+    assert "database-recovery" in restore_db
+    assert 'restart: "no"' in restore_db

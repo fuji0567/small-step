@@ -164,6 +164,27 @@ VRT上では、FastAPIを起動した後に別プロセスでGPUワーカーを�
 ローカル接続に限って利用できます。端末キーは`.env`の`EDGE_API_KEY`または非表示入力から読み、
 画面や結果へ表示しません。園児を決めずに確認した場合は、作成された候補を先生画面で選択します。
 
+### 実音声テストセットの精度確認
+
+複数話者、声量差、雑音、記録対象外を含む複数の音声は、匿名のケースIDと期待値を
+マニフェストへ記載して順番に評価できます。ひな形は
+[`docs/vrt-audio-evaluation-manifest.example.json`](docs/vrt-audio-evaluation-manifest.example.json)です。
+音声はGit対象外の`data/vrt-evaluation/`へ置き、人物名をケースIDやファイル名に使わないでください。
+
+```bash
+.venv313/bin/python scripts/evaluate_vrt_audio_samples.py \
+  docs/vrt-audio-evaluation-manifest.example.json \
+  --api-url http://127.0.0.1:18000
+```
+
+VRTの受付状態を一度確認してから、ケースを1件ずつ処理します。評価項目は検出話者数、
+記録候補の作成有無、音量差補正の使用有無、処理時間です。作成された候補は承認待ちで止まり、
+LINEへ自動送信されません。集計は既定で`data/vrt-audio-evaluation-report.json`へ保存します。
+レポートには音声、文字起こし、ファイルパス、人物名、ジョブID、記録IDを含めません。
+
+話者数は生体情報や声紋ではなく、その音声内だけの匿名集計値として音声処理ジョブへ保存します。
+話者分離が無効な環境では人数が未計測となり、期待値との照合は不合格になります。
+
 ### 火曜日のVRT切替
 
 Macでの開発中は、これまでどおり次だけを使います。GPUワーカーは起動しないため、Mac用の設定や音声テストを変える必要はありません。
@@ -623,8 +644,82 @@ ESP32-S3とEV_INMP621-FXを使う実機ファームウェア、配線、秘密�
 4. リバースプロキシ（CaddyまたはNginx）でTLS終端し、APIの8000番ポートをインターネットへ直接公開しない。
 5. GPUワーカーを追加する際は、モデル・一時音声は永続ディスクまたは園内側に置く。高火力 VRTの一時領域はVM停止・障害時に消えるため、そこを永続データの保存先にしない。
 
+## Supabase PostgreSQLのバックアップと復元確認
+
+Supabaseのバックアップ提供範囲はプランによって異なります。Freeプランでは、公式ドキュメントも
+定期的なデータ出力と外部保管を案内しています。最新条件は
+[SupabaseのDatabase Backups](https://supabase.com/docs/guides/platform/backups)を確認してください。
+
+このリポジトリのバックアップは、Small Stepが使う`public`スキーマをPostgreSQLのカスタム形式で
+保存します。作成直後に必要テーブル、アーカイブ構造、SHA-256チェックサムを検証し、途中で失敗した
+ファイルは正式なバックアップとして残しません。バックアップには園児名、通知文、LINE連携情報などの
+個人データが含まれるため、保存先ディレクトリは`0700`、ファイルは`0600`に制限されます。
+
+バックアップ専用イメージを作り、業務データを1回保存します。APIやGPUワーカーは停止しません。
+
+```bash
+cd /home/ubuntu/small-step
+
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile operations \
+  build database-tools
+
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile operations \
+  run --rm database-tools
+```
+
+保存先は既定でホストの`./data/database-backups`です。変更するときだけ`.env`の
+`DATABASE_BACKUP_HOST_DIR`へ絶対パスを設定します。NVMeのモデルキャッシュ領域は、障害時に
+同時に失う可能性があるため指定しないでください。
+
+最新バックアップのチェックサムと構成だけを再確認する場合は次を使います。
+
+```bash
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile operations \
+  run --rm database-tools \
+  python scripts/verify_database_backup.py
+```
+
+実際に復元できることは、ネットワーク非公開かつメモリ上だけで動く使い捨てPostgreSQLで確認します。
+復元スクリプトは、本番と同じ接続先や外部ホストを復元先として受け付けません。
+
+```bash
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile recovery \
+  up -d --wait restore-db
+
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile operations \
+  --profile recovery \
+  run --rm database-tools \
+  python scripts/rehearse_database_restore.py
+
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile recovery \
+  rm -sf restore-db
+```
+
+このアーカイブに音声ファイル、Supabase Authのユーザー、Supabase Storageのオブジェクトは含まれません。
+それらを含むプロジェクト全体の復旧はSupabase側のバックアップ方針と合わせて管理してください。また、
+VRT内に1部あるだけではVRT障害への備えにならないため、作成後は暗号化された外部保管先へ複製します。
+復元リハーサルに成功したファイルだけを正式な世代として扱い、世代削除は外部保管を確認してから行います。
+
 ## 次に実装するもの
 
-1. 複数話者・雑音・声量差を含む実データで、記録対象判定と匿名話者分離の精度を確認する
+1. 複数話者・雑音・声量差を含む匿名テストセットを収録し、一括評価レポートで精度を確認する
 2. ESP32-S3録音端末を実機へ書き込み、PSRAM・マイク配線・無音しきい値・再送を確認する
-3. Quick Tunnelから固定HTTPS URLへ切り替え、バックアップ復元と障害通知を確認する
+3. VRT上でバックアップ復元リハーサルを実行し、Quick Tunnelから固定HTTPS URLへ切り替えて障害通知を確認する

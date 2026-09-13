@@ -20,6 +20,7 @@ from app.config import Settings
 from app.edge_audio import (
     CloudAudioUploader,
     EdgeDeviceHeartbeatClient,
+    EdgeAudioAnalysis,
     EdgeAudioCandidate,
     EdgeAudioError,
     EdgeAudioProcessor,
@@ -1903,17 +1904,21 @@ def test_cloud_audio_job_is_opt_in_and_deletes_raw_audio_after_processing(tmp_pa
     )
 
     class FakeCloudProcessor:
-        def analyze_trusted_cloud_audio_file(
+        def analyze_trusted_cloud_audio_file_with_metrics(
             self,
             audio_path: str,
             *,
             prior_context: str | None = None,
-        ) -> EdgeAudioCandidate:
+        ) -> EdgeAudioAnalysis:
             path = Path(audio_path)
             assert path.parent == job_dir
             assert path.read_bytes() == b"raw-audio-bytes"
             assert prior_context is None
-            return candidate
+            return EdgeAudioAnalysis(
+                candidate=candidate,
+                detected_speaker_count=2,
+                used_low_volume_retry=True,
+            )
 
     with TestClient(app) as client:
         school_id = client.post("/api/v1/schools", json={"name": "VRTテスト園"}).json()["id"]
@@ -1970,11 +1975,15 @@ def test_cloud_audio_job_is_opt_in_and_deletes_raw_audio_after_processing(tmp_pa
         assert processed is not None
         assert processed.status == CloudAudioJobStatus.completed
         assert processed.record_id is not None
+        assert processed.detected_speaker_count == 2
+        assert processed.used_low_volume_retry is True
         assert not stored_path.exists()
 
         completed = client.get(f"/api/v1/edge/audio-jobs/{job['id']}", headers=headers)
         assert completed.status_code == 200
         assert completed.json()["status"] == "completed"
+        assert completed.json()["detected_speaker_count"] == 2
+        assert completed.json()["used_low_volume_retry"] is True
         visible_jobs = client.get("/api/v1/audio-jobs", params={"school_id": school_id})
         assert visible_jobs.json()[0]["status"] == "completed"
         records = client.get(
@@ -3036,11 +3045,13 @@ def test_whisper_transcript_is_aligned_to_anonymous_speakers(tmp_path):
     )
     transcriber._model = FakeWhisperModel()
 
-    transcript = transcriber.transcribe(audio_file, language="ja")
+    transcription = transcriber.transcribe_with_metadata(audio_file, language="ja")
 
-    assert transcript == "speaker_01: できた、\nspeaker_02: すごいね"
-    assert "provider-child" not in transcript
-    assert "provider-teacher" not in transcript
+    assert transcription.transcript == "speaker_01: できた、\nspeaker_02: すごいね"
+    assert transcription.diarization is not None
+    assert transcription.diarization.speaker_count == 2
+    assert "provider-child" not in transcription.transcript
+    assert "provider-teacher" not in transcription.transcript
 
 
 def test_mcp_server_exposes_safe_edge_audio_tools():

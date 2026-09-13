@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "case_id": "single-speaker-no-event",
+      "audio_path": "../data/vrt-evaluation/single-speaker-no-event.wav",
+      "expected_speaker_count": 1,
+      "expected_candidate": false
+    },
+    {
+      "case_id": "two-speakers-balanced",
+      "audio_path": "../data/vrt-evaluation/two-speakers-balanced.wav",
+      "expected_speaker_count": 2,
+      "expected_candidate": true
+    },
+    {
+      "case_id": "two-speakers-volume-gap",
+      "audio_path": "../data/vrt-evaluation/two-speakers-volume-gap.wav",
+      "expected_speaker_count": 2,
+      "expected_candidate": true
+    },
+    {
+      "case_id": "background-noise-no-event",
+      "audio_path": "../data/vrt-evaluation/background-noise-no-event.wav",
+      "expected_speaker_count": 0,
+      "expected_candidate": false
+    }
+  ]
+}

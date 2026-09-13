@@ -95,6 +95,8 @@ def test_verifier_uploads_anonymous_filename_and_waits_for_candidate(tmp_path):
                 "id": JOB_ID,
                 "status": status,
                 "record_id": RECORD_ID if status == "completed" else None,
+                "detected_speaker_count": 2 if status == "completed" else None,
+                "used_low_volume_retry": status == "completed",
             },
         )
 
@@ -119,6 +121,8 @@ def test_verifier_uploads_anonymous_filename_and_waits_for_candidate(tmp_path):
     )
 
     assert result.created_candidate is True
+    assert result.detected_speaker_count == 2
+    assert result.used_low_volume_retry is True
     assert statuses == [
         CloudAudioJobStatus.queued,
         CloudAudioJobStatus.processing,
@@ -126,6 +130,33 @@ def test_verifier_uploads_anonymous_filename_and_waits_for_candidate(tmp_path):
     ]
     assert audio.exists()
     assert requests[-1] == ("GET", f"/api/v1/edge/audio-jobs/{JOB_ID}")
+
+
+def test_verifier_rejects_invalid_quality_metrics(tmp_path):
+    audio = tmp_path / "sample.wav"
+    audio.write_bytes(b"audio")
+
+    verifier = VrtPipelineVerifier(
+        api_url="https://vrt.example.test",
+        api_key="edge-secret",
+        request_timeout_seconds=15,
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(
+                    201,
+                    json={
+                        "id": JOB_ID,
+                        "status": "completed",
+                        "record_id": None,
+                        "detected_speaker_count": "two",
+                    },
+                )
+            )
+        ),
+    )
+
+    with pytest.raises(VrtPipelineVerificationError, match="不正"):
+        verifier.upload(audio_path=audio, child_id=None)
 
 
 def test_verifier_reports_completed_non_record_as_success(tmp_path):

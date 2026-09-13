@@ -100,6 +100,23 @@ class EdgeAudioCandidate(BaseModel):
 
 
 @dataclass(frozen=True)
+class TranscriptionResult:
+    """In-memory transcript plus non-identifying diarization metrics."""
+
+    transcript: str
+    diarization: SpeakerDiarizationResult | None = None
+
+
+@dataclass(frozen=True)
+class EdgeAudioAnalysis:
+    """An anonymized candidate and aggregate, non-biometric quality metrics."""
+
+    candidate: EdgeAudioCandidate
+    detected_speaker_count: int | None = None
+    used_low_volume_retry: bool | None = None
+
+
+@dataclass(frozen=True)
 class SubmittedRecord:
     """Safe result returned after a candidate is handed to the backend."""
 
@@ -273,7 +290,14 @@ class FasterWhisperTranscriber:
         self.diarizer = diarizer
         self._model: object | None = None
 
-    def transcribe(self, audio_path: Path, *, language: str) -> str:
+    def transcribe_with_metadata(
+        self,
+        audio_path: Path,
+        *,
+        language: str,
+    ) -> TranscriptionResult:
+        """Transcribe once and keep only anonymous aggregate diarization data."""
+
         if self._model is None:
             try:
                 from faster_whisper import WhisperModel
@@ -292,6 +316,7 @@ class FasterWhisperTranscriber:
             word_timestamps=self.diarizer is not None,
         )
         segment_list = list(segments)
+        diarization = None
         if self.diarizer is None:
             transcript = " ".join(
                 segment.text.strip() for segment in segment_list if segment.text.strip()
@@ -326,9 +351,13 @@ class FasterWhisperTranscriber:
             except SpeakerDiarizationError as error:
                 raise EdgeAudioError("Anonymous speaker diarization failed") from error
             transcript = align_transcript_with_speakers(parts, diarization)
-        if not transcript:
+        return TranscriptionResult(transcript=transcript, diarization=diarization)
+
+    def transcribe(self, audio_path: Path, *, language: str) -> str:
+        result = self.transcribe_with_metadata(audio_path, language=language)
+        if not result.transcript:
             raise NoSpeechDetectedError("The audio file did not produce a transcript")
-        return transcript
+        return result.transcript
 
 
 def redact_obvious_identifiers(value: str) -> str:
@@ -534,25 +563,53 @@ class EdgeAudioProcessor:
     def _resolve_audio_path(self, audio_path: str) -> Path:
         return self._validate_audio_path(audio_path, require_inbox=True)
 
+    def _analyze_resolved_audio_with_metrics(
+        self,
+        audio_path: Path,
+        *,
+        prior_context: str | None = None,
+    ) -> EdgeAudioAnalysis:
+        diarization = None
+        try:
+            transcribe_with_metadata = getattr(self.transcriber, "transcribe_with_metadata", None)
+            if callable(transcribe_with_metadata):
+                transcription = transcribe_with_metadata(
+                    audio_path,
+                    language=self.settings.edge_audio_language,
+                )
+                if not isinstance(transcription, TranscriptionResult):
+                    raise EdgeAudioError("The transcriber returned invalid metadata")
+                transcript = transcription.transcript
+                diarization = transcription.diarization
+                if not transcript:
+                    raise NoSpeechDetectedError("The audio file did not produce a transcript")
+            else:
+                transcript = self.transcriber.transcribe(
+                    audio_path,
+                    language=self.settings.edge_audio_language,
+                )
+        except NoSpeechDetectedError:
+            candidate = EdgeAudioCandidate(
+                recordable=False, category=None, confidence=1.0, summary=None
+            )
+        else:
+            candidate = self.summarizer.summarize(transcript, prior_context=prior_context)
+        return EdgeAudioAnalysis(
+            candidate=candidate,
+            detected_speaker_count=diarization.speaker_count if diarization else None,
+            used_low_volume_retry=diarization.used_low_volume_retry if diarization else None,
+        )
+
     def _analyze_resolved_audio(
         self,
         audio_path: Path,
         *,
         prior_context: str | None = None,
     ) -> EdgeAudioCandidate:
-        try:
-            transcript = self.transcriber.transcribe(
-                audio_path,
-                language=self.settings.edge_audio_language,
-            )
-        except NoSpeechDetectedError:
-            return EdgeAudioCandidate(
-                recordable=False,
-                category=None,
-                confidence=1.0,
-                summary=None,
-            )
-        return self.summarizer.summarize(transcript, prior_context=prior_context)
+        return self._analyze_resolved_audio_with_metrics(
+            audio_path,
+            prior_context=prior_context,
+        ).candidate
 
     def analyze_audio_file(self, audio_path: str) -> EdgeAudioCandidate:
         """Analyze one local file and remove it afterwards when configured to do so."""
@@ -579,6 +636,24 @@ class EdgeAudioProcessor:
         resolved_path = self._validate_audio_path(audio_path, require_inbox=False)
         try:
             return self._analyze_resolved_audio(
+                resolved_path,
+                prior_context=prior_context,
+            )
+        finally:
+            if self.settings.edge_audio_delete_after_processing:
+                resolved_path.unlink(missing_ok=True)
+
+    def analyze_trusted_cloud_audio_file_with_metrics(
+        self,
+        audio_path: str,
+        *,
+        prior_context: str | None = None,
+    ) -> EdgeAudioAnalysis:
+        """Analyze a trusted cloud file and return only aggregate quality data."""
+
+        resolved_path = self._validate_audio_path(audio_path, require_inbox=False)
+        try:
+            return self._analyze_resolved_audio_with_metrics(
                 resolved_path,
                 prior_context=prior_context,
             )

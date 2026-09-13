@@ -27,6 +27,8 @@ class VrtPipelineVerificationResult:
     job_id: str
     status: CloudAudioJobStatus
     record_id: str | None
+    detected_speaker_count: int | None = None
+    used_low_volume_retry: bool | None = None
 
     @property
     def created_candidate(self) -> bool:
@@ -108,9 +110,25 @@ def _job_result(payload: object) -> VrtPipelineVerificationResult:
         status = CloudAudioJobStatus(payload["status"])
         raw_record_id = payload.get("record_id")
         record_id = str(UUID(str(raw_record_id))) if raw_record_id is not None else None
+        detected_speaker_count = payload.get("detected_speaker_count")
+        if detected_speaker_count is not None and (
+            isinstance(detected_speaker_count, bool)
+            or not isinstance(detected_speaker_count, int)
+            or detected_speaker_count < 0
+        ):
+            raise ValueError("invalid detected speaker count")
+        used_low_volume_retry = payload.get("used_low_volume_retry")
+        if used_low_volume_retry is not None and not isinstance(used_low_volume_retry, bool):
+            raise ValueError("invalid low-volume retry state")
     except (KeyError, TypeError, ValueError) as error:
         raise VrtPipelineVerificationError("VRTから不正な処理状態が返されました。") from error
-    return VrtPipelineVerificationResult(job_id=job_id, status=status, record_id=record_id)
+    return VrtPipelineVerificationResult(
+        job_id=job_id,
+        status=status,
+        record_id=record_id,
+        detected_speaker_count=detected_speaker_count,
+        used_low_volume_retry=used_low_volume_retry,
+    )
 
 
 class VrtPipelineVerifier:
