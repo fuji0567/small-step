@@ -46,11 +46,11 @@ create_app(settings)
 
 ## エンドポイントの分類
 
-タグごとのエンドポイント数です（`/api/v1` 配下、合計 55 本）。
+タグごとのエンドポイント数です（`/api/v1` 配下、合計 56 本）。
 
 | タグ | 数 | 代表的なエンドポイント |
 | --- | --- | --- |
-| `records` | 6 | `POST /records/{id}/approve`, `POST /records/manual`, `GET /records/export.csv` |
+| `records` | 7 | `GET /records/{id}`, `POST /records/{id}/approve`, `GET /records/export.csv` |
 | `notifications` | 6 | `GET /notifications`, `POST /notifications/{id}/retry`, `PATCH /notifications/{id}/schedule` |
 | `children` | 6 | `POST /children`, `POST /children/{id}/archive`, `DELETE /children/{id}/guardian-line-link` |
 | `teachers` | 5 | `GET /teachers`, `PATCH /teachers/{id}/role`, `POST /teachers/{id}/disable` |

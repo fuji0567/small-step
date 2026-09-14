@@ -1673,6 +1673,21 @@ def test_supabase_user_links_to_pre_registered_teacher(tmp_path, monkeypatch):
         )
         assert own_record.status_code == 201
         assert other_record.status_code == 201
+        own_record_detail = client.get(
+            f"/api/v1/records/{own_record.json()['id']}", headers=teacher_headers
+        )
+        assert own_record_detail.status_code == 200
+        assert own_record_detail.json() == own_record.json()
+        assert client.get(
+            f"/api/v1/records/{other_record.json()['id']}", headers=teacher_headers
+        ).status_code == 403
+        assert client.get(
+            f"/api/v1/records/{other_record.json()['id']}", headers=admin_headers
+        ).status_code == 200
+        assert client.get(
+            "/api/v1/records/00000000-0000-0000-0000-000000000000",
+            headers=teacher_headers,
+        ).status_code == 404
         assert client.post(
             f"/api/v1/records/{own_record.json()['id']}/approve", headers=admin_headers, json={}
         ).status_code == 200
