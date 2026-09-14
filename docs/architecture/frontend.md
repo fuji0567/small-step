@@ -34,7 +34,7 @@ SvelteKit のサーバーへ業務ロジックを移しておらず、API と認
 | `/teacher/notifications/` | `teacher/notifications/+page.svelte` | 通知状況、管理者操作 |
 | `/teacher/audio-jobs/` | `teacher/audio-jobs/+page.svelte` | 安全な音声処理メタデータ |
 | `/teacher/children/` | `teacher/children/+page.svelte` | 園児・保護者 LINE 連携 |
-| `/teacher/voice-consent/` | `teacher/voice-consent/+page.svelte` | 声紋利用への同意 |
+| `/teacher/voice-consent/` | `teacher/voice-consent/+page.svelte` | 声紋利用への同意・登録・本人確認・削除 |
 | `/teacher/settings/` | `teacher/settings/+page.svelte` | 園設定（管理者） |
 | `/teacher/teachers/` | `teacher/teachers/+page.svelte` | 先生管理（管理者） |
 | `/teacher/devices/` | `teacher/devices/+page.svelte` | 録音端末（管理者） |

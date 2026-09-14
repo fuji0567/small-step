@@ -45,13 +45,23 @@ from app.models import (
     RecordCategory,
     School,
     Teacher,
+    TeacherVoiceprint,
     TeacherRole,
+    VoiceEnrollmentConsent,
+    VoiceprintJob,
+    VoiceprintJobKind,
 )
 from app.worker_heartbeat import (
     GPU_AUDIO_WORKER_NAME,
     LINE_DELIVERY_WORKER_NAME,
     record_worker_heartbeat,
 )
+
+
+def _fernet_test_key() -> str:
+    from cryptography.fernet import Fernet
+
+    return Fernet.generate_key().decode("ascii")
 
 
 def line_signature(secret: str, body: bytes) -> str:
@@ -1655,6 +1665,7 @@ def test_supabase_user_links_to_pre_registered_teacher(tmp_path, monkeypatch):
             "auth_mode": "supabase",
             "supabase_url": "https://example.supabase.co",
             "supabase_publishable_key": "sb_publishable_test",
+            "voiceprint_enabled": False,
         }
         school = client.post(
             "/api/v1/schools",
@@ -3419,3 +3430,93 @@ def test_local_llm_candidate_rejects_incomplete_non_recordable_json():
         assert "candidate format" in str(error)
     else:
         raise AssertionError("Non-recordable output must not retain record content")
+
+
+def test_teacher_voiceprint_api_requires_enrollment_and_deletes_jobs_on_revoke(tmp_path, monkeypatch):
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "id": "00000000-0000-0000-0000-000000000051",
+                "email": "voiceprint@example.com",
+            }
+
+    monkeypatch.setattr(
+        "app.api.dependencies.httpx.get", lambda _url, headers, timeout: FakeResponse()
+    )
+    job_dir = tmp_path / "voiceprint-jobs"
+    app = create_app(
+        Settings(
+            database_url=f"sqlite:///{tmp_path}/test.db",
+            auth_mode="supabase",
+                supabase_url="https://example.supabase.co",
+                supabase_publishable_key="sb_publishable_test",
+                cloud_audio_enabled=True,
+                voiceprint_enabled=True,
+            voiceprint_encryption_key=_fernet_test_key(),
+            voiceprint_job_dir=str(job_dir),
+            speaker_diarization_token="hf_test",
+        )
+    )
+    headers = {"Authorization": "Bearer teacher-token"}
+    with TestClient(app) as client:
+        now = datetime.now(timezone.utc)
+        with app.state.session_factory() as db:
+            school = School(name="声紋APIテスト園")
+            db.add(school)
+            db.flush()
+            teacher = Teacher(
+                school_id=school.id,
+                name="声紋先生",
+                email="voiceprint@example.com",
+                auth_user_id="00000000-0000-0000-0000-000000000051",
+            )
+            db.add(teacher)
+            db.flush()
+            db.add(
+                VoiceEnrollmentConsent(
+                    school_id=school.id,
+                    teacher_id=teacher.id,
+                    purpose="teacher_voiceprint_enrollment",
+                    policy_version="test",
+                    retention_days=30,
+                    expires_at=now + timedelta(days=30),
+                )
+            )
+            db.commit()
+            teacher_id = teacher.id
+
+        assert client.get("/api/v1/voiceprint/me", headers=headers).json() is None
+        rejected = client.post(
+            "/api/v1/voiceprint/me/verify",
+            headers=headers,
+            files={"audio": ("voice.wav", b"RIFF-test", "audio/wav")},
+        )
+        assert rejected.status_code == 409
+
+        created = client.post(
+            "/api/v1/voiceprint/me/enroll",
+            headers=headers,
+            files={"audio": ("voice.wav", b"RIFF-test", "audio/wav")},
+        )
+        assert created.status_code == 201
+        assert created.json()["kind"] == VoiceprintJobKind.enrollment.value
+        assert "storage_key" not in created.json()
+        job_id = created.json()["id"]
+        assert client.get(f"/api/v1/voiceprint-jobs/{job_id}", headers=headers).status_code == 200
+
+        with app.state.session_factory() as db:
+            job = db.get(VoiceprintJob, job_id)
+            assert job is not None
+            raw_path = job_dir / job.storage_key
+            assert raw_path.is_file()
+
+        revoked = client.post("/api/v1/voice-consent/me/revoke", headers=headers)
+        assert revoked.status_code == 200
+        assert revoked.json()["is_active"] is False
+
+    assert not raw_path.exists()
+    with app.state.session_factory() as db:
+        assert db.scalar(select(VoiceprintJob).where(VoiceprintJob.teacher_id == teacher_id)) is None
+        assert db.scalar(select(TeacherVoiceprint).where(TeacherVoiceprint.teacher_id == teacher_id)) is None

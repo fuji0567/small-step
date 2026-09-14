@@ -31,6 +31,7 @@ CORE_APPLICATION_TABLES = frozenset(
         "teachers",
     }
 )
+BIOMETRIC_DATA_TABLES = frozenset({"teacher_voiceprints", "voiceprint_jobs"})
 LOCAL_RESTORE_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "restore-db"})
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -262,6 +263,10 @@ def create_database_backup(
                 "--no-owner",
                 "--no-privileges",
                 "--schema=public",
+                *[
+                    f"--exclude-table-data=public.{table_name}"
+                    for table_name in sorted(BIOMETRIC_DATA_TABLES)
+                ],
                 "--lock-wait-timeout=30000",
                 "--file",
                 str(temporary_path),

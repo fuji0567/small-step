@@ -133,6 +133,7 @@ vLLMは初回起動にモデル読込とGPU最適化で数分かかるため、�
 | `DATABASE_URL` | `sqlite:///./data/otayori.db` | 非 SQLite を強制 |
 | `EDGE_AUDIO_PROCESSING_MODE` | `local` | `local` / `cloud` |
 | `CLOUD_AUDIO_ENABLED` | `false` | 必要なときだけ `true` |
+| `VOICEPRINT_ENABLED` | `false` | 同意済み先生の登録・本人確認を行うときだけ `true` |
 | `GUARDIAN_ARCHIVE_BASE_URL` | `http://127.0.0.1:8000` | アーカイブ有効時は HTTPS を強制 |
 | 移行の適用 | アプリ起動時に自動（SQLite のみ） | `migrate` サービスで明示適用 |
 
@@ -142,6 +143,11 @@ vLLMは初回起動にモデル読込とGPU最適化で数分かかるため、�
 詳細は [api.md](api.md) の「設定」を参照してください。
 
 設定項目の一覧は `.env.example` にあります。
+
+声紋機能を有効にする場合は `CLOUD_AUDIO_ENABLED=true`、`SPEAKER_DIARIZATION_TOKEN`、
+Fernet形式の `VOICEPRINT_ENCRYPTION_KEY` が必要です。鍵が欠けている、形式が不正、またはGPU音声処理が
+無効な構成は起動時に拒否します。登録・照合は既存の `gpu-worker` が処理し、一時音声には既存の
+`cloud_audio_jobs` ボリューム内の専用ディレクトリを使います。
 
 ---
 

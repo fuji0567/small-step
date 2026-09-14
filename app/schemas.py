@@ -4,7 +4,16 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models import AuditEventAction, CloudAudioJobStatus, NotificationStatus, RecordCategory, RecordStatus, TeacherRole
+from app.models import (
+    AuditEventAction,
+    CloudAudioJobStatus,
+    NotificationStatus,
+    RecordCategory,
+    RecordStatus,
+    TeacherRole,
+    VoiceprintJobKind,
+    VoiceprintJobStatus,
+)
 
 
 class APIModel(BaseModel):
@@ -70,6 +79,7 @@ class AuthClientConfig(BaseModel):
     auth_mode: Literal["development", "supabase"]
     supabase_url: str | None = None
     supabase_publishable_key: str | None = None
+    voiceprint_enabled: bool = False
 
 
 class RuntimeReadinessRead(BaseModel):
@@ -141,6 +151,38 @@ class VoiceConsentRead(APIModel):
     expires_at: datetime
     revoked_at: datetime | None
     is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class VoiceprintRead(APIModel):
+    """Safe enrollment metadata. The encrypted embedding is never returned."""
+
+    id: UUID
+    school_id: UUID
+    teacher_id: UUID
+    model_name: str
+    enrolled_at: datetime
+    expires_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+
+class VoiceprintJobRead(APIModel):
+    """Safe job state without storage paths or biometric vectors."""
+
+    id: UUID
+    school_id: UUID
+    teacher_id: UUID
+    kind: VoiceprintJobKind
+    status: VoiceprintJobStatus
+    attempts: int
+    similarity_score: float | None
+    matched: bool | None
+    queued_at: datetime
+    processing_started_at: datetime | None
+    completed_at: datetime | None
+    expires_at: datetime
     created_at: datetime
     updated_at: datetime
 

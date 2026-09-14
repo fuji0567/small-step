@@ -9,5 +9,6 @@
 <VoiceConsentView
   api={shell.api}
   enabled={shell.canLogout}
+  voiceprintEnabled={shell.voiceprintEnabled}
   controller={shell.controller}
 />

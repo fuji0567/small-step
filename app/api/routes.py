@@ -8,7 +8,7 @@ import httpx
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import exists, func, select, text, update
+from sqlalchemy import delete, exists, func, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -47,8 +47,12 @@ from app.models import (
     RecordStatus,
     School,
     Teacher,
+    TeacherVoiceprint,
     TeacherRole,
     VoiceEnrollmentConsent,
+    VoiceprintJob,
+    VoiceprintJobKind,
+    VoiceprintJobStatus,
     utc_now,
 )
 from app.schemas import (
@@ -91,6 +95,8 @@ from app.schemas import (
     TeacherRoleUpdate,
     VoiceConsentCreate,
     VoiceConsentRead,
+    VoiceprintJobRead,
+    VoiceprintRead,
 )
 from app.worker_heartbeat import (
     GPU_AUDIO_WORKER_NAME,
@@ -379,6 +385,29 @@ def cloud_audio_storage(request: Request) -> CloudAudioJobStorage:
         job_dir=settings.cloud_audio_job_dir,
         max_file_bytes=settings.edge_audio_max_file_bytes,
     )
+
+
+def voiceprint_storage(request: Request) -> CloudAudioJobStorage:
+    settings = request.app.state.settings
+    return CloudAudioJobStorage(
+        job_dir=settings.voiceprint_job_dir,
+        max_file_bytes=settings.edge_audio_max_file_bytes,
+    )
+
+
+def delete_teacher_voiceprint_data(
+    *, db: Session, request: Request, teacher_id: str
+) -> None:
+    """Remove all biometric data and any short-lived source audio for one teacher."""
+
+    storage = voiceprint_storage(request)
+    jobs = list(
+        db.scalars(select(VoiceprintJob).where(VoiceprintJob.teacher_id == teacher_id))
+    )
+    for job in jobs:
+        storage.delete(job.storage_key)
+    db.execute(delete(VoiceprintJob).where(VoiceprintJob.teacher_id == teacher_id))
+    db.execute(delete(TeacherVoiceprint).where(TeacherVoiceprint.teacher_id == teacher_id))
 
 
 def runtime_readiness_summary(request: Request, db: Session) -> RuntimeReadinessRead:
@@ -853,11 +882,12 @@ def get_auth_client_config(request: Request) -> AuthClientConfig:
 
     settings = request.app.state.settings
     if settings.auth_mode == "development":
-        return AuthClientConfig(auth_mode="development")
+        return AuthClientConfig(auth_mode="development", voiceprint_enabled=False)
     return AuthClientConfig(
         auth_mode="supabase",
         supabase_url=settings.supabase_url,
         supabase_publishable_key=settings.supabase_publishable_key,
+        voiceprint_enabled=settings.voiceprint_enabled,
     )
 
 
@@ -1082,6 +1112,7 @@ def disable_teacher(
         .where(VoiceEnrollmentConsent.revoked_at.is_(None))
         .values(revoked_at=now)
     )
+    delete_teacher_voiceprint_data(db=db, request=request, teacher_id=teacher.id)
     for device in db.scalars(
         select(EdgeDevice)
         .where(EdgeDevice.teacher_id == teacher.id)
@@ -1187,6 +1218,7 @@ def grant_my_voice_consent(
 
 @router.post("/voice-consent/me/revoke", response_model=VoiceConsentRead, tags=["voice consent"])
 def revoke_my_voice_consent(
+    request: Request,
     current_teacher: CurrentTeacher = Depends(get_current_teacher),
     db: Session = Depends(get_db),
 ) -> VoiceConsentRead:
@@ -1197,9 +1229,172 @@ def revoke_my_voice_consent(
     if consent is None:
         raise HTTPException(status_code=404, detail="Voiceprint consent was not found")
     consent.revoked_at = utc_now()
+    delete_teacher_voiceprint_data(db=db, request=request, teacher_id=teacher.id)
     db.commit()
     db.refresh(consent)
     return voice_consent_read(consent)
+
+
+@router.get("/voiceprint/me", response_model=VoiceprintRead | None, tags=["voiceprint"])
+def get_my_voiceprint(
+    request: Request,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> TeacherVoiceprint | None:
+    """Return only the current teacher's enrollment metadata."""
+
+    teacher = require_real_teacher(current_teacher)
+    voiceprint = db.scalar(
+        select(TeacherVoiceprint).where(TeacherVoiceprint.teacher_id == teacher.id)
+    )
+    if voiceprint is not None and as_utc_datetime(voiceprint.expires_at) <= utc_now():
+        delete_teacher_voiceprint_data(db=db, request=request, teacher_id=teacher.id)
+        db.commit()
+        return None
+    return voiceprint
+
+
+async def create_my_voiceprint_job(
+    *,
+    kind: VoiceprintJobKind,
+    request: Request,
+    audio: UploadFile,
+    current_teacher: CurrentTeacher,
+    db: Session,
+) -> VoiceprintJob:
+    settings = request.app.state.settings
+    if not settings.voiceprint_enabled:
+        await audio.close()
+        raise HTTPException(status_code=403, detail="Voiceprint processing is disabled")
+
+    teacher = require_real_teacher(current_teacher)
+    consent = db.scalar(
+        select(VoiceEnrollmentConsent).where(VoiceEnrollmentConsent.teacher_id == teacher.id)
+    )
+    if consent is None or not voice_consent_is_active(consent):
+        await audio.close()
+        raise HTTPException(status_code=409, detail="Active voiceprint consent is required")
+
+    active_job = db.scalar(
+        select(VoiceprintJob).where(
+            VoiceprintJob.teacher_id == teacher.id,
+            VoiceprintJob.status.in_(
+                [VoiceprintJobStatus.queued, VoiceprintJobStatus.processing]
+            ),
+        )
+    )
+    if active_job is not None:
+        await audio.close()
+        raise HTTPException(status_code=409, detail="A voiceprint job is already processing")
+
+    if kind == VoiceprintJobKind.verification:
+        voiceprint = db.scalar(
+            select(TeacherVoiceprint).where(TeacherVoiceprint.teacher_id == teacher.id)
+        )
+        if voiceprint is None or as_utc_datetime(voiceprint.expires_at) <= utc_now():
+            await audio.close()
+            raise HTTPException(status_code=409, detail="An active enrolled voiceprint is required")
+
+    now = utc_now()
+    job = VoiceprintJob(
+        school_id=teacher.school_id,
+        teacher_id=teacher.id,
+        kind=kind,
+        storage_key=f"pending-{uuid4()}",
+        status=VoiceprintJobStatus.queued,
+        expires_at=now + timedelta(minutes=settings.voiceprint_job_retention_minutes),
+    )
+    storage = voiceprint_storage(request)
+    storage_key: str | None = None
+    try:
+        db.add(job)
+        db.flush()
+        storage_key = await storage.store_upload(upload=audio, job_id=job.id)
+        job.storage_key = storage_key
+        db.commit()
+    except CloudAudioStorageError as error:
+        db.rollback()
+        if storage_key:
+            storage.delete(storage_key)
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (IntegrityError, OSError) as error:
+        db.rollback()
+        if storage_key:
+            storage.delete(storage_key)
+        raise HTTPException(status_code=503, detail="Voiceprint job could not be stored") from error
+    finally:
+        await audio.close()
+    db.refresh(job)
+    return job
+
+
+@router.post(
+    "/voiceprint/me/enroll",
+    response_model=VoiceprintJobRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["voiceprint"],
+)
+async def enroll_my_voiceprint(
+    request: Request,
+    audio: UploadFile = File(...),
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> VoiceprintJob:
+    return await create_my_voiceprint_job(
+        kind=VoiceprintJobKind.enrollment,
+        request=request,
+        audio=audio,
+        current_teacher=current_teacher,
+        db=db,
+    )
+
+
+@router.post(
+    "/voiceprint/me/verify",
+    response_model=VoiceprintJobRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["voiceprint"],
+)
+async def verify_my_voiceprint(
+    request: Request,
+    audio: UploadFile = File(...),
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> VoiceprintJob:
+    return await create_my_voiceprint_job(
+        kind=VoiceprintJobKind.verification,
+        request=request,
+        audio=audio,
+        current_teacher=current_teacher,
+        db=db,
+    )
+
+
+@router.get(
+    "/voiceprint-jobs/{job_id}", response_model=VoiceprintJobRead, tags=["voiceprint"]
+)
+def get_my_voiceprint_job(
+    job_id: str,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> VoiceprintJob:
+    teacher = require_real_teacher(current_teacher)
+    job = require_entity(db, VoiceprintJob, job_id, "Voiceprint job")
+    if job.teacher_id != teacher.id:
+        raise HTTPException(status_code=404, detail="Voiceprint job not found")
+    return job
+
+
+@router.delete("/voiceprint/me", status_code=status.HTTP_204_NO_CONTENT, tags=["voiceprint"])
+def delete_my_voiceprint(
+    request: Request,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> Response:
+    teacher = require_real_teacher(current_teacher)
+    delete_teacher_voiceprint_data(db=db, request=request, teacher_id=teacher.id)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

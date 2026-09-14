@@ -1,3 +1,5 @@
+import base64
+import binascii
 from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlparse
@@ -51,6 +53,13 @@ class Settings(BaseSettings):
     speaker_diarization_token: str | None = None
     speaker_diarization_device: str = "cpu"
     speaker_diarization_low_volume_retry: bool = True
+    voiceprint_enabled: bool = False
+    voiceprint_model: str = "pyannote/embedding"
+    voiceprint_encryption_key: str | None = None
+    voiceprint_match_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
+    voiceprint_job_dir: str = "./data/cloud-audio-jobs/voiceprints"
+    voiceprint_job_retention_minutes: int = Field(default=15, ge=1, le=60)
+    voiceprint_processing_timeout_minutes: int = Field(default=10, ge=1, le=60)
     llm_backend: Literal["ollama", "vllm"] = "ollama"
     llm_base_url: str | None = None
     llm_api_key: str | None = None
@@ -118,6 +127,25 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "aws:kms backup encryption requires DATABASE_BACKUP_S3_KMS_KEY_ID"
                 )
+        if self.voiceprint_enabled:
+            if not self.cloud_audio_enabled:
+                raise ValueError("VOICEPRINT_ENABLED requires CLOUD_AUDIO_ENABLED")
+            if not self.voiceprint_encryption_key:
+                raise ValueError("VOICEPRINT_ENABLED requires VOICEPRINT_ENCRYPTION_KEY")
+            try:
+                decoded_key = base64.b64decode(
+                    self.voiceprint_encryption_key,
+                    altchars=b"-_",
+                    validate=True,
+                )
+            except (ValueError, binascii.Error) as error:
+                raise ValueError(
+                    "VOICEPRINT_ENCRYPTION_KEY must be a valid Fernet key"
+                ) from error
+            if len(decoded_key) != 32:
+                raise ValueError("VOICEPRINT_ENCRYPTION_KEY must be a valid Fernet key")
+            if not self.speaker_diarization_token:
+                raise ValueError("VOICEPRINT_ENABLED requires SPEAKER_DIARIZATION_TOKEN")
         if self.app_env != "production":
             return self
 

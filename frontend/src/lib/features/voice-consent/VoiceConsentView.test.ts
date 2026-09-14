@@ -8,12 +8,13 @@ import VoiceConsentView from './VoiceConsentView.svelte';
 afterEach(cleanup);
 
 describe('VoiceConsentView', () => {
-  it('developmentでは設定変更フォームもAPI呼び出しも出さない', () => {
+  it('開発モードでは設定変更フォームもAPI呼び出しも出さない', () => {
     const fetchMock = vi.fn<typeof fetch>();
 
     render(VoiceConsentView, {
       api: new ApiClient({ fetch: fetchMock }),
       enabled: false,
+      voiceprintEnabled: false,
       controller: new AppController()
     });
 
@@ -36,12 +37,18 @@ describe('VoiceConsentView', () => {
     render(VoiceConsentView, {
       api: new ApiClient({ fetch: fetchMock }),
       enabled: true,
+      voiceprintEnabled: false,
       controller: new AppController()
     });
 
     expect(await screen.findByText('未同意')).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: '同意を保存' })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        '新しい登録と本人確認はできませんが、保存済み声紋の削除や同意の取消はいつでも行えます。'
+      )
     ).toBeInTheDocument();
   });
 });

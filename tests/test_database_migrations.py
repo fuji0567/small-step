@@ -26,6 +26,9 @@ def test_initial_migration_creates_the_current_schema(tmp_path):
         inspector = inspect(engine)
         tables = set(inspector.get_table_names())
         columns = {column["name"] for column in inspector.get_columns("cloud_audio_jobs")}
+        voiceprint_job_columns = {
+            column["name"] for column in inspector.get_columns("voiceprint_jobs")
+        }
     finally:
         engine.dispose()
 
@@ -36,9 +39,12 @@ def test_initial_migration_creates_the_current_schema(tmp_path):
         "audit_events",
         "notion_syncs",
         "worker_heartbeats",
+        "teacher_voiceprints",
+        "voiceprint_jobs",
     } <= tables
     assert {"detected_speaker_count", "used_low_volume_retry", "candidate_category"} <= columns
-    assert migration_revision(database_url) == "0020_record_reassignment_audit"
+    assert {"kind", "similarity_score", "matched", "claim_token"} <= voiceprint_job_columns
+    assert migration_revision(database_url) == "0021_teacher_voiceprints"
 
 
 def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_path):
@@ -52,4 +58,4 @@ def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_pat
     message = prepare_database(database_url)
 
     assert "登録しました" in message
-    assert migration_revision(database_url) == "0020_record_reassignment_audit"
+    assert migration_revision(database_url) == "0021_teacher_voiceprints"

@@ -100,6 +100,10 @@ export class TeacherShellState {
     return this.#config?.auth_mode === 'supabase';
   }
 
+  get voiceprintEnabled(): boolean {
+    return this.#config?.voiceprint_enabled === true;
+  }
+
   get snapshot(): TeacherShellSnapshot {
     return {
       phase: this.#phase,

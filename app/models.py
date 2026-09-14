@@ -51,6 +51,19 @@ class CloudAudioJobStatus(str, enum.Enum):
     expired = "expired"
 
 
+class VoiceprintJobKind(str, enum.Enum):
+    enrollment = "enrollment"
+    verification = "verification"
+
+
+class VoiceprintJobStatus(str, enum.Enum):
+    queued = "queued"
+    processing = "processing"
+    completed = "completed"
+    failed = "failed"
+    expired = "expired"
+
+
 class WorkerHeartbeat(Base):
     """A data-free liveness marker written by a long-running worker."""
 
@@ -151,6 +164,49 @@ class VoiceEnrollmentConsent(Base):
     consented_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class TeacherVoiceprint(Base):
+    """An encrypted speaker embedding. Raw enrollment audio is never retained."""
+
+    __tablename__ = "teacher_voiceprints"
+    __table_args__ = (UniqueConstraint("teacher_id", name="uq_teacher_voiceprint_teacher"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_text)
+    school_id: Mapped[str] = mapped_column(ForeignKey("schools.id"), index=True)
+    teacher_id: Mapped[str] = mapped_column(ForeignKey("teachers.id"), index=True)
+    encrypted_embedding: Mapped[str] = mapped_column(Text)
+    embedding_dimension: Mapped[int] = mapped_column(Integer)
+    model_name: Mapped[str] = mapped_column(String(255))
+    enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class VoiceprintJob(Base):
+    """A short-lived enrollment or one-to-one verification audio job."""
+
+    __tablename__ = "voiceprint_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_text)
+    school_id: Mapped[str] = mapped_column(ForeignKey("schools.id"), index=True)
+    teacher_id: Mapped[str] = mapped_column(ForeignKey("teachers.id"), index=True)
+    kind: Mapped[VoiceprintJobKind] = mapped_column(Enum(VoiceprintJobKind), index=True)
+    storage_key: Mapped[str] = mapped_column(String(80), unique=True)
+    status: Mapped[VoiceprintJobStatus] = mapped_column(
+        Enum(VoiceprintJobStatus), default=VoiceprintJobStatus.queued, index=True
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    claim_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    similarity_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    matched: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    queued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 

@@ -64,3 +64,36 @@
   flex-wrap: wrap;
   gap: var(--ss-space-2);
 }
+
+.voice-enrollment {
+  display: grid;
+  gap: var(--ss-space-2);
+  margin-top: var(--ss-space-3);
+  padding-top: var(--ss-space-3);
+  border-top: 1px solid var(--ss-color-border);
+}
+
+.voice-enrollment__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ss-space-2);
+}
+
+.voice-enrollment__heading h3,
+.voice-enrollment__heading p {
+  margin: 0;
+}
+
+.voice-file {
+  display: grid;
+  gap: var(--ss-space-1);
+  padding: var(--ss-space-2);
+  border: 1px dashed var(--ss-color-border);
+  border-radius: var(--ss-radius-medium);
+  background: var(--ss-color-action-soft);
+}
+
+.voice-file span {
+  font-weight: var(--ss-font-weight-bold);
+}

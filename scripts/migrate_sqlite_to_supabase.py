@@ -25,7 +25,9 @@ from app.models import (
     Record,
     School,
     Teacher,
+    TeacherVoiceprint,
     VoiceEnrollmentConsent,
+    VoiceprintJob,
     WorkerHeartbeat,
 )
 
@@ -37,11 +39,13 @@ MODELS_IN_DEPENDENCY_ORDER = (
     Child,
     EdgeDevice,
     VoiceEnrollmentConsent,
+    TeacherVoiceprint,
     LineLinkInvitation,
     GuardianArchiveLink,
     AuditEvent,
     Record,
     CloudAudioJob,
+    VoiceprintJob,
     Notification,
     NotionSync,
     WorkerHeartbeat,

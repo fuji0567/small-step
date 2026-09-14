@@ -321,7 +321,8 @@ loadApp()
      │   ├ GET /notifications                  （通知状況）
      │   ├ GET /audio-jobs                     （音声処理状況）
      │   ├ GET /teachers                       （先生管理）
-     │   ├ GET /voice-consent/me               （声紋設定）
+     │   ├ GET /voice-consent/me               （声紋同意）
+     │   ├ GET /voiceprint/me                   （登録済み声紋）
      │   └ GET /line/link-invitations/active   （招待コード）
      └ GET /edge-devices                       （録音端末）
 ```
@@ -385,7 +386,7 @@ flowchart TD
 | 通知状況 | `GET /notifications` |
 | 記録履歴 | `GET /records`（履歴条件つき） |
 | 音声処理状況 | `GET /audio-jobs` |
-| 声紋設定 | `GET /voice-consent/me` |
+| 声紋設定 | `GET /voice-consent/me` と `GET /voiceprint/me` |
 | 録音端末 | `GET /edge-devices` |
 | 園の設定 | 再描画のみ（フェッチなし） |
 | 稼働準備チェック | `GET /readiness` |

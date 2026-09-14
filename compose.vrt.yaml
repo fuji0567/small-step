@@ -43,6 +43,7 @@ services:
   api:
     environment:
       CLOUD_AUDIO_JOB_DIR: /var/lib/small-step/cloud-audio-jobs
+      VOICEPRINT_JOB_DIR: /var/lib/small-step/cloud-audio-jobs/voiceprints
     volumes:
       - cloud_audio_jobs:/var/lib/small-step/cloud-audio-jobs
     depends_on:
@@ -66,6 +67,7 @@ services:
       - .env
     environment:
       CLOUD_AUDIO_JOB_DIR: /var/lib/small-step/cloud-audio-jobs
+      VOICEPRINT_JOB_DIR: /var/lib/small-step/cloud-audio-jobs/voiceprints
       HF_HOME: /var/lib/small-step/models/huggingface
     command: ["python3", "scripts/process_cloud_audio_jobs.py"]
     gpus: all

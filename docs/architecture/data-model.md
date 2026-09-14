@@ -17,6 +17,8 @@ erDiagram
     School ||--o{ AuditEvent : "記録"
     Teacher ||--o{ Record : "担当"
     Teacher ||--o| VoiceEnrollmentConsent : "声紋同意"
+    Teacher ||--o| TeacherVoiceprint : "声紋"
+    Teacher ||--o{ VoiceprintJob : "登録・照合"
     Child ||--o{ Record : "対象"
     Child ||--o{ LineLinkInvitation : "招待コード"
     Child ||--o{ GuardianArchiveLink : "アーカイブURL"
@@ -42,6 +44,8 @@ erDiagram
 | `guardian_archive_links` | 配信アーカイブの URL | `token_hash` のみ保存。期限つき・失効可能 |
 | `cloud_audio_jobs` | クラウド GPU 処理ジョブ | メタデータのみ。音声本体はファイルシステム上の短命保管 |
 | `voice_enrollment_consents` | 声紋登録の同意 | 目的・ポリシー版・保持日数・失効を記録 |
+| `teacher_voiceprints` | 先生の声紋 | 暗号化した特徴量だけを先生ごとに1件保存。元音声は保存しない |
+| `voiceprint_jobs` | 声紋登録・本人確認ジョブ | 一時音声のランダムキーと処理結果。本人以外には返さない |
 | `notion_syncs` | Notion 同期の結果 | `record_id` に一意制約。ページ ID と URL |
 | `audit_events` | 操作履歴 | 音声・文字起こし・秘密情報を含めない |
 
@@ -66,6 +70,7 @@ stateDiagram-v2
 | `records` | `status` | `pending_review` → `approved` / `rejected` → `dispatched` |
 | `notifications` | `status` | `waiting_guardian_link` → `pending`（保護者連携）→ `sent` / `failed`。`failed` → `pending`（再送予約）。`pending` / `waiting_guardian_link` → `cancelled` |
 | `cloud_audio_jobs` | `status` | `queued` → `processing` → `completed` / `failed` / `expired` |
+| `voiceprint_jobs` | `status` | `queued` → `processing` → `completed` / `failed` / `expired` |
 | `teachers` | `role` | `teacher` / `school_admin` |
 | `records` | `category` | `growth`（成長の記録） / `injury`（けがの記録） |
 

@@ -51,7 +51,7 @@ create_app(settings)
 
 ## エンドポイントの分類
 
-タグごとのエンドポイント数です（`/api/v1` 配下、合計 58 本）。
+タグごとのエンドポイント数です（`/api/v1` 配下、合計 63 本）。
 
 | タグ | 数 | 代表的なエンドポイント |
 | --- | --- | --- |
@@ -62,6 +62,7 @@ create_app(settings)
 | `auth` | 5 | `GET /auth/config`, `GET /auth/me`, `POST /auth/link-teacher`, `POST /auth/bootstrap/teacher` |
 | `edge devices` | 4 | `POST /edge-devices`, `POST /edge-devices/{id}/rotate-key` |
 | `voice consent` | 3 | `GET /voice-consent/me`, `POST /voice-consent/me/revoke` |
+| `voiceprint` | 5 | `GET /voiceprint/me`, `POST /voiceprint/me/enroll`, `POST /voiceprint/me/verify` |
 | `schools` | 3 | `POST /schools`, `PATCH /schools/{id}/digest-time` |
 | `line` | 3 | `POST /line/webhook`, `POST /line/link-invitations` |
 | `guardian archive` | 3 | `POST /guardian-archive-links`, `GET /guardian/archive` |
@@ -73,12 +74,12 @@ create_app(settings)
 
 利用者別の入口:
 
-- **先生用アプリ** … `auth` / `records` / `notifications` / `children` / `teachers` / `schools` / `edge devices` / `audit` / `voice consent`
+- **先生用アプリ** … `auth` / `records` / `notifications` / `children` / `teachers` / `schools` / `edge devices` / `audit` / `voice consent` / `voiceprint`
 - **録音端末** … `edge` / `cloud audio`（端末 APIキー認証）
 - **LINE** … `line`（Webhook）
 - **保護者** … `guardian archive` の `GET /guardian/archive` のみ
 
-GPU ワーカー（`process_cloud_audio_jobs.py`）と LINE 送信ワーカー（`send_pending_line_notifications.py`）は
+GPU ワーカー（`process_cloud_audio_jobs.py`、通常音声と任意の声紋ジョブ）と LINE 送信ワーカー（`send_pending_line_notifications.py`）は
 API を経由せず、API と同じデータベースを直接読み書きします。`GET /notifications/ready` と
 `POST /notifications/{id}/mark-sent` は先生管理者の Bearer 認証が必要なエンドポイントで、同梱の LINE 送信ワーカーは使いません。
 

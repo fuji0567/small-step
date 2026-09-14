@@ -5,6 +5,7 @@ description = "Backend API for kindergarten growth and incident records"
 requires-python = ">=3.11"
 dependencies = [
   "alembic>=1.14.0,<2.0.0",
+  "cryptography>=44.0.0,<51.0.0",
   "fastapi>=0.115.0",
   "httpx>=0.28.0",
   "mcp>=2.0.0,<3.0.0",

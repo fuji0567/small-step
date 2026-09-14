@@ -95,3 +95,36 @@ def test_offsite_backup_requires_public_key_bucket_and_secure_endpoint():
             database_backup_s3_bucket="small-step-backups",
             database_backup_s3_sse="aws:kms",
         )
+
+
+def test_voiceprint_requires_cloud_audio_encryption_key_and_model_token():
+    encryption_key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+
+    with pytest.raises(ValidationError, match="CLOUD_AUDIO_ENABLED"):
+        Settings(
+            voiceprint_enabled=True,
+            voiceprint_encryption_key=encryption_key,
+            speaker_diarization_token="hf_test",
+        )
+
+    with pytest.raises(ValidationError, match="VOICEPRINT_ENCRYPTION_KEY"):
+        Settings(
+            cloud_audio_enabled=True,
+            voiceprint_enabled=True,
+            speaker_diarization_token="hf_test",
+        )
+
+    with pytest.raises(ValidationError, match="valid Fernet key"):
+        Settings(
+            cloud_audio_enabled=True,
+            voiceprint_enabled=True,
+            voiceprint_encryption_key="test-key",
+            speaker_diarization_token="hf_test",
+        )
+
+    with pytest.raises(ValidationError, match="SPEAKER_DIARIZATION_TOKEN"):
+        Settings(
+            cloud_audio_enabled=True,
+            voiceprint_enabled=True,
+            voiceprint_encryption_key=encryption_key,
+        )

@@ -101,6 +101,11 @@ def test_create_and_verify_database_backup(tmp_path):
     assert result.archive_path.parent.stat().st_mode & 0o777 == 0o700
     assert verified.sha256 == hashlib.sha256(b"test custom archive").hexdigest()
     assert CORE_APPLICATION_TABLES <= verified.table_names
+    dump_command = next(
+        command for command in commands if command[0] == "pg_dump" and "--file" in command
+    )
+    assert "--exclude-table-data=public.teacher_voiceprints" in dump_command
+    assert "--exclude-table-data=public.voiceprint_jobs" in dump_command
     assert all("p@ss:word" not in " ".join(command) for command in commands)
 
 

@@ -18,6 +18,7 @@ export interface AuthClientConfig {
   auth_mode: 'development' | 'supabase';
   supabase_url: string | null;
   supabase_publishable_key: string | null;
+  voiceprint_enabled: boolean;
 }
 
 export type TeacherShellPhase =

@@ -10,6 +10,8 @@ from app.config import Settings
 from app.database import create_database_engine, create_session_factory, initialise_database
 from app.edge_audio import EdgeAudioProcessor
 from app.worker_heartbeat import GPU_AUDIO_WORKER_NAME, WorkerHeartbeatMonitor
+from app.voiceprint import PyannoteVoiceprintExtractor
+from app.voiceprint_worker import process_next_voiceprint_job
 
 
 def positive_int(value: str) -> int:
@@ -51,6 +53,34 @@ def process_available_jobs(
     return completed_count
 
 
+def process_available_voiceprint_jobs(
+    *,
+    session_factory,
+    storage: CloudAudioJobStorage,
+    extractor: PyannoteVoiceprintExtractor,
+    encryption_key: str,
+    match_threshold: float,
+    limit: int,
+    processing_timeout: timedelta,
+) -> int:
+    completed_count = 0
+    for _ in range(limit):
+        with session_factory() as db:
+            job = process_next_voiceprint_job(
+                db=db,
+                storage=storage,
+                extractor=extractor,
+                encryption_key=encryption_key,
+                match_threshold=match_threshold,
+                processing_timeout=processing_timeout,
+            )
+        if job is None:
+            break
+        completed_count += 1
+        print(f"声紋ジョブを処理しました: {job.id} ({job.status.value})")
+    return completed_count
+
+
 def main() -> None:
     settings = Settings()
     parser = argparse.ArgumentParser(description="VRT上でクラウド音声ジョブをGPU処理します。")
@@ -73,11 +103,30 @@ def main() -> None:
         max_file_bytes=settings.edge_audio_max_file_bytes,
     )
     storage.ensure_directory()
+    voiceprint_storage = None
+    voiceprint_extractor = None
+    voiceprint_encryption_key = settings.voiceprint_encryption_key
+    if settings.voiceprint_enabled:
+        assert settings.speaker_diarization_token is not None
+        assert voiceprint_encryption_key is not None
+        voiceprint_storage = CloudAudioJobStorage(
+            job_dir=settings.voiceprint_job_dir,
+            max_file_bytes=settings.edge_audio_max_file_bytes,
+        )
+        voiceprint_storage.ensure_directory()
+        voiceprint_extractor = PyannoteVoiceprintExtractor(
+            model_name=settings.voiceprint_model,
+            token=settings.speaker_diarization_token,
+            device=settings.speaker_diarization_device,
+        )
 
     engine = create_database_engine(settings.database_url)
     initialise_database(engine)
     session_factory = create_session_factory(engine)
     processing_timeout = timedelta(minutes=settings.cloud_audio_processing_timeout_minutes)
+    voiceprint_processing_timeout = timedelta(
+        minutes=settings.voiceprint_processing_timeout_minutes
+    )
     try:
         if args.once:
             count = process_available_jobs(
@@ -87,6 +136,16 @@ def main() -> None:
                 limit=args.limit,
                 processing_timeout=processing_timeout,
             )
+            if voiceprint_storage is not None and voiceprint_extractor is not None:
+                count += process_available_voiceprint_jobs(
+                    session_factory=session_factory,
+                    storage=voiceprint_storage,
+                    extractor=voiceprint_extractor,
+                    encryption_key=voiceprint_encryption_key,
+                    match_threshold=settings.voiceprint_match_threshold,
+                    limit=args.limit,
+                    processing_timeout=voiceprint_processing_timeout,
+                )
             print(f"処理したクラウド音声ジョブ: {count}件")
             return
 
@@ -103,6 +162,16 @@ def main() -> None:
                     limit=args.limit,
                     processing_timeout=processing_timeout,
                 )
+                if voiceprint_storage is not None and voiceprint_extractor is not None:
+                    process_available_voiceprint_jobs(
+                        session_factory=session_factory,
+                        storage=voiceprint_storage,
+                        extractor=voiceprint_extractor,
+                        encryption_key=voiceprint_encryption_key,
+                        match_threshold=settings.voiceprint_match_threshold,
+                        limit=args.limit,
+                        processing_timeout=voiceprint_processing_timeout,
+                    )
                 time.sleep(args.poll_seconds)
     finally:
         engine.dispose()
