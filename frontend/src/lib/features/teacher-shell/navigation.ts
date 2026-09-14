@@ -1,5 +1,10 @@
 import type { AppShellNavItem } from '$lib/components';
 
+import {
+  EMPTY_NAVIGATION_BADGES,
+  type NavigationBadgeCounts
+} from './navigation-badges';
+
 export const TEACHER_NAV_ITEMS = [
   { href: '/teacher/', label: 'ホーム', icon: 'home' },
   { href: '/teacher/review/', label: 'レビュー待ち', icon: 'review' },
@@ -34,8 +39,81 @@ export const ADMIN_NAV_ITEMS = [
   { href: '/teacher/audit/', label: '操作履歴', icon: 'privacy' }
 ] as const satisfies readonly AppShellNavItem[];
 
-export function teacherNavItems(isSchoolAdmin: boolean): AppShellNavItem[] {
-  return [...TEACHER_NAV_ITEMS, ...(isSchoolAdmin ? ADMIN_NAV_ITEMS : [])];
+function countBadge(
+  count: number,
+  suffix: '件' | '項目',
+  ariaLabel: string,
+  warning = false
+): Pick<AppShellNavItem, 'badge' | 'badgeAriaLabel' | 'badgeTone'> | null {
+  if (count === 0) return null;
+  const visualCount = count >= 100 ? '99+' : `${count}${suffix}`;
+  return {
+    badge: `${warning ? '!' : ''}${visualCount}`,
+    badgeAriaLabel: ariaLabel,
+    badgeTone: warning ? 'warning' : 'default'
+  };
+}
+
+function badgeFor(
+  href: string,
+  counts: NavigationBadgeCounts,
+  isSchoolAdmin: boolean
+): Pick<AppShellNavItem, 'badge' | 'badgeAriaLabel' | 'badgeTone'> | null {
+  switch (href) {
+    case '/teacher/review/':
+      return countBadge(
+        counts.pending_review_records,
+        '件',
+        `レビュー待ち${counts.pending_review_records}件`
+      );
+    case '/teacher/notifications/':
+      return countBadge(
+        counts.notification_attention,
+        '件',
+        `通知状況の要確認${counts.notification_attention}件`,
+        true
+      );
+    case '/teacher/audio-jobs/':
+      return countBadge(
+        counts.failed_audio_jobs,
+        '件',
+        `音声処理の失敗${counts.failed_audio_jobs}件`,
+        true
+      );
+    case '/teacher/children/':
+      return isSchoolAdmin
+        ? countBadge(
+            counts.invitations_not_issued,
+            '件',
+            `招待コード未発行${counts.invitations_not_issued}件`
+          )
+        : null;
+    case '/teacher/readiness/':
+      return isSchoolAdmin
+        ? countBadge(
+            counts.readiness_issues,
+            '項目',
+            `稼働準備で確認が必要な項目${counts.readiness_issues}項目`,
+            true
+          )
+        : null;
+    default:
+      return null;
+  }
+}
+
+export function teacherNavItems(
+  isSchoolAdmin: boolean,
+  counts: NavigationBadgeCounts = EMPTY_NAVIGATION_BADGES
+): AppShellNavItem[] {
+  const items = [
+    ...TEACHER_NAV_ITEMS,
+    ...(isSchoolAdmin ? ADMIN_NAV_ITEMS : [])
+  ];
+  return items.map((item) => {
+    const badge = badgeFor(item.href, counts, isSchoolAdmin);
+    return badge ? { ...item, ...badge } : { ...item };
+  });
 }
 
 const ADMIN_ROUTE_PATTERN =

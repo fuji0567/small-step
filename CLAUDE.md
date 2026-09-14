@@ -25,7 +25,7 @@ uvicorn app.main:app --reload                             # http://127.0.0.1:800
 - SQLite なら移行はアプリ起動時に自動適用されるので、事前準備は不要です。
 
 ```bash
-pytest                                                    # 2026-09-12 実測: 57 passed, 1 skipped
+pytest                                                    # 2026-09-14 実測: 60 passed, 1 skipped
 pytest tests/test_api.py::test_growth_record_is_reviewed_and_scheduled   # 単体
 pytest -k notion -q                                       # 名前で絞り込み
 ```
@@ -97,7 +97,7 @@ README では別の venv（`.venv313`）へ入れる運用になっています�
 
 ### 単一ルーターと明示的なスコープ検証
 
-全 55 エンドポイントが `app/api/routes.py`（2,300 行超）に入っています。
+全 57 エンドポイントが `app/api/routes.py`（2,300 行超）に入っています。
 園スコープと管理者判定は、ミドルウェアに隠さず **各ハンドラの冒頭で明示的に呼ぶ** のがこのリポジトリの慣習です
 （`assert_school_access` / `assert_school_admin`）。新しいハンドラでも同じ形を踏襲してください。
 
@@ -192,3 +192,8 @@ prerender 済みページと `/_app/*` を静的配信し、`/teacher/*` だけ�
 | 参考デザインシステム | `docs/design-system-digital-agency.md` / `docs/reference/dads/` |
 
 運用手順とセットアップの詳細は `README.md`、設定項目の一覧は `.env.example` にあります。
+
+### コミット時のドキュメント整合
+
+コミットする前に、変更した実装・設定・運用手順と `README.md`、`.env.example`、`docs/` の記述に
+矛盾がないことを必ず確認してください。差異がある場合は、関連ドキュメントを同じコミットで更新します。

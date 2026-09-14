@@ -31,6 +31,8 @@ from app.speaker_diarization import build_anonymous_diarization_result
 from app.main import create_app
 from app.mcp_server import build_mcp_server, is_loopback_host
 from app.models import (
+    Child,
+    CloudAudioJob,
     CloudAudioJobStatus,
     GuardianArchiveLink,
     LineLinkInvitation,
@@ -93,6 +95,286 @@ def test_readiness_requires_cloud_audio_storage_and_llm_configuration(tmp_path):
         "cloud_audio_llm_configured": False,
         "line_delivery_configured": False,
     }
+
+
+def test_navigation_badges_do_not_count_optional_line_delivery_as_readiness_issue(tmp_path):
+    app = create_app(
+        Settings(
+            database_url=f"sqlite:///{tmp_path}/test.db",
+            auth_mode="development",
+            cloud_audio_enabled=True,
+            cloud_audio_job_dir=str(tmp_path / "cloud-audio-jobs"),
+            llm_base_url="http://127.0.0.1:11434",
+            llm_model="test-model",
+            line_channel_secret="",
+            line_channel_access_token="",
+        )
+    )
+    with TestClient(app) as client:
+        school_id = client.post("/api/v1/schools", json={"name": "LINE任意設定テスト園"}).json()["id"]
+
+        readiness = client.get("/api/v1/readiness")
+        badges = client.get("/api/v1/navigation-badges", params={"school_id": school_id})
+
+    assert readiness.status_code == 200
+    assert readiness.json()["status"] == "ready"
+    assert readiness.json()["line_delivery_configured"] is False
+    assert badges.status_code == 200
+    assert badges.json()["readiness_issues"] == 0
+
+
+def test_navigation_badges_count_each_school_admin_indicator(tmp_path):
+    app = create_app(
+        Settings(
+            database_url=f"sqlite:///{tmp_path}/test.db",
+            auth_mode="development",
+            cloud_audio_enabled=True,
+            cloud_audio_job_dir=str(tmp_path / "cloud-audio-jobs"),
+            llm_base_url="http://127.0.0.1:11434",
+            llm_model="test-model",
+            line_channel_secret="line-secret",
+            line_channel_access_token="line-token",
+        )
+    )
+    with TestClient(app) as client:
+        school_id = client.post("/api/v1/schools", json={"name": "ナビバッジ集計園"}).json()["id"]
+        teacher_id = client.post(
+            "/api/v1/teachers",
+            json={"school_id": school_id, "name": "集計先生", "email": "badge-count@example.com"},
+        ).json()["id"]
+
+        def create_child(name: str, guardian_line_user_id: str | None = None) -> dict[str, object]:
+            response = client.post(
+                "/api/v1/children",
+                json={
+                    "school_id": school_id,
+                    "display_name": name,
+                    "guardian_line_user_id": guardian_line_user_id,
+                },
+            )
+            assert response.status_code == 201
+            return response.json()
+
+        waiting_child = create_child("連携待ち園児")
+        no_invitation_child = create_child("招待未発行園児")
+        invited_child = create_child("招待発行済み園児")
+        linked_child = create_child("連携済み園児", "U-linked")
+        archived_child = create_child("退園済み園児")
+        invitation = client.post(
+            "/api/v1/line/link-invitations", json={"child_id": invited_child["id"]}
+        )
+        assert invitation.status_code == 201
+
+        def create_record(child_id: str, summary: str) -> dict[str, object]:
+            response = client.post(
+                "/api/v1/records",
+                json={
+                    "school_id": school_id,
+                    "teacher_id": teacher_id,
+                    "child_id": child_id,
+                    "category": "injury",
+                    "confidence": 0.9,
+                    "occurred_at": datetime.now(timezone.utc).isoformat(),
+                    "summary": summary,
+                },
+            )
+            assert response.status_code == 201
+            return response.json()
+
+        pending = create_record(linked_child["id"], "レビュー待ち")
+        waiting = create_record(waiting_child["id"], "連携待ち通知")
+        assert client.post(f"/api/v1/records/{waiting['id']}/approve", json={}).status_code == 200
+        failed = create_record(linked_child["id"], "送信失敗通知")
+        assert client.post(f"/api/v1/records/{failed['id']}/approve", json={}).status_code == 200
+        failed_notification = next(
+            item
+            for item in client.get("/api/v1/notifications", params={"school_id": school_id}).json()
+            if item["record_id"] == failed["id"]
+        )
+
+        device = client.post(
+            "/api/v1/edge-devices",
+            json={"school_id": school_id, "teacher_id": teacher_id, "name": "集計端末"},
+        )
+        assert device.status_code == 201
+        failed_job = client.post(
+            "/api/v1/edge/audio-jobs",
+            headers={"X-Edge-Api-Key": device.json()["api_key"]},
+            files={"audio": ("audio.wav", b"audio", "audio/wav")},
+        )
+        assert failed_job.status_code == 201
+
+        with app.state.session_factory() as db:
+            db.get(Child, archived_child["id"]).is_active = False
+            db.get(Child, archived_child["id"]).archived_at = datetime.now(timezone.utc)
+            db.get(Notification, failed_notification["id"]).status = NotificationStatus.failed
+            db.get(CloudAudioJob, failed_job.json()["id"]).status = CloudAudioJobStatus.failed
+            db.commit()
+
+        badges = client.get("/api/v1/navigation-badges", params={"school_id": school_id})
+
+    assert badges.status_code == 200
+    assert badges.json() == {
+        "pending_review_records": 1,
+        "notification_attention": 2,
+        "failed_audio_jobs": 1,
+        "invitations_not_issued": 2,
+        "readiness_issues": 0,
+    }
+
+
+def test_navigation_badges_limit_teacher_counts_and_school_access(tmp_path, monkeypatch):
+    users = {
+        "admin-token": {"id": "00000000-0000-0000-0000-000000000011", "email": "badge-admin@example.com"},
+        "teacher-token": {"id": "00000000-0000-0000-0000-000000000012", "email": "badge-teacher@example.com"},
+        "second-teacher-token": {
+            "id": "00000000-0000-0000-0000-000000000013",
+            "email": "badge-second@example.com",
+        },
+    }
+
+    class FakeResponse:
+        status_code = 200
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def json(self):
+            return self.payload
+
+    def fake_get(_url, headers, timeout):
+        return FakeResponse(users[headers["Authorization"].removeprefix("Bearer ")])
+
+    monkeypatch.setattr("app.api.dependencies.httpx.get", fake_get)
+    app = create_app(
+        Settings(
+            database_url=f"sqlite:///{tmp_path}/test.db",
+            auth_mode="supabase",
+            supabase_url="https://example.supabase.co",
+            supabase_publishable_key="sb_publishable_test",
+            supabase_bootstrap_admin_emails="badge-admin@example.com",
+            cloud_audio_enabled=True,
+            cloud_audio_job_dir=str(tmp_path / "cloud-audio-jobs"),
+            llm_base_url="http://127.0.0.1:11434",
+            llm_model="test-model",
+            line_channel_secret="line-secret",
+            line_channel_access_token="line-token",
+        )
+    )
+    with TestClient(app) as client:
+        admin_headers = {"Authorization": "Bearer admin-token"}
+        teacher_headers = {"Authorization": "Bearer teacher-token"}
+        school = client.post(
+            "/api/v1/schools",
+            headers=admin_headers,
+            json={"name": "先生スコープバッジ園", "initial_admin_name": "バッジ管理者"},
+        )
+        assert school.status_code == 201
+        school_id = school.json()["id"]
+        teacher = client.post(
+            "/api/v1/teachers",
+            headers=admin_headers,
+            json={"school_id": school_id, "name": "担当先生", "email": "badge-teacher@example.com"},
+        )
+        second_teacher = client.post(
+            "/api/v1/teachers",
+            headers=admin_headers,
+            json={"school_id": school_id, "name": "別先生", "email": "badge-second@example.com"},
+        )
+        assert teacher.status_code == second_teacher.status_code == 201
+        teacher_id = teacher.json()["id"]
+        second_teacher_id = second_teacher.json()["id"]
+        assert client.post("/api/v1/auth/link-teacher", headers=teacher_headers).status_code == 200
+        assert client.post(
+            "/api/v1/auth/link-teacher", headers={"Authorization": "Bearer second-teacher-token"}
+        ).status_code == 200
+
+        own_waiting_child = client.post(
+            "/api/v1/children", headers=admin_headers, json={"school_id": school_id, "display_name": "担当連携待ち"}
+        ).json()
+        linked_child = client.post(
+            "/api/v1/children",
+            headers=admin_headers,
+            json={"school_id": school_id, "display_name": "連携済み", "guardian_line_user_id": "U-linked"},
+        ).json()
+
+        def create_record(teacher_id: str, child_id: str, summary: str) -> dict[str, object]:
+            response = client.post(
+                "/api/v1/records",
+                headers=admin_headers,
+                json={
+                    "school_id": school_id,
+                    "teacher_id": teacher_id,
+                    "child_id": child_id,
+                    "category": "injury",
+                    "confidence": 0.9,
+                    "occurred_at": datetime.now(timezone.utc).isoformat(),
+                    "summary": summary,
+                },
+            )
+            assert response.status_code == 201
+            return response.json()
+
+        own_pending = create_record(teacher_id, linked_child["id"], "担当レビュー待ち")
+        other_pending = create_record(second_teacher_id, linked_child["id"], "別先生レビュー待ち")
+        own_waiting = create_record(teacher_id, own_waiting_child["id"], "担当連携待ち")
+        own_failed = create_record(teacher_id, linked_child["id"], "担当送信失敗")
+        other_failed = create_record(second_teacher_id, linked_child["id"], "別先生送信失敗")
+        for record in (own_waiting, own_failed, other_failed):
+            assert client.post(f"/api/v1/records/{record['id']}/approve", headers=admin_headers, json={}).status_code == 200
+
+        notifications = client.get("/api/v1/notifications", headers=admin_headers, params={"school_id": school_id}).json()
+        notification_by_record = {item["record_id"]: item["id"] for item in notifications}
+        with app.state.session_factory() as db:
+            db.get(Notification, notification_by_record[own_failed["id"]]).status = NotificationStatus.failed
+            db.get(Notification, notification_by_record[other_failed["id"]]).status = NotificationStatus.failed
+            db.commit()
+
+        own_device = client.post(
+            "/api/v1/edge-devices",
+            headers=admin_headers,
+            json={"school_id": school_id, "teacher_id": teacher_id, "name": "担当端末"},
+        ).json()
+        other_device = client.post(
+            "/api/v1/edge-devices",
+            headers=admin_headers,
+            json={"school_id": school_id, "teacher_id": second_teacher_id, "name": "別先生端末"},
+        ).json()
+        own_job = client.post(
+            "/api/v1/edge/audio-jobs",
+            headers={"X-Edge-Api-Key": own_device["api_key"]},
+            files={"audio": ("own.wav", b"audio", "audio/wav")},
+        )
+        other_job = client.post(
+            "/api/v1/edge/audio-jobs",
+            headers={"X-Edge-Api-Key": other_device["api_key"]},
+            files={"audio": ("other.wav", b"audio", "audio/wav")},
+        )
+        assert own_job.status_code == other_job.status_code == 201
+        with app.state.session_factory() as db:
+            db.get(CloudAudioJob, own_job.json()["id"]).status = CloudAudioJobStatus.failed
+            db.get(CloudAudioJob, other_job.json()["id"]).status = CloudAudioJobStatus.failed
+            db.commit()
+
+        own_badges = client.get(
+            "/api/v1/navigation-badges", headers=teacher_headers, params={"school_id": school_id}
+        )
+        assert own_badges.status_code == 200
+        assert own_badges.json() == {
+            "pending_review_records": 1,
+            "notification_attention": 2,
+            "failed_audio_jobs": 1,
+            "invitations_not_issued": 0,
+            "readiness_issues": 0,
+        }
+
+        denied = client.get(
+            "/api/v1/navigation-badges",
+            headers=teacher_headers,
+            params={"school_id": "00000000-0000-0000-0000-000000000099"},
+        )
+
+    assert denied.status_code == 403
 
 
 def test_guardian_archive_only_shows_one_childs_delivered_notifications(tmp_path):

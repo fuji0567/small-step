@@ -46,11 +46,11 @@ create_app(settings)
 
 ## エンドポイントの分類
 
-タグごとのエンドポイント数です（`/api/v1` 配下、合計 55 本）。
+タグごとのエンドポイント数です（`/api/v1` 配下、合計 57 本）。
 
 | タグ | 数 | 代表的なエンドポイント |
 | --- | --- | --- |
-| `records` | 6 | `POST /records/{id}/approve`, `POST /records/manual`, `GET /records/export.csv` |
+| `records` | 7 | `GET /records/{id}`, `POST /records/{id}/approve`, `POST /records/manual`, `GET /records/export.csv` |
 | `notifications` | 6 | `GET /notifications`, `POST /notifications/{id}/retry`, `PATCH /notifications/{id}/schedule` |
 | `children` | 6 | `POST /children`, `POST /children/{id}/archive`, `DELETE /children/{id}/guardian-line-link` |
 | `teachers` | 5 | `GET /teachers`, `PATCH /teachers/{id}/role`, `POST /teachers/{id}/disable` |
@@ -62,7 +62,7 @@ create_app(settings)
 | `guardian archive` | 3 | `POST /guardian-archive-links`, `GET /guardian/archive` |
 | `edge` | 3 | `POST /edge/records`, `POST /edge/heartbeat`, `GET /edge/me` |
 | `cloud audio` | 3 | `POST /edge/audio-jobs`, `GET /audio-jobs` |
-| `system` | 2 | `GET /health`, `GET /readiness` |
+| `system` | 3 | `GET /health`, `GET /readiness`, `GET /navigation-badges` |
 | `audit` | 2 | `GET /audit-events`, `GET /audit-events/export.csv` |
 | `notion` | 1 | `POST /records/{id}/notion-sync` |
 
@@ -73,6 +73,35 @@ create_app(settings)
 - **GPU ワーカー** … `cloud audio`
 - **LINE** … `line`（Webhook）
 - **保護者** … `guardian archive` の `GET /guardian/archive` のみ
+
+---
+
+## ナビゲーションバッジ集計
+
+`GET /navigation-badges?school_id=<園ID>` は、先生用ナビゲーションに必要な件数だけを 1 回で返します。
+Bearer token による先生認証と `assert_school_access` を必須とし、一覧 API の page size や取得上限には
+依存せず、データベース上で `COUNT` します。
+
+```json
+{
+  "pending_review_records": 3,
+  "notification_attention": 1,
+  "failed_audio_jobs": 0,
+  "invitations_not_issued": 4,
+  "readiness_issues": 0
+}
+```
+
+| フィールド | 集計条件 | 一般の先生 | 先生管理者 |
+| --- | --- | --- | --- |
+| `pending_review_records` | `pending_review` の日誌 | 自分が担当する日誌 | 園全体 |
+| `notification_attention` | `failed` または `waiting_guardian_link` の通知 | 自分が担当する日誌の通知 | 園全体 |
+| `failed_audio_jobs` | `failed` のクラウド音声ジョブ | 自分が開始したジョブ | 園全体 |
+| `invitations_not_issued` | 在園中、保護者 LINE 未連携、有効な未使用招待なしの園児 | 常に 0 | 園全体 |
+| `readiness_issues` | DB、DB migration、有効時のクラウド音声保存先・LLM 設定の不備 | 常に 0 | 園全体の実行環境 |
+
+`readiness_issues` は画面上で対応が必要な blocking check だけを数えます。任意機能である LINE の未設定は
+含めません。レスポンスは非負整数だけで、園児名、日誌本文、LINE ID、token、設定値などは返しません。
 
 ---
 

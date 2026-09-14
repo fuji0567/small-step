@@ -279,6 +279,33 @@ describe('TeacherShellState', () => {
     expect(refreshRecords).toHaveBeenCalledOnce();
   });
 
+  it('対象scopeのrefresh完了後にナビ件数も再取得する', async () => {
+    const counts = {
+      pending_review_records: 2,
+      notification_attention: 3,
+      failed_audio_jobs: 4,
+      invitations_not_issued: 5,
+      readiness_issues: 1
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ auth_mode: 'development' }))
+      .mockResolvedValueOnce(jsonResponse([school()]))
+      .mockResolvedValueOnce(jsonResponse(counts));
+    const shell = new TeacherShellState(fetchMock);
+    const refreshRecords = vi.fn();
+    shell.controller.register('records', refreshRecords);
+
+    await shell.initialize(null);
+    await shell.controller.refresh(['records']);
+
+    expect(refreshRecords).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[2]?.[0]).toBe(
+      '/api/v1/navigation-badges?school_id=school-1'
+    );
+    expect(shell.navigationBadges.counts).toEqual(counts);
+  });
+
   it('ログアウト時にtokenと園・教員の状態を消去する', async () => {
     const storage = {
       getItem: vi.fn(() => 'saved-jwt'),
