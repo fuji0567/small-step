@@ -85,6 +85,21 @@ route は薄く保ち、巨大な global store や DOM の手組み、`{@html}` 
 更新後の横断的な再取得は `AppController` と `InvalidationScope` で接続します。
 コンポーネントは mount 中だけ更新 handler を登録し、離脱時に解除します。
 
+### ナビゲーションバッジ
+
+`lib/features/teacher-shell/` の `NavigationBadgeService` と `NavigationBadgeState` が、認証完了後に
+`GET /api/v1/navigation-badges?school_id=...` を読み込みます。選択園の変更、route の移動、対象データを
+更新する `InvalidationScope` の発火後に再取得し、同じ園への同時リクエストは共有します。
+
+取得値は必須 5 フィールドすべてが 0 以上の整数であることを確認してから使います。通信失敗や不正な応答は
+補助表示だけの失敗として空の集計へ戻し、認証済みの画面やナビゲーション自体は止めません。
+共通の nav item を使うため、デスクトップのサイドパネルとモバイルナビには同じ件数が表示されます。
+0 件は DOM に出さず、100 件以上は視覚上 `99+` としながら、支援技術向けの `aria-label` には正確な件数を残します。
+要確認・失敗の項目は `!` と warning tone を併用し、色だけに意味を持たせません。
+
+バッジと画面の対応は [画面遷移図](../transition.md#サイドパネルとモバイルナビの通知数)、
+サーバー側の集計条件と権限範囲は [API 設計](api.md#ナビゲーションバッジ集計)を参照してください。
+
 Svelte 5 の実装は runes（`$state`、`$derived`、`$effect`、`$props`）を使います。
 effect の依存は入力となる状態だけに限定し、非同期読み込みで更新する内部状態を意図せず追跡しないようにします。
 
