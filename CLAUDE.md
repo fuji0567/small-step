@@ -192,3 +192,8 @@ prerender 済みページと `/_app/*` を静的配信し、`/teacher/*` だけ�
 | 参考デザインシステム | `docs/design-system-digital-agency.md` / `docs/reference/dads/` |
 
 運用手順とセットアップの詳細は `README.md`、設定項目の一覧は `.env.example` にあります。
+
+### コミット時のドキュメント整合
+
+コミットする前に、変更した実装・設定・運用手順と `README.md`、`.env.example`、`docs/` の記述に
+矛盾がないことを必ず確認してください。差異がある場合は、関連ドキュメントを同じコミットで更新します。
