@@ -51,6 +51,15 @@ class CloudAudioJobStatus(str, enum.Enum):
     expired = "expired"
 
 
+class WorkerHeartbeat(Base):
+    """A data-free liveness marker written by a long-running worker."""
+
+    __tablename__ = "worker_heartbeats"
+
+    worker_name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class AuditEventAction(str, enum.Enum):
     """Safe operational events that never contain audio, transcripts, or secrets."""
 
@@ -165,6 +174,11 @@ class CloudAudioJob(Base):
         Enum(CloudAudioJobStatus), default=CloudAudioJobStatus.queued, index=True
     )
     attempts: Mapped[int] = mapped_column(Integer, default=0)
+    detected_speaker_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    used_low_volume_retry: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    candidate_category: Mapped[RecordCategory | None] = mapped_column(
+        Enum(RecordCategory), nullable=True
+    )
     claim_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
     record_id: Mapped[str | None] = mapped_column(ForeignKey("records.id"), nullable=True, index=True)
     queued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)

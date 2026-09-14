@@ -44,3 +44,54 @@ def test_guardian_archive_requires_https_only_in_production():
         )
     )
     assert settings.app_env == "production"
+
+
+def test_worker_heartbeat_stale_window_must_exceed_update_interval():
+    with pytest.raises(ValidationError, match="WORKER_HEARTBEAT_STALE_SECONDS"):
+        Settings(
+            worker_heartbeat_interval_seconds=30,
+            worker_heartbeat_stale_seconds=30,
+        )
+
+
+def test_operations_monitor_intervals_have_safe_lower_bounds():
+    with pytest.raises(ValidationError):
+        Settings(operations_monitor_poll_seconds=5)
+
+    with pytest.raises(ValidationError):
+        Settings(operations_alert_after_seconds=10)
+
+    with pytest.raises(ValidationError):
+        Settings(operations_alert_repeat_seconds=60)
+
+
+def test_database_backup_schedule_rejects_invalid_settings():
+    with pytest.raises(ValidationError):
+        Settings(database_backup_time="25:00")
+
+    with pytest.raises(ValidationError):
+        Settings(database_backup_worker_poll_seconds=10)
+
+    with pytest.raises(ValidationError):
+        Settings(database_backup_retention_count=-1)
+
+
+def test_offsite_backup_requires_public_key_bucket_and_secure_endpoint():
+    with pytest.raises(ValidationError, match="AGE_RECIPIENT"):
+        Settings(database_backup_offsite_enabled=True)
+
+    with pytest.raises(ValidationError, match="must use HTTPS"):
+        Settings(
+            database_backup_offsite_enabled=True,
+            database_backup_age_recipient="age1examplepublicrecipient",
+            database_backup_s3_bucket="small-step-backups",
+            database_backup_s3_endpoint_url="http://storage.example.test",
+        )
+
+    with pytest.raises(ValidationError, match="KMS_KEY_ID"):
+        Settings(
+            database_backup_offsite_enabled=True,
+            database_backup_age_recipient="age1examplepublicrecipient",
+            database_backup_s3_bucket="small-step-backups",
+            database_backup_s3_sse="aws:kms",
+        )

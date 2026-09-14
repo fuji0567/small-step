@@ -38,6 +38,18 @@ notification_status = sa.Enum("pending", "sent", "failed", name="notificationsta
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        # Alembic defaults this column to VARCHAR(32), while this project uses
+        # descriptive revision identifiers that can be longer than 32 chars.
+        op.alter_column(
+            "alembic_version",
+            "version_num",
+            existing_type=sa.String(length=32),
+            type_=sa.String(length=128),
+            existing_nullable=False,
+        )
+
     op.create_table(
         "schools",
         sa.Column("id", sa.String(length=36), nullable=False),

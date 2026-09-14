@@ -81,7 +81,9 @@ class RuntimeReadinessRead(BaseModel):
     cloud_audio_enabled: bool
     cloud_audio_job_storage_ready: bool | None
     cloud_audio_llm_configured: bool | None
+    cloud_audio_worker_ready: bool | None
     line_delivery_configured: bool
+    line_delivery_worker_ready: bool | None
 
 
 class NavigationBadgeSummaryRead(BaseModel):
@@ -289,6 +291,9 @@ class CloudAudioJobRead(APIModel):
     child_id: UUID | None
     status: CloudAudioJobStatus
     attempts: int
+    detected_speaker_count: int | None
+    used_low_volume_retry: bool | None
+    candidate_category: RecordCategory | None
     record_id: UUID | None
     queued_at: datetime
     processing_started_at: datetime | None

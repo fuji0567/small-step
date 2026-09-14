@@ -15,6 +15,7 @@ from app.config import Settings, get_settings
 from app.database import create_database_engine, create_session_factory, initialise_database
 from app.line import LineMessagingError, build_notification_text, push_text_message
 from app.models import Notification, NotificationStatus, Record, RecordStatus, utc_now
+from app.worker_heartbeat import LINE_DELIVERY_WORKER_NAME, WorkerHeartbeatMonitor
 
 
 FAILURE_GUARDIAN_NOT_LINKED = "guardian_not_linked"
@@ -139,7 +140,7 @@ def main() -> None:
     if not args.dry_run and not settings.line_channel_access_token:
         raise SystemExit("LINE_CHANNEL_ACCESS_TOKEN を設定してから起動してください。")
 
-    while True:
+    if not args.watch:
         sent, failed = send_due_notifications(
             retry_failed=args.retry_failed,
             dry_run=args.dry_run,
@@ -147,9 +148,27 @@ def main() -> None:
         )
         mode_label = "確認" if args.dry_run else "送信"
         print(f"LINE通知 {mode_label}: 対象={sent}件, 失敗={failed}件")
-        if not args.watch:
-            return
-        time.sleep(poll_seconds)
+        return
+
+    engine = create_database_engine(settings.database_url)
+    initialise_database(engine)
+    session_factory = create_session_factory(engine)
+    try:
+        with WorkerHeartbeatMonitor(
+            session_factory=session_factory,
+            worker_name=LINE_DELIVERY_WORKER_NAME,
+            interval_seconds=settings.worker_heartbeat_interval_seconds,
+        ):
+            while True:
+                sent, failed = send_due_notifications(
+                    retry_failed=args.retry_failed,
+                    dry_run=False,
+                    settings=settings,
+                )
+                print(f"LINE通知 送信: 対象={sent}件, 失敗={failed}件")
+                time.sleep(poll_seconds)
+    finally:
+        engine.dispose()
 
 
 if __name__ == "__main__":

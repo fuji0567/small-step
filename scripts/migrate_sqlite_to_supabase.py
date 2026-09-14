@@ -13,44 +13,39 @@ from sqlalchemy import func, select
 from app.config import Settings
 from app.database import create_database_engine, create_session_factory, initialise_database
 from app.database_migrations import upgrade_database
-from app.models import Child, Notification, Record, School, Teacher
+from app.models import (
+    AuditEvent,
+    Child,
+    CloudAudioJob,
+    EdgeDevice,
+    GuardianArchiveLink,
+    LineLinkInvitation,
+    NotionSync,
+    Notification,
+    Record,
+    School,
+    Teacher,
+    VoiceEnrollmentConsent,
+    WorkerHeartbeat,
+)
 
 
 SOURCE_DATABASE_URL = "sqlite:///./data/otayori.db"
-MODELS_IN_DEPENDENCY_ORDER = (School, Teacher, Child, Record, Notification)
-COPY_FIELDS: dict[type[object], tuple[str, ...]] = {
-    School: ("id", "name", "timezone", "created_at"),
-    Teacher: ("id", "school_id", "name", "email", "auth_user_id", "role", "created_at"),
-    Child: ("id", "school_id", "display_name", "guardian_line_user_id", "created_at"),
-    Record: (
-        "id",
-        "school_id",
-        "teacher_id",
-        "child_id",
-        "category",
-        "status",
-        "source_event_id",
-        "confidence",
-        "occurred_at",
-        "summary",
-        "conversation_prompt",
-        "anonymized_context",
-        "reviewed_at",
-        "created_at",
-        "updated_at",
-    ),
-    Notification: (
-        "id",
-        "record_id",
-        "channel",
-        "recipient_line_user_id",
-        "scheduled_for",
-        "status",
-        "provider_message_id",
-        "sent_at",
-        "created_at",
-    ),
-}
+MODELS_IN_DEPENDENCY_ORDER = (
+    School,
+    Teacher,
+    Child,
+    EdgeDevice,
+    VoiceEnrollmentConsent,
+    LineLinkInvitation,
+    GuardianArchiveLink,
+    AuditEvent,
+    Record,
+    CloudAudioJob,
+    Notification,
+    NotionSync,
+    WorkerHeartbeat,
+)
 
 
 def item_count(session, model: type[object]) -> int:
@@ -58,7 +53,22 @@ def item_count(session, model: type[object]) -> int:
 
 
 def copy_items(source_items: Iterable[object], model: type[object]) -> list[object]:
-    return [model(**{field: getattr(item, field) for field in COPY_FIELDS[model]}) for item in source_items]
+    fields = tuple(column.key for column in model.__table__.columns)
+    return [model(**{field: getattr(item, field) for field in fields}) for item in source_items]
+
+
+def copy_application_data(source, target) -> dict[str, int]:
+    """Copy every table and flush each dependency layer before continuing."""
+
+    copied_counts: dict[str, int] = {}
+    for model in MODELS_IN_DEPENDENCY_ORDER:
+        items = source.scalars(select(model)).all()
+        target.add_all(copy_items(items, model))
+        # The models intentionally do not define ORM relationships. Flushing
+        # here guarantees that referenced rows exist before dependent tables.
+        target.flush()
+        copied_counts[model.__tablename__] = len(items)
+    return copied_counts
 
 
 def main() -> None:
@@ -81,11 +91,7 @@ def main() -> None:
                     "Supabase側に既存データがあるため中止しました（上書きはしません）。"
                 )
 
-            copied_counts: dict[str, int] = {}
-            for model in MODELS_IN_DEPENDENCY_ORDER:
-                items = source.scalars(select(model)).all()
-                target.add_all(copy_items(items, model))
-                copied_counts[model.__tablename__] = len(items)
+            copied_counts = copy_application_data(source, target)
             target.commit()
 
         print("SQLiteからSupabase PostgreSQLへコピーしました。")

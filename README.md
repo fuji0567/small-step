@@ -66,7 +66,7 @@ npm run build
 Python runtime には生成物だけをコピーします。Node.js と `node_modules` は runtime image に含めません。
 配信と本番起動の契約は [デプロイ・運用](docs/architecture/deployment.md) を参照してください。
 
-レビュー時は、配信日時を空欄のまま承認すると既定ルールが使われます。成長記録は園ごとの配信時刻、怪我記録は即時の送信待ちです。必要な場合だけ「配信日時を指定する」を選び、保護者へ送る日時を予約できます。
+レビュー時は、在籍中の園児を必ず選択してから承認します。園児未選択の候補は承認できず、通知も作成されません。配信日時を空欄のまま承認すると既定ルールが使われます。成長記録は園ごとの配信時刻、怪我記録は即時の送信待ちです。必要な場合だけ「配信日時を指定する」を選び、保護者へ送る日時を予約できます。
 
 音声がない場面では、「レビュー待ち」の「手入力で追加」から成長記録または怪我記録を作成できます。手入力した記録も必ずレビュー待ちになり、承認するまで保護者へ配信されません。本番ではログイン中の先生へ自動で紐付きます。
 
@@ -158,11 +158,14 @@ CLOUD_AUDIO_JOB_RETENTION_MINUTES=15
 CLOUD_AUDIO_PROCESSING_TIMEOUT_MINUTES=10
 EDGE_AUDIO_DEVICE=cuda
 EDGE_AUDIO_COMPUTE_TYPE=float16
+LLM_BACKEND=vllm
 LLM_BASE_URL=http://127.0.0.1:8001/v1
-LLM_MODEL=<VRT内で起動するモデル名>
+LLM_MODEL=Qwen/Qwen3-32B
 ```
 
-アップロードされた生音声には元のファイル名を付けず、ランダムIDで保存します。未処理ジョブは最大15分で期限切れになり、GPUワーカーは成功・失敗を問わず音声を削除します。処理中にVRTやワーカーが停止した場合は、既定10分後に次のワーカーが安全に引き継げます。DBや先生画面に保存・表示されるのはジョブ状態と匿名化済みの承認待ち記録だけです。
+アップロードされた生音声には元のファイル名を付けず、ランダムIDで保存します。未処理ジョブは最大15分で期限切れになり、GPUワーカーは成功・失敗・記録対象外を問わず音声を削除します。処理中にVRTやワーカーが停止した場合は、既定10分後に次のワーカーが安全に引き継げます。具体的な園児の出来事が確認できた場合だけ匿名化済みの承認待ち記録を作り、無音、技術テスト、雑談、設定確認、先生だけの事務的な会話などは正常完了の「記録対象外」としてジョブ履歴だけを残します。Whisperが発話を検出しなかった場合はQwenを呼び出しません。
+
+常駐するGPUワーカーとLINE送信ワーカーは、既定30秒ごとにワーカー名と最終確認時刻だけをデータベースへ記録します。90秒以上更新されない場合、先生画面の「稼働準備」は停止として表示します。長い音声処理中も別スレッドで更新するため、処理時間の長さを停止と誤判定しません。
 
 録音端末は、VRTのAPIが準備できた後に端末側の `.env` で次のように切り替えます。`cloud` モードでは端末内の文字起こし・LLMは起動せず、VRTが受信に成功したときだけ端末の音声ファイルを削除します。通信失敗時は端末に残るため、次回の監視で再送できます。
 
@@ -177,6 +180,8 @@ VRT側では `CLOUD_AUDIO_ENABLED=true` を設定します。端末・VRTとも�
 
 VRTとの通信が一時的に切れた場合、端末は音声を削除せずに残します。再接続後は10秒、20秒、40秒のように待機時間を延ばしながら再送します（最大5分）。同じ音声には端末内だけで管理するランダムな送信IDを付けるため、サーバーの受信結果が通信途中で分からなくなった場合も、VRT上に同じ音声ジョブを二重に作りません。送信を受け付けた応答を確認できたときだけ端末側の音声を削除します。
 
+30秒区切りの前後で同じ出来事が重複して候補化された場合は、同じ園児・同じ録音端末・同じ種別・2分以内・未承認で、要約がほぼ同じものだけを既存の記録へまとめます。園児未選択、承認済み、文章が異なる候補は自動統合しません。
+
 VRT上では、FastAPIを起動した後に別プロセスでGPUワーカーを起動します。`--once` は1回だけの安全な検証用です。
 
 ```bash
@@ -185,6 +190,52 @@ VRT上では、FastAPIを起動した後に別プロセスでGPUワーカーを�
 ```
 
 通常運用では `--once` を外します。待機中ジョブの取得はDBで原子的に行うため、複数のGPUワーカーを誤って起動しても同じジョブを同時に処理しません。最初のVRTではGPUメモリ管理を単純にするため、まずは1プロセスで運用してください。APIとGPUワーカーを別VMへ分ける段階では、次に暗号化したオブジェクトストレージとキューへ置き換えます。
+
+### VRT音声処理の一括確認
+
+録音端末を実機運用へ切り替える前に、音声1件のアップロード、端末キー、GPUワーカー、
+記録候補作成を一度に確認できます。元の音声は削除せず、処理結果は先生の承認待ちまでで止まるため、
+このコマンドだけでLINEへ送信されることはありません。
+
+```bash
+.venv313/bin/python scripts/verify_vrt_audio_pipeline.py \
+  data/edge-audio-inbox/test.wav \
+  --api-url http://127.0.0.1:18000
+```
+
+外部URLを直接指定する場合はHTTPSだけを受け付けます。`http://127.0.0.1`はSSH転送中の
+ローカル接続に限って利用できます。端末キーは`.env`の`EDGE_API_KEY`または非表示入力から読み、
+画面や結果へ表示しません。園児を決めずに確認した場合は、作成された候補を先生画面で選択します。
+
+### 実音声テストセットの精度確認
+
+複数話者、声量差、雑音、記録対象外を含む複数の音声は、匿名のケースIDと期待値を
+マニフェストへ記載して順番に評価できます。ひな形は
+[`docs/vrt-audio-evaluation-manifest.example.json`](docs/vrt-audio-evaluation-manifest.example.json)です。
+音声はGit対象外の`data/vrt-evaluation/`へ置き、人物名をケースIDやファイル名に使わないでください。
+
+```bash
+.venv313/bin/python scripts/evaluate_vrt_audio_samples.py \
+  docs/vrt-audio-evaluation-manifest.example.json \
+  --api-url http://127.0.0.1:18000 \
+  --interactive-review
+```
+
+VRTの受付状態を一度確認してから、ケースを1件ずつ処理します。評価項目は検出話者数、
+記録候補の作成有無、成長／怪我の分類、誤検出・見逃し、音量差補正の使用有無、処理時間の
+中央値・95パーセンタイルです。`--interactive-review`を付けると候補作成後に処理を一時停止し、
+先生画面で最新候補を確認して、要約と会話のきっかけをそれぞれ合否入力できます。作成された候補は
+承認待ちで止まり、LINEへ自動送信されません。集計は既定で
+`data/vrt-audio-evaluation-report.json`へ保存します。
+レポートには音声、文字起こし、ファイルパス、人物名、ジョブID、記録IDを含めません。
+
+マニフェストの`acceptance`には、処理完了率、話者数・候補判定・分類・人手確認の最低精度と、処理時間の上限を
+設定できます。すべての基準を満たすと終了コード0、満たさない場合は終了コード2になります。
+生成文の基準を設定したマニフェストでは`--interactive-review`が必須です。`expected_category`は
+候補が必要なケースで`growth`または`injury`、候補が不要なケースでは`null`にします。
+
+話者数は生体情報や声紋ではなく、その音声内だけの匿名集計値として音声処理ジョブへ保存します。
+話者分離が無効な環境では人数が未計測となり、期待値との照合は不合格になります。
 
 ### 火曜日のVRT切替
 
@@ -206,14 +257,37 @@ EDGE_AUDIO_DEVICE=cuda
 EDGE_AUDIO_COMPUTE_TYPE=float16
 SPEAKER_DIARIZATION_DEVICE=cuda
 
-# VRTホスト上のOllama/vLLMをコンテナから使う場合の例。
-# ホスト側は外部公開せず、127.0.0.1またはDocker内部ネットワークだけで待ち受けます。
-LLM_BASE_URL=http://host.docker.internal:11434/v1
+# VRT上のvLLMコンテナへ、同じDocker内部ネットワークから接続します。
+LLM_BACKEND=vllm
+LLM_BASE_URL=http://small-step-vllm:8000/v1
 LLM_ALLOW_EXTERNAL=true
-LLM_MODEL=<VRTで動かすモデル名>
+LLM_MODEL=Qwen/Qwen3-32B
+
+# Composeが管理するvLLMのキャッシュ先。既存のNVMeキャッシュを再利用します。
+VLLM_MODEL_CACHE_DIR=/mnt/small-step-cache/huggingface
+VLLM_COMPILE_CACHE_DIR=/mnt/small-step-cache/vllm
 ```
 
-次でデータベース準備・API・GPUワーカーを一緒に起動できます。`compose.vrt.yaml` はMacでは使いません。空のDBでは`migrate`が初期構成を適用してから、APIと各ワーカーが順番に起動します。
+`LLM_ALLOW_EXTERNAL=true` は、ここではDockerサービス名を許可するために必要です。
+LLMをインターネットへ公開する設定ではありません。ComposeがQwen3-32BのvLLMも管理し、
+ホスト側ポートは`127.0.0.1:8001:8000`だけに限定します。`small-step-vllm` と
+`gpu-worker`だけを`small-step-ai`ネットワークへ接続します。ネットワークが未作成の場合だけ、
+起動前に作成します。
+
+```bash
+sudo docker network inspect small-step-ai >/dev/null 2>&1 \
+  || sudo docker network create small-step-ai
+```
+
+以前の手動`docker run`で`small-step-vllm`を起動しているVRTでは、最初の切り替え時だけ
+そのコンテナを削除します。モデルはNVMe側に残るため再ダウンロードされません。
+
+```bash
+sudo docker stop small-step-vllm
+sudo docker rm small-step-vllm
+```
+
+次でデータベース準備・vLLM・API・GPUワーカーを一緒に起動できます。`compose.vrt.yaml` はMacでは使いません。空のDBでは`migrate`が初期構成を適用し、vLLMとAPIがHealthyになってから各ワーカーが順番に起動します。Qwenの読込中は数分待ちます。
 
 ```bash
 docker compose -f compose.yaml -f compose.vrt.yaml config
@@ -221,13 +295,17 @@ docker compose -f compose.yaml -f compose.vrt.yaml up -d --build
 docker compose -f compose.yaml -f compose.vrt.yaml ps
 ```
 
+APIのホスト側ポートは安全な初期値として `127.0.0.1:8000` にだけ公開されます。
+外部端末から接続する前に、認証を有効化し、HTTPSのリバースプロキシを経由させてください。
+検証のために `8000` 番ポートをインターネットへ直接公開しないでください。
+
 `migrate`が`exited (0)`、`api`が`healthy`になったことを確認してください。`gpu-worker`は`api`が`healthy`になるまで待ってから起動します。`migrate`が止まった場合は、次で理由を確認してから対応します。データを消して再実行する必要はありません。
 
 ```bash
 docker compose -f compose.yaml -f compose.vrt.yaml logs --tail=100 migrate
 ```
 
-`api`が`healthy`になるためには、DBの接続と移行状態が正しく、クラウド音声モードを有効にした場合は一時音声の保存先と `LLM_BASE_URL`・`LLM_MODEL` も設定済みである必要があります。APIキーや接続先を表示しない確認結果は、次で見られます。
+`api`のDockerヘルスチェックは、データベースへ接続してAPIが応答できることだけを確認します。GPU・LINEワーカーがAPIの起動を待つ一方、運用準備チェックがワーカーを待つ循環を避けるためです。移行状態、一時音声保存、文章生成AI、GPUワーカー、LINE設定とLINE送信ワーカーを含む確認結果は、次で見られます。
 
 ```bash
 python scripts/check_runtime_readiness.py
@@ -235,7 +313,7 @@ python scripts/check_runtime_readiness.py
 
 `ready` 以外の場合は、そのVRTへ録音端末を切り替えずに `.env` と `migrate` のログを見直します。LINE配信設定は表示のみで、LINEをまだ接続していない開発・検証環境では `false` でもAPIは起動できます。
 
-先生管理者は先生画面の「稼働準備」からも、同じ安全な確認結果を見られます。VRTをまだ使わない間は「Macでローカル処理中」と表示されます。VRTへ切り替えた後は、データベース更新、一時音声保存、文章生成AI、LINE配信の準備状態を、接続先やキーを表示せずに確認できます。
+先生管理者は先生画面の「稼働準備」からも、同じ安全な確認結果を見られます。VRTをまだ使わない間は「Macでローカル処理中」と表示されます。VRTへ切り替えた後は、データベース更新、一時音声保存、文章生成AI、GPU音声処理、LINE配信設定、LINE送信処理の状態を、接続先やキーを表示せずに確認できます。
 
 `APP_ENV=production`で起動する場合は、誤ってローカル開発設定を公開しないように、`AUTH_MODE=supabase`、Supabaseの公開設定、SQLite以外の`DATABASE_URL`が必須です。保護者用配信アーカイブを有効にする場合は、`GUARDIAN_ARCHIVE_BASE_URL`もHTTPS URLでなければ起動しません。
 
@@ -250,6 +328,8 @@ docker compose -f compose.yaml -f compose.vrt.yaml logs --tail=100 gpu-worker
 LINE配信ワーカーは、通信断などで送信結果が確定しない通知を勝手に繰り返し送信しません。二重送信を避けるため、失敗した場合は先生管理者が先生画面の「通知状況」で確認してから「再送を予約」を実行します。
 
 通知一覧には送信試行回数と最終試行日時、本文やLINEの応答内容を含まない大まかな失敗区分だけが表示されます。保護者のLINE連携、ネットワーク、LINE側の一時的な障害、LINE設定のどれを確認すべきか判断するための情報です。
+
+AIが返した信頼度が70%未満の記録候補は削除せず、レビュー一覧と詳細画面で「要確認」として強調します。承認確認にも注意文を表示するため、聞き取りづらい音声を保護者へそのまま配信することを防ぎつつ、実際の出来事を見逃さない設計です。
 
 ### GPU環境の準備
 
@@ -266,8 +346,9 @@ mkdir -p data/edge-audio-inbox
 EDGE_AUDIO_INBOX_DIR=./data/edge-audio-inbox
 EDGE_AUDIO_DEVICE=cuda
 EDGE_AUDIO_COMPUTE_TYPE=float16
+LLM_BACKEND=vllm
 LLM_BASE_URL=http://127.0.0.1:8001/v1
-LLM_MODEL=<vLLMで起動したモデル名>
+LLM_MODEL=Qwen/Qwen3-32B
 LLM_ALLOW_EXTERNAL=false
 EDGE_API_URL=http://127.0.0.1:8000
 EDGE_API_KEY=<POST /api/v1/edge-devices で発行した端末専用キー>
@@ -275,7 +356,7 @@ EDGE_API_KEY=<POST /api/v1/edge-devices で発行した端末専用キー>
 
 ### Macで音声を自動送信するテスト
 
-録音端末を用意する前に、Macを端末の代わりにできます。別の録音アプリなどで作成した対応形式の音声を `data/edge-audio-inbox` に置くと、Mac内で文字起こし・匿名化してから承認待ち記録として送信します。生音声や文字起こしはAPI・DBへ送信されません。
+録音端末を用意する前に、Macを端末の代わりにできます。別の録音アプリなどで作成した対応形式の音声を `data/edge-audio-inbox` に置くと、Mac内で文字起こし・匿名化し、具体的な出来事がある場合だけ承認待ち記録として送信します。生音声や文字起こしはAPI・DBへ送信されません。
 
 最初は、既存の音声を一度だけ処理する `--once` を使います。話者識別はまだ作らないため、園児は音声内容やファイル名から推測しません。園児IDを省略すると、先生が確認画面で対象園児を選べます。
 
@@ -318,7 +399,7 @@ Macでは `ffmpeg` を使って、マイクの音声を30秒ごとのWAVファ�
 
 ### 匿名の話者分離
 
-話者分離は、生音声をMac内で `speaker_01` のような匿名の話者区間に分ける機能です。先生・園児の名前を判定せず、音声・文字起こし・話者区間をAPIやDBへ送信しません。
+話者分離は、生音声を処理端末内で `speaker_01` のような匿名の話者区間に分ける機能です。先生・園児の名前を判定せず、音声・文字起こし・話者区間をAPIやDBへ送信しません。
 
 ローカルで動かす Community-1 モデルは、最初にHugging Faceで利用条件へ同意し、無料のアクセストークンを作る必要があります。トークンを `.env` の `SPEAKER_DIARIZATION_TOKEN` に保存してから、音声処理用環境へ追加パッケージを入れます。
 
@@ -326,7 +407,9 @@ Macでは `ffmpeg` を使って、マイクの音声を30秒ごとのWAVファ�
 .venv313/bin/python -m pip install -e '.[speaker-diarization]'
 ```
 
-音声は `EDGE_AUDIO_INBOX_DIR` に置いたまま、次のコマンドで話者数と匿名区間だけを確認できます。音声ファイル名に個人名を入れないでください。
+`SPEAKER_DIARIZATION_TOKEN` が設定されていると、通常のローカル処理とVRT処理でも自動的に匿名話者分離を行います。Whisperの単語時刻を匿名区間へ対応付け、匿名ラベル付きの文字起こしだけをQwenへ渡します。トークンが未設定なら話者分離だけを省略し、従来どおり文字起こしを続けます。
+
+音声は `EDGE_AUDIO_INBOX_DIR` に置いたまま、次のコマンドで話者数と匿名区間だけを単体確認できます。音声ファイル名に個人名を入れないでください。
 
 ```bash
 .venv313/bin/python scripts/diarize_edge_audio.py data/edge-audio-inbox/<音声ファイル名>.wav
@@ -344,7 +427,9 @@ Macでは `ffmpeg` を使って、マイクの音声を30秒ごとのWAVファ�
 
 この場合は、最初の結果で見つからなかった静かな話者を補正後に検出できています。補正前後ともに話者数が `1` の場合は、静かな声がマイクに十分届いていない可能性があります。話者数を無理に増やさず、マイクを会話の中央に近づけるか、実機マイクで録音し直してください。
 
-この段階では、話者区間の情報を通知や成長記録に使いません。
+話者ラベルは、会話の交代をQwenが理解するためだけに使います。ラベル自体や話者区間は通知・成長記録・DBに保存しません。
+
+録音時点で園児IDが指定されている場合は、同じ園児の直近5件の承認済み・配信済み記録も匿名の参考情報としてQwenへ渡します。現在の音声と過去記録の両方に根拠がある場合だけ、小さな変化を候補文へ含めます。園児未選択、未承認記録、別の園児の履歴は参照しません。
 
 ### 声紋登録の同意
 
@@ -551,6 +636,8 @@ docker compose run --rm api python scripts/send_pending_line_notifications.py --
 
 FreeプランでローカルPCやIPv4のサーバーから接続するときは、Supabase Dashboard の **Connect → Direct → Session pooler** を選びます。表示された URI はチャットに貼り付けず、ローカルで次を実行してください。
 
+Small StepはSupabaseのData APIから業務テーブルを直接操作しません。PostgreSQL向けの移行では、`public`スキーマの業務テーブルでRLSを有効化し、ブラウザ用の`anon`・`authenticated`ロールから直接操作権限を外します。先生Web画面はSupabase Authでログインし、業務データは認証済みのFastAPIだけを経由します。
+
 ```bash
 .venv/bin/python -m pip install "psycopg[binary]>=3.2.0"
 .venv/bin/python scripts/configure_supabase_database.py
@@ -559,7 +646,7 @@ FreeプランでローカルPCやIPv4のサーバーから接続するときは�
 
 スクリプトの最初の入力には、ダッシュボードにある `[YOUR-PASSWORD]` を含む接続文字列を貼り付けます。次の2回の入力には、プロジェクト作成時に決めた**データベース用パスワード**を入力します（Supabaseへのログイン用パスワードとは別です）。パスワードは画面に表示されず、`.env` 以外には保存されません。
 
-最後の移行スクリプトは、ローカルSQLiteに作成済みの園・管理者・記録をSupabaseへ一度だけコピーします。Supabase側にデータがある場合は安全のため中止し、上書きしません。
+最後の移行スクリプトは、ローカルSQLiteに作成済みの園・先生・園児・記録に加え、録音端末、音声処理ジョブ、同意、監査履歴、LINE連携を含む全アプリケーションデータをSupabaseへ一度だけコピーします。Supabase側にデータがある場合は安全のため中止し、上書きしません。
 
 ### 実ログインの確認
 
@@ -593,6 +680,10 @@ Supabaseのメールアドレス・パスワードで、管理者認証まで通
 .venv/bin/python scripts/verify_edge_device.py
 ```
 
+ESP32-S3とEV_INMP621-FXを使う実機ファームウェア、配線、秘密値の設定、書き込み手順は
+[`firmware/esp32-s3-recorder/README.md`](firmware/esp32-s3-recorder/README.md) にあります。
+通信切断・混雑・サーバー障害のときは同じアップロードIDで1件を再送するため、VRT側の重複防止と組み合わせて二重登録を避けます。無効な端末キーなど、再送しても直らないHTTP `4xx`では音声を端末から削除し、設定ミスで新しい録音が止まり続けないようにします。
+
 起動中の開発APIへ、端末の立場で匿名化済みのテスト候補を送るには次を使います。`【端末テスト】` と明示した記録が作成され、先生の承認待ちになります。
 
 ```bash
@@ -615,8 +706,248 @@ Supabaseのメールアドレス・パスワードで、管理者認証まで通
 4. リバースプロキシ（CaddyまたはNginx）でTLS終端し、APIの8000番ポートをインターネットへ直接公開しない。
 5. GPUワーカーを追加する際は、モデル・一時音声は永続ディスクまたは園内側に置く。高火力 VRTの一時領域はVM停止・障害時に消えるため、そこを永続データの保存先にしない。
 
-## 次に実装するもの
+## Supabase PostgreSQLのバックアップと復元確認
 
-1. 高火力VRTへのfaster-whisper・LLMの実配備とHTTPS公開
-2. 複数話者の実データでの匿名話者分離の精度確認
-3. 声紋による個人識別を実施するかの運用・同意設計の確定
+Supabaseのバックアップ提供範囲はプランによって異なります。Freeプランでは、公式ドキュメントも
+定期的なデータ出力と外部保管を案内しています。最新条件は
+[SupabaseのDatabase Backups](https://supabase.com/docs/guides/platform/backups)を確認してください。
+
+このリポジトリのバックアップは、Small Stepが使う`public`スキーマをPostgreSQLのカスタム形式で
+保存します。作成直後に必要テーブル、アーカイブ構造、SHA-256チェックサムを検証し、途中で失敗した
+ファイルは正式なバックアップとして残しません。バックアップには園児名、通知文、LINE連携情報などの
+個人データが含まれるため、保存先ディレクトリは`0700`、ファイルは`0600`に制限されます。
+
+バックアップ専用イメージを作り、業務データを1回保存します。APIやGPUワーカーは停止しません。
+
+```bash
+cd /home/ubuntu/small-step
+
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile operations \
+  build database-tools
+
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile operations \
+  run --rm database-tools
+```
+
+手動確認に成功したら、`.env`の`DATABASE_BACKUP_TIME`へ毎日の作成時刻を設定し、日次ワーカーを
+起動します。既定は日本時間の03:00です。起動時に当日分がなければ予定時刻を待たずに1件作成し、
+失敗した場合は既定で5分後に再試行します。API、GPU、LINE処理は停止しません。
+
+```bash
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile backup \
+  up -d --build backup-worker
+
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile backup \
+  ps backup-worker
+```
+
+`DATABASE_BACKUP_RETENTION_COUNT=0`は自動削除なしです。後述の外部保管を有効にするまでは`0`を維持して
+ください。外部保管を有効にすると、日次ワーカーは「作成・検証、公開鍵暗号化、外部アップロード、外部の
+サイズと検証値の確認」のすべてに成功してから古いローカル世代を削除します。外部保存に失敗した日は、
+新しいローカルバックアップを残したまま再試行し、過去世代を削除しません。
+
+保存先は既定でホストの`./data/database-backups`です。変更するときだけ`.env`の
+`DATABASE_BACKUP_HOST_DIR`へ絶対パスを設定します。NVMeのモデルキャッシュ領域は、障害時に
+同時に失う可能性があるため指定しないでください。
+
+最新バックアップのチェックサムと構成だけを再確認する場合は次を使います。
+
+```bash
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile operations \
+  run --rm database-tools \
+  python scripts/verify_database_backup.py
+```
+
+実際に復元できることは、ネットワーク非公開かつメモリ上だけで動く使い捨てPostgreSQLで確認します。
+復元スクリプトは、本番と同じ接続先や外部ホストを復元先として受け付けません。復元先に業務テーブルが
+ないことを確認してから、PostgreSQLが既定で作る空の`public`スキーマをアーカイブ内の構成へ置き換えます。
+
+```bash
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile recovery \
+  up -d --wait restore-db
+
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile operations \
+  --profile recovery \
+  run --rm database-tools \
+  python scripts/rehearse_database_restore.py
+
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile recovery \
+  rm -sf restore-db
+```
+
+このアーカイブに音声ファイル、Supabase Authのユーザー、Supabase Storageのオブジェクトは含まれません。
+それらを含むプロジェクト全体の復旧はSupabase側のバックアップ方針と合わせて管理してください。また、
+VRT内に1部あるだけではVRT障害への備えにならないため、作成後は暗号化された外部保管先へ複製します。
+復元リハーサルに成功したファイルだけを正式な世代として扱い、世代削除は外部保管を確認してから行います。
+
+### 暗号化した外部バックアップ
+
+VRTの故障や誤削除に備え、検証済みバックアップを`age`公開鍵で暗号化し、AWS S3またはS3互換の非公開
+バケットへ自動保存できます。VRTに置くのは暗号化用の公開Recipientだけです。復号用の秘密Identityは
+VRT、Git、チャットへ置かず、管理責任者がオフラインで保管してください。S3のアクセスキーには対象
+プレフィックスへのアップロードと確認に必要な最小権限だけを与え、削除権限は与えません。
+
+まず安全な別端末で鍵を作ります。表示された`age1...`だけをVRTで使い、`.agekey`ファイルはUSBメモリなど
+別の安全な場所へ二重保管します。
+
+```bash
+umask 077
+age-keygen -o small-step-backup.agekey
+age-keygen -y small-step-backup.agekey
+```
+
+VRTの`.env`へ次を設定します。AWS S3では`DATABASE_BACKUP_S3_ENDPOINT_URL`を空にします。S3互換サービスでは
+そのサービスのHTTPSエンドポイントを設定します。サービス側暗号化ヘッダーに非対応でも、`none`を選べば
+`age`による端末側暗号化は維持されます。
+
+```dotenv
+DATABASE_BACKUP_OFFSITE_ENABLED=true
+DATABASE_BACKUP_AGE_RECIPIENT=age1から始まる公開Recipient
+DATABASE_BACKUP_S3_BUCKET=非公開バケット名
+DATABASE_BACKUP_S3_PREFIX=small-step/database
+DATABASE_BACKUP_S3_ENDPOINT_URL=
+DATABASE_BACKUP_S3_REGION=ap-northeast-1
+DATABASE_BACKUP_S3_SSE=AES256
+DATABASE_BACKUP_S3_KMS_KEY_ID=
+AWS_ACCESS_KEY_ID=外部保存専用アクセスキー
+AWS_SECRET_ACCESS_KEY=外部保存専用シークレット
+```
+
+自動削除を有効にする前に、最新の1件を手動で外部保存して確認します。成功すると外部オブジェクトの
+サイズ、平文と暗号文のSHA-256、サービス側暗号化方式を確認し、個人情報を含まない確認状態を
+`.small-step-offsite-backup.json`へ保存します。
+
+```bash
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile operations \
+  build database-tools
+
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile operations \
+  run --rm database-tools \
+  python scripts/upload_latest_database_backup.py
+```
+
+外部保存を有効にすると`operations-monitor`も、外部保存の欠落、最新世代との不一致、26時間以上の遅延を
+検知してLINEへ知らせます。外部から復元するときは暗号化オブジェクトを安全な作業端末へダウンロードし、
+保管していた秘密Identityで`age --decrypt`します。復号後は`pg_restore --list`と使い捨てDBへの復元
+リハーサルを行ってから、本番復旧を判断してください。
+
+Supabase AuthユーザーとSupabase Storageは、この`public`スキーマのバックアップ対象外です。現在Small Stepの
+音声はVRT内の短期保存で、Supabase Storageは使用していません。Authを含むプロジェクト全体の障害には、
+Supabase公式のDatabase Backupsとプロジェクト復旧手順を併用します。`auth`や`storage`スキーマをこの
+スクリプトで上書きすると認証を壊す可能性があるため、自動復元の対象にはしていません。
+
+## VRTの障害をLINEで受け取る
+
+`operations-monitor`はAPIとは別コンテナで動き、API、データベース更新、GPU音声処理、vLLM、LINE送信処理、
+最新バックアップの更新時刻とチェックサム、保存領域の空き容量を1分ごとに確認します。園児名、音声、通知文、
+URL、接続情報はLINE通知にも状態ファイルにも保存しません。
+
+一時的な再起動で通知しないよう、同じ異常が既定で3分続いた場合だけ管理者へLINE通知します。同じ状態の
+連続通知は6時間に1回までで、すべて正常に戻ると復旧通知を1回送ります。LINEへの送信結果が不明な場合は、
+[LINE公式の再試行仕様](https://developers.line.biz/ja/docs/messaging-api/retrying-api-request/)に従い、
+24時間の管理期限内は永続化した同じ再試行キーを使うため重複送信を抑えます。
+
+VRTの`.env`へ次を設定します。`OPERATIONS_ALERT_LINE_USER_ID`は通知を受ける運用責任者本人のLINEユーザーIDで、
+Gitへ追加したりチャットへ貼ったりしないでください。
+
+```dotenv
+OPERATIONS_MONITOR_ENABLED=true
+OPERATIONS_ALERT_LINE_USER_ID=ここへ運用責任者のLINEユーザーID
+```
+
+最初にLINE送信なしで稼働状態を確認し、次に個人情報を含まないテスト通知を1回送ります。テスト通知が届き、
+`運用監視: 正常`になれば常駐監視を起動できます。
+
+```bash
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile monitoring \
+  run --rm --no-deps operations-monitor \
+  python scripts/monitor_operations.py --dry-run
+
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile monitoring \
+  run --rm --no-deps operations-monitor \
+  python scripts/monitor_operations.py --send-test-notification
+
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile monitoring \
+  up -d --build operations-monitor
+
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile monitoring \
+  ps operations-monitor
+```
+
+最新バックアップが26時間を超えると警告になるため、日次ワーカーが停止した場合も検知できます。監視自体が
+VRT内で動く都合上、VRT全体の停止やインターネット回線断はLINEへ送れません。その範囲は次のGitHub Actions
+外部監視で補います。Quick Tunnelでも利用できますが、URLが変わるたびにGitHub Secretの更新が必要です。
+
+## VRT全体の停止を外部から検知する
+
+`.github/workflows/external-vrt-monitor.yml`は、GitHub Actionsから5分ごとに公開中の
+`/api/v1/health`を3回確認します。APIとデータベースへ接続できない状態では専用のGitHub Issueを1件だけ作成し、
+復旧時にコメントを追加して閉じます。LINE用Secretも設定した場合は、最初の障害と復旧だけを運用責任者へ通知します。
+同じ障害を確認し続けてもIssueを増やさず、LINEには同じ再試行キーを使います。
+
+GitHubのリポジトリで `Settings` → `Secrets and variables` → `Actions` を開き、次を登録します。
+
+| 種類 | 名前 | 設定する値 |
+| --- | --- | --- |
+| Variable | `SMALL_STEP_EXTERNAL_MONITOR_ENABLED` | 準備完了後に `true` |
+| Secret | `SMALL_STEP_EXTERNAL_HEALTH_URL` | `https://公開URL/api/v1/health` |
+| Secret | `LINE_CHANNEL_ACCESS_TOKEN` | VRT内部監視と同じLINEチャネルアクセストークン |
+| Secret | `OPERATIONS_ALERT_LINE_USER_ID` | 通知を受ける運用責任者のLINEユーザーID |
+
+LINE用の2つのSecretを省略した場合もGitHub Issueによる障害記録は動きます。片方だけを設定してはいけません。
+Quick Tunnelを使っている間は再起動のたびにURLが変わるため、`SMALL_STEP_EXTERNAL_HEALTH_URL`も直ちに更新します。
+固定URLへ切り替えた後は、このSecretの変更だけで監視を継続できます。
+
+有効化前に `Actions` → `Small Step external VRT monitor` → `Run workflow` で手動実行します。
+正常時に `外部監視: 正常` と表示されたらVariableを `true` にします。監視先URL、LINEの秘密値、園児、音声は
+Issueや実行ログへ出力しません。GitHub Actionsの定期実行は数分遅れる場合があるため、これは即時フェイルオーバーではなく
+VRT全体の停止を知らせる補助監視です。GPU・LINEワーカー・バックアップの詳細はVRT内の`operations-monitor`が確認します。
+
+## コード反映後に残る実機・外部設定
+
+1. 複数話者・雑音・声量差を含む匿名テストセットを収録し、設定済みの合格基準を満たすまで調整する
+2. ESP32-S3録音端末を実機へ書き込み、PSRAM・マイク配線・無音しきい値・再送を確認する
+3. GitHub Actionsの外部監視を実機確認し、Quick Tunnelから固定HTTPS URLへ切り替える
+4. 外部バックアップ用の非公開S3バケットと`age`鍵を準備し、外部保存と復号リハーサルを実施する

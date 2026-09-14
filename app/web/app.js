@@ -1,5 +1,6 @@
 const apiBase = "/api/v1";
 const accessTokenStorageKey = "small-step.access-token";
+const lowConfidenceThreshold = 0.7;
 
 const state = {
   schoolId: null,
@@ -67,6 +68,7 @@ const elements = {
   emptyState: document.querySelector("#empty-state"),
   reviewForm: document.querySelector("#review-form"),
   recordMeta: document.querySelector("#record-meta"),
+  recordConfidenceWarning: document.querySelector("#record-confidence-warning"),
   recordCategory: document.querySelector("#record-category"),
   childSelect: document.querySelector("#child-select"),
   summaryInput: document.querySelector("#summary-input"),
@@ -161,8 +163,12 @@ const elements = {
   runtimeStorageNote: document.querySelector("#runtime-storage-note"),
   runtimeLlmStatus: document.querySelector("#runtime-llm-status"),
   runtimeLlmNote: document.querySelector("#runtime-llm-note"),
+  runtimeGpuWorkerStatus: document.querySelector("#runtime-gpu-worker-status"),
+  runtimeGpuWorkerNote: document.querySelector("#runtime-gpu-worker-note"),
   runtimeLineStatus: document.querySelector("#runtime-line-status"),
   runtimeLineNote: document.querySelector("#runtime-line-note"),
+  runtimeLineWorkerStatus: document.querySelector("#runtime-line-worker-status"),
+  runtimeLineWorkerNote: document.querySelector("#runtime-line-worker-note"),
   runtimeRefreshButton: document.querySelector("#runtime-refresh-button"),
   auditEventsNavButton: document.querySelector("#audit-events-nav-button"),
   auditEventsView: document.querySelector("#audit-events-view"),
@@ -465,17 +471,21 @@ function notificationFailureMessage(kind) {
   return "配信状況を確認して、必要に応じて再送してください。";
 }
 
-function audioJobStatusLabel(status) {
-  if (status === "processing") return "GPU処理中";
-  if (status === "completed") return "記録作成済み";
-  if (status === "failed") return "処理失敗";
-  if (status === "expired") return "期限切れ";
+function audioJobStatusLabel(job) {
+  if (job.status === "processing") return "GPU処理中";
+  if (job.status === "completed") return job.record_id ? "記録作成済み" : "記録対象外";
+  if (job.status === "failed") return "処理失敗";
+  if (job.status === "expired") return "期限切れ";
   return "受付済み";
 }
 
 function audioJobDescription(job) {
   if (job.status === "processing") return "GPUワーカーが音声を解析しています。";
-  if (job.status === "completed") return "レビュー待ちの記録を作成しました。";
+  if (job.status === "completed") {
+    return job.record_id
+      ? "レビュー待ちの記録を作成しました。"
+      : "具体的な園児の出来事が確認できなかったため、記録は作成していません。";
+  }
   if (job.status === "failed") return "音声は削除済みです。録音設定を確認して、もう一度送信してください。";
   if (job.status === "expired") return "時間内に処理されなかったため、音声を削除しました。";
   return "GPUワーカーの処理待ちです。";
@@ -559,7 +569,9 @@ function renderRecordList() {
     const title = document.createElement("strong");
     title.textContent = `${childName(record.child_id)} / ${categoryLabel(record.category)}`;
     const detail = document.createElement("small");
-    detail.textContent = `${formatDate(record.occurred_at)} - 信頼度 ${Math.round(record.confidence * 100)}%`;
+    const lowConfidence = record.confidence < lowConfidenceThreshold;
+    item.classList.toggle("is-low-confidence", lowConfidence);
+    detail.textContent = `${formatDate(record.occurred_at)} - 信頼度 ${Math.round(record.confidence * 100)}%${lowConfidence ? " - 要確認" : ""}`;
     content.append(title, detail);
     item.append(icon, content);
     elements.recordList.append(item);
@@ -627,10 +639,13 @@ function renderDetail() {
     elements.scheduledForEnabled.checked = false;
     elements.scheduledForInput.value = "";
     elements.scheduledForInput.disabled = true;
+    elements.recordConfidenceWarning.hidden = true;
     updateReviewCharacterCounts();
     return;
   }
+  const lowConfidence = record.confidence < lowConfidenceThreshold;
   elements.recordMeta.textContent = `${formatDate(record.occurred_at)} / 信頼度 ${Math.round(record.confidence * 100)}%`;
+  elements.recordConfidenceWarning.hidden = !lowConfidence;
   elements.recordCategory.textContent = categoryLabel(record.category);
   elements.summaryInput.value = record.summary;
   elements.promptInput.value = record.conversation_prompt ?? "";
@@ -1141,6 +1156,11 @@ function renderRuntimeReadiness() {
       note: "VRTでクラウド音声処理を有効にした後に、文章生成AIを確認します。",
       tone: "local",
     });
+    setRuntimeCheck(elements.runtimeGpuWorkerStatus, elements.runtimeGpuWorkerNote, {
+      label: "VRT切替時に確認",
+      note: "VRTでクラウド音声処理を有効にした後に、GPUワーカーの稼働を確認します。",
+      tone: "local",
+    });
   } else {
     setRuntimeCheck(elements.runtimeAudioModeStatus, elements.runtimeAudioModeNote, {
       label: "VRTでクラウド処理中",
@@ -1153,11 +1173,25 @@ function renderRuntimeReadiness() {
     setRuntimeCheck(elements.runtimeLlmStatus, elements.runtimeLlmNote, readiness.cloud_audio_llm_configured
       ? { label: "確認済み", note: "VRT上の文章生成AIの設定を確認できました。", tone: "ready" }
       : { label: "設定を確認", note: "VRT上の文章生成AIの設定を確認してください。", tone: "attention" });
+    setRuntimeCheck(elements.runtimeGpuWorkerStatus, elements.runtimeGpuWorkerNote, readiness.cloud_audio_worker_ready
+      ? { label: "稼働中", note: "GPU音声処理ワーカーから定期的な稼働確認を受け取っています。", tone: "ready" }
+      : { label: "停止を確認", note: "GPUワーカーの起動状態とログを確認してください。", tone: "attention" });
   }
 
   setRuntimeCheck(elements.runtimeLineStatus, elements.runtimeLineNote, readiness.line_delivery_configured
     ? { label: "確認済み", note: "LINE配信に必要な設定が入っています。", tone: "ready" }
     : { label: "設定を確認", note: "LINEの通知を配信する前に設定を確認してください。", tone: "attention" });
+  if (!readiness.line_delivery_configured) {
+    setRuntimeCheck(elements.runtimeLineWorkerStatus, elements.runtimeLineWorkerNote, {
+      label: "設定後に確認",
+      note: "LINE配信設定を入れた後に、送信ワーカーの稼働を確認します。",
+      tone: "local",
+    });
+  } else {
+    setRuntimeCheck(elements.runtimeLineWorkerStatus, elements.runtimeLineWorkerNote, readiness.line_delivery_worker_ready
+      ? { label: "稼働中", note: "LINE送信ワーカーから定期的な稼働確認を受け取っています。", tone: "ready" }
+      : { label: "停止を確認", note: "LINE送信ワーカーの起動状態とログを確認してください。", tone: "attention" });
+  }
 }
 
 function renderVoiceConsent() {
@@ -1421,7 +1455,7 @@ function renderAudioJobs() {
 
     const status = document.createElement("span");
     status.className = `audio-job-status is-${job.status}`;
-    status.textContent = audioJobStatusLabel(job.status);
+    status.textContent = audioJobStatusLabel(job);
     item.append(content, status);
     elements.audioJobList.append(item);
   }
@@ -1905,7 +1939,7 @@ async function saveVoiceConsent() {
 async function revokeVoiceConsent() {
   const confirmed = await requestConfirmation({
     title: "声紋登録への同意を取り消しますか？",
-    message: "以後の声紋登録は開始できなくなります。すでに登録済みの声紋を削除する機能は、次の実装で追加します。",
+    message: "以後の声紋登録は開始できなくなります。現在は音声や声紋の特徴量を保存していないため、削除対象の声紋はありません。",
     confirmLabel: "同意を取り消す",
     confirmIcon: "close",
   });
@@ -2409,6 +2443,12 @@ async function submitReview(action) {
   const record = selectedRecord();
   if (!record) return;
   const actionLabel = action === "approve" ? "承認" : "却下";
+  const childId = action === "approve" ? elements.childSelect.value : "";
+  if (action === "approve" && !childId) {
+    setNotice("園児を選択してから承認してください。", true);
+    elements.childSelect.focus();
+    return;
+  }
   let scheduledFor = null;
   if (action === "approve" && elements.scheduledForEnabled.checked) {
     const value = elements.scheduledForInput.value;
@@ -2424,8 +2464,8 @@ async function submitReview(action) {
     title: `記録を${actionLabel}しますか？`,
     message: action === "approve"
       ? scheduledFor
-        ? `編集内容を保存し、${formatDate(scheduledFor)}に保護者へ通知するよう予約します。`
-        : "編集内容を保存し、既定の配信ルールで保護者への通知を準備します。"
+        ? `${record.confidence < lowConfidenceThreshold ? "AIの信頼度が低い候補です。内容を再確認してください。 " : ""}編集内容を保存し、${formatDate(scheduledFor)}に保護者へ通知するよう予約します。`
+        : `${record.confidence < lowConfidenceThreshold ? "AIの信頼度が低い候補です。内容を再確認してください。 " : ""}編集内容を保存し、既定の配信ルールで保護者への通知を準備します。`
       : "この記録はレビュー待ちの一覧から削除されます。",
     confirmLabel: actionLabel,
     confirmIcon: action === "approve" ? "check" : "close",
@@ -2436,10 +2476,11 @@ async function submitReview(action) {
   elements.rejectButton.disabled = true;
   try {
     if (action === "approve") {
-      const payload = { summary: elements.summaryInput.value.trim() };
-      const childId = elements.childSelect.value;
+      const payload = {
+        child_id: childId,
+        summary: elements.summaryInput.value.trim(),
+      };
       const prompt = elements.promptInput.value.trim();
-      if (childId) payload.child_id = childId;
       if (prompt) payload.conversation_prompt = prompt;
       if (scheduledFor) payload.scheduled_for = scheduledFor;
       await api(`/records/${record.id}/approve`, {

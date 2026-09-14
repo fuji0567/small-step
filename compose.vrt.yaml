@@ -1,6 +1,45 @@
 # Add this file only on a Sakura High Firepower VRT instance:
 # docker compose -f compose.yaml -f compose.vrt.yaml up -d --build
 services:
+  small-step-vllm:
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.11.0}
+    command:
+      - --model
+      - ${LLM_MODEL:-Qwen/Qwen3-32B}
+      - --served-model-name
+      - ${LLM_MODEL:-Qwen/Qwen3-32B}
+      - --dtype
+      - bfloat16
+      - --max-model-len
+      - ${VLLM_MAX_MODEL_LEN:-8192}
+      - --gpu-memory-utilization
+      - ${VLLM_GPU_MEMORY_UTILIZATION:-0.90}
+      - --max-num-seqs
+      - ${VLLM_MAX_NUM_SEQS:-4}
+      - --disable-log-requests
+    gpus: all
+    ipc: host
+    ports:
+      - "127.0.0.1:8001:8000"
+    networks:
+      llm:
+        aliases:
+          - small-step-vllm
+    volumes:
+      - ${VLLM_MODEL_CACHE_DIR:-/mnt/small-step-cache/huggingface}:/root/.cache/huggingface
+      - ${VLLM_COMPILE_CACHE_DIR:-/mnt/small-step-cache/vllm}:/root/.cache/vllm
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3); raise SystemExit(0 if response.status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 300s
+    restart: unless-stopped
+
   api:
     environment:
       CLOUD_AUDIO_JOB_DIR: /var/lib/small-step/cloud-audio-jobs
@@ -32,12 +71,17 @@ services:
     gpus: all
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - llm
     volumes:
       - api_data:/app/data
       - cloud_audio_jobs:/var/lib/small-step/cloud-audio-jobs
       - gpu_model_cache:/var/lib/small-step/models
     depends_on:
       api:
+        condition: service_healthy
+      small-step-vllm:
         condition: service_healthy
     restart: unless-stopped
 
@@ -53,6 +97,118 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  operations-monitor:
+    profiles:
+      - monitoring
+    build: .
+    user: "0:0"
+    environment:
+      TIMEZONE: ${TIMEZONE:-Asia/Tokyo}
+      LINE_CHANNEL_ACCESS_TOKEN: ${LINE_CHANNEL_ACCESS_TOKEN:-}
+      LINE_API_TIMEOUT_SECONDS: ${LINE_API_TIMEOUT_SECONDS:-10}
+      OPERATIONS_MONITOR_ENABLED: ${OPERATIONS_MONITOR_ENABLED:-false}
+      OPERATIONS_ALERT_LINE_USER_ID: ${OPERATIONS_ALERT_LINE_USER_ID:-}
+      OPERATIONS_MONITOR_POLL_SECONDS: ${OPERATIONS_MONITOR_POLL_SECONDS:-60}
+      OPERATIONS_ALERT_AFTER_SECONDS: ${OPERATIONS_ALERT_AFTER_SECONDS:-180}
+      OPERATIONS_ALERT_REPEAT_SECONDS: ${OPERATIONS_ALERT_REPEAT_SECONDS:-21600}
+      OPERATIONS_CHECK_TIMEOUT_SECONDS: ${OPERATIONS_CHECK_TIMEOUT_SECONDS:-10}
+      OPERATIONS_API_READINESS_URL: http://api:8000/api/v1/readiness
+      OPERATIONS_VLLM_HEALTH_URL: http://small-step-vllm:8000/health
+      OPERATIONS_BACKUP_DIR: /backups
+      OPERATIONS_BACKUP_MAX_AGE_HOURS: ${OPERATIONS_BACKUP_MAX_AGE_HOURS:-26}
+      OPERATIONS_MIN_DISK_FREE_GB: ${OPERATIONS_MIN_DISK_FREE_GB:-10}
+      OPERATIONS_DISK_PATHS: /app/data,/backups
+      OPERATIONS_MONITOR_STATE_PATH: /app/data/operations-monitor-state.json
+      DATABASE_BACKUP_OFFSITE_ENABLED: ${DATABASE_BACKUP_OFFSITE_ENABLED:-false}
+      DATABASE_BACKUP_AGE_RECIPIENT: ${DATABASE_BACKUP_AGE_RECIPIENT:-}
+      DATABASE_BACKUP_S3_BUCKET: ${DATABASE_BACKUP_S3_BUCKET:-}
+    command: ["python", "scripts/monitor_operations.py", "--watch"]
+    networks:
+      - default
+      - llm
+    volumes:
+      - operations_monitor_data:/app/data
+      - ${DATABASE_BACKUP_HOST_DIR:-./data/database-backups}:/backups:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  backup-worker:
+    profiles:
+      - backup
+    build:
+      context: .
+      dockerfile: Dockerfile.database-tools
+    env_file:
+      - .env
+    environment:
+      DATABASE_BACKUP_DIR: /backups
+    command: ["python", "scripts/schedule_database_backups.py", "--watch"]
+    volumes:
+      - ${DATABASE_BACKUP_HOST_DIR:-./data/database-backups}:/backups
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  database-tools:
+    profiles:
+      - operations
+    build:
+      context: .
+      dockerfile: Dockerfile.database-tools
+    env_file:
+      - .env
+    environment:
+      DATABASE_BACKUP_DIR: /backups
+      RESTORE_DATABASE_URL: postgresql+psycopg://postgres@restore-db:5432/small_step_restore
+    networks:
+      - default
+      - database-recovery
+    volumes:
+      - ${DATABASE_BACKUP_HOST_DIR:-./data/database-backups}:/backups
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
+  restore-db:
+    profiles:
+      - recovery
+    image: postgres:18.6-bookworm
+    environment:
+      POSTGRES_DB: small_step_restore
+      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_USER: postgres
+      PGDATA: /var/lib/postgresql/data
+    networks:
+      - database-recovery
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U postgres -d small_step_restore
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    restart: "no"
+
 volumes:
   cloud_audio_jobs:
   gpu_model_cache:
+  operations_monitor_data:
+
+networks:
+  llm:
+    name: small-step-ai
+    external: true
+  database-recovery:
+    internal: true

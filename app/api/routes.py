@@ -9,7 +9,7 @@ import httpx
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import exists, func, select, text, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import (
@@ -90,6 +90,11 @@ from app.schemas import (
     TeacherRoleUpdate,
     VoiceConsentCreate,
     VoiceConsentRead,
+)
+from app.worker_heartbeat import (
+    GPU_AUDIO_WORKER_NAME,
+    LINE_DELIVERY_WORKER_NAME,
+    worker_is_alive,
 )
 
 router = APIRouter(prefix="/api/v1")
@@ -382,6 +387,7 @@ def runtime_readiness_summary(request: Request, db: Session) -> RuntimeReadiness
 
     cloud_audio_job_storage_ready: bool | None = None
     cloud_audio_llm_configured: bool | None = None
+    cloud_audio_worker_ready: bool | None = None
     if settings.cloud_audio_enabled:
         cloud_audio_llm_configured = bool(settings.llm_base_url and settings.llm_model)
         try:
@@ -389,6 +395,29 @@ def runtime_readiness_summary(request: Request, db: Session) -> RuntimeReadiness
             cloud_audio_job_storage_ready = True
         except (CloudAudioStorageError, OSError):
             cloud_audio_job_storage_ready = False
+        if database_ready and database_migration_current:
+            try:
+                cloud_audio_worker_ready = worker_is_alive(
+                    db=db,
+                    worker_name=GPU_AUDIO_WORKER_NAME,
+                    stale_after=timedelta(seconds=settings.worker_heartbeat_stale_seconds),
+                )
+            except SQLAlchemyError:
+                db.rollback()
+                cloud_audio_worker_ready = False
+
+    line_delivery_configured = bool(settings.line_channel_secret and settings.line_channel_access_token)
+    line_delivery_worker_ready: bool | None = None
+    if line_delivery_configured and database_ready and database_migration_current:
+        try:
+            line_delivery_worker_ready = worker_is_alive(
+                db=db,
+                worker_name=LINE_DELIVERY_WORKER_NAME,
+                stale_after=timedelta(seconds=settings.worker_heartbeat_stale_seconds),
+            )
+        except SQLAlchemyError:
+            db.rollback()
+            line_delivery_worker_ready = False
 
     return RuntimeReadinessRead(
         status="ready"
@@ -396,15 +425,22 @@ def runtime_readiness_summary(request: Request, db: Session) -> RuntimeReadiness
         and database_migration_current
         and (
             not settings.cloud_audio_enabled
-            or (cloud_audio_job_storage_ready is True and cloud_audio_llm_configured is True)
+            or (
+                cloud_audio_job_storage_ready is True
+                and cloud_audio_llm_configured is True
+                and cloud_audio_worker_ready is True
+            )
         )
+        and (not line_delivery_configured or line_delivery_worker_ready is True)
         else "not_ready",
         database_ready=database_ready,
         database_migration_current=database_migration_current,
         cloud_audio_enabled=settings.cloud_audio_enabled,
         cloud_audio_job_storage_ready=cloud_audio_job_storage_ready,
         cloud_audio_llm_configured=cloud_audio_llm_configured,
-        line_delivery_configured=bool(settings.line_channel_secret and settings.line_channel_access_token),
+        cloud_audio_worker_ready=cloud_audio_worker_ready,
+        line_delivery_configured=line_delivery_configured,
+        line_delivery_worker_ready=line_delivery_worker_ready,
     )
 
 
@@ -2019,6 +2055,8 @@ def approve_record(
     if payload.child_id:
         child = require_active_child_for_school(db, as_id(payload.child_id), record.school_id)
         record.child_id = as_id(payload.child_id)
+    if record.child_id is None:
+        raise HTTPException(status_code=422, detail="A child must be selected before approval")
     if payload.summary is not None:
         record.summary = payload.summary
     if payload.conversation_prompt is not None:
@@ -2026,8 +2064,8 @@ def approve_record(
 
     record.status = RecordStatus.approved
     record.reviewed_at = utc_now()
-    child = db.get(Child, record.child_id) if record.child_id else None
-    if child is not None and not child.is_active:
+    child = require_entity(db, Child, record.child_id, "Child")
+    if not child.is_active:
         raise HTTPException(status_code=409, detail="Child is archived")
     if payload.scheduled_for:
         scheduled_for = payload.scheduled_for
@@ -2038,13 +2076,13 @@ def approve_record(
         school = require_entity(db, School, record.school_id, "School")
         scheduled_for = get_next_digest_time(utc_now(), school.timezone or settings.timezone, school.digest_time)
 
-    recipient_line_user_id = child.guardian_line_user_id if child else None
+    recipient_line_user_id = child.guardian_line_user_id
     notification = Notification(
         record_id=record.id,
         recipient_line_user_id=recipient_line_user_id,
         status=(
             NotificationStatus.pending
-            if recipient_line_user_id or child is None
+            if recipient_line_user_id
             else NotificationStatus.waiting_guardian_link
         ),
         scheduled_for=scheduled_for,

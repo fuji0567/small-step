@@ -117,6 +117,10 @@ def push_text_message(
         },
         timeout=timeout_seconds,
     )
+    accepted_request_id = response.headers.get("x-line-accepted-request-id")
+    if response.status_code == 409 and accepted_request_id:
+        # A previous attempt with this retry key was already accepted by LINE.
+        return accepted_request_id
     if not response.is_success:
         detail = response.text.strip().replace("\n", " ")[:500]
         raise LineMessagingError(

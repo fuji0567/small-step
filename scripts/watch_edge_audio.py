@@ -59,7 +59,7 @@ class RetrySchedule:
 def process_ready_audio_files(
     *,
     inbox_dir: str,
-    submit_audio_file: Callable[[str, str | None], str],
+    submit_audio_file: Callable[[str, str | None], str | None],
     success_message: str,
     child_id: str | None,
     min_age_seconds: float,
@@ -102,8 +102,11 @@ def process_ready_audio_files(
             retry_schedule.clear(file_version)
         if processed_file_versions is not None:
             processed_file_versions.add(file_version)
-        submitted_count += 1
-        print(f"{success_message}: {submitted_id}")
+        if submitted_id is None:
+            print("記録対象の出来事がないため、レビュー候補を作成しませんでした。")
+        else:
+            submitted_count += 1
+            print(f"{success_message}: {submitted_id}")
     return submitted_count
 
 

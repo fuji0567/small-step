@@ -9,6 +9,7 @@ from app.cloud_audio_worker import process_next_cloud_audio_job
 from app.config import Settings
 from app.database import create_database_engine, create_session_factory, initialise_database
 from app.edge_audio import EdgeAudioProcessor
+from app.worker_heartbeat import GPU_AUDIO_WORKER_NAME, WorkerHeartbeatMonitor
 
 
 def positive_int(value: str) -> int:
@@ -89,15 +90,20 @@ def main() -> None:
             print(f"処理したクラウド音声ジョブ: {count}件")
             return
 
-        while True:
-            process_available_jobs(
-                session_factory=session_factory,
-                storage=storage,
-                processor=processor,
-                limit=args.limit,
-                processing_timeout=processing_timeout,
-            )
-            time.sleep(args.poll_seconds)
+        with WorkerHeartbeatMonitor(
+            session_factory=session_factory,
+            worker_name=GPU_AUDIO_WORKER_NAME,
+            interval_seconds=settings.worker_heartbeat_interval_seconds,
+        ):
+            while True:
+                process_available_jobs(
+                    session_factory=session_factory,
+                    storage=storage,
+                    processor=processor,
+                    limit=args.limit,
+                    processing_timeout=processing_timeout,
+                )
+                time.sleep(args.poll_seconds)
     finally:
         engine.dispose()
 
