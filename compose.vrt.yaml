@@ -120,6 +120,8 @@ services:
       OPERATIONS_DISK_PATHS: /app/data,/backups
       OPERATIONS_MONITOR_STATE_PATH: /app/data/operations-monitor-state.json
       DATABASE_BACKUP_OFFSITE_ENABLED: ${DATABASE_BACKUP_OFFSITE_ENABLED:-false}
+      DATABASE_BACKUP_AGE_RECIPIENT: ${DATABASE_BACKUP_AGE_RECIPIENT:-}
+      DATABASE_BACKUP_S3_BUCKET: ${DATABASE_BACKUP_S3_BUCKET:-}
     command: ["python", "scripts/monitor_operations.py", "--watch"]
     networks:
       - default

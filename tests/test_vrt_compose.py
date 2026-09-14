@@ -70,6 +70,8 @@ def test_operations_monitor_is_separate_private_and_restartable():
     assert 'user: "0:0"' in monitor
     assert "operations_monitor_data:/app/data" in monitor
     assert "no-new-privileges:true" in monitor
+    assert "DATABASE_BACKUP_AGE_RECIPIENT" in monitor
+    assert "DATABASE_BACKUP_S3_BUCKET" in monitor
     assert "docker.sock" not in monitor
     assert "DATABASE_URL" not in monitor
     assert "SUPABASE" not in monitor
