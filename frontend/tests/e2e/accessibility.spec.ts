@@ -80,3 +80,56 @@ test('ボタンの補足ガイドをフォーカスとホバーで確認しEsc�
   await approveButton.hover();
   await expect(guide).toBeVisible();
 });
+
+test('左ナビの補足ガイドをフォーカスとホバーで確認しEscで閉じられる', async ({
+  page
+}) => {
+  await page.goto('/teacher/');
+  await expect(page.getByRole('heading', { name: '今日の状況' })).toBeVisible();
+
+  const reviewLink = page.getByRole('link', {
+    name: 'レビュー待ち レビュー待ち3件'
+  });
+  const guide = page.getByRole('tooltip', {
+    name: 'AI候補や手入力の日誌を確認し、承認・却下します。'
+  });
+
+  await expect(guide).toBeHidden();
+  await reviewLink.focus();
+  await expect(guide).toBeVisible();
+  const guideId = await guide.getAttribute('id');
+  expect(guideId).not.toBeNull();
+  await expect(reviewLink).toHaveAttribute('aria-describedby', guideId!);
+
+  await guide.hover();
+  await expect(guide).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(guide).toBeHidden();
+
+  await reviewLink.evaluate((link) => link.blur());
+  await page.mouse.move(0, 0);
+  await reviewLink.hover();
+  await expect(guide).toBeVisible();
+});
+
+test('モバイル横ナビでもガイドが画面内に収まる', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/teacher/');
+  await expect(page.getByRole('heading', { name: '今日の状況' })).toBeVisible();
+
+  const reviewLink = page.getByRole('link', {
+    name: 'レビュー待ち レビュー待ち3件'
+  });
+  const guide = page.getByRole('tooltip', {
+    name: 'AI候補や手入力の日誌を確認し、承認・却下します。'
+  });
+
+  await reviewLink.focus();
+  await expect(guide).toBeVisible();
+  const guideBox = await guide.boundingBox();
+  expect(guideBox).not.toBeNull();
+  expect(guideBox!.x).toBeGreaterThanOrEqual(0);
+  expect(guideBox!.x + guideBox!.width).toBeLessThanOrEqual(390);
+  expect(guideBox!.y).toBeGreaterThanOrEqual(0);
+  expect(guideBox!.y + guideBox!.height).toBeLessThanOrEqual(844);
+});

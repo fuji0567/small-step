@@ -374,4 +374,100 @@ describe('AppShell', () => {
       screen.queryByRole('link', { name: 'レビュー待ち 3件 レビュー待ち3件' })
     ).not.toBeInTheDocument();
   });
+
+  it('ナビ項目にガイドを説明として関連付け、バッジ付きリンクのアクセシブルネームは変えない', () => {
+    render(AppShell, {
+      title: '先生用',
+      navItems: [
+        {
+          href: '/teacher/review/',
+          label: 'レビュー待ち',
+          badge: '3件',
+          badgeAriaLabel: 'レビュー待ち3件',
+          guide: 'AI候補や手入力の日誌を確認し、承認・却下します。'
+        }
+      ],
+      currentPath: '/teacher/',
+      children: textSnippet('<p>今日の状況</p>')
+    });
+
+    const link = screen.getByRole('link', {
+      name: 'レビュー待ち レビュー待ち3件'
+    });
+    const guide = screen.getByRole('tooltip', { hidden: true });
+    expect(guide).toHaveTextContent(
+      'AI候補や手入力の日誌を確認し、承認・却下します。'
+    );
+    expect(link).toHaveAttribute('aria-describedby', guide.id);
+  });
+
+  it('複数のナビガイドへ一意なdescribedbyを割り当てる', () => {
+    render(AppShell, {
+      title: '先生用',
+      navItems: [
+        {
+          href: '/teacher/review/',
+          label: 'レビュー待ち',
+          guide: 'AI候補や手入力の日誌を確認し、承認・却下します。'
+        },
+        {
+          href: '/teacher/records/',
+          label: '記録履歴',
+          guide: '過去の日誌を検索し、内容や配信状態を確認します。'
+        }
+      ],
+      currentPath: '/teacher/',
+      children: textSnippet('<p>今日の状況</p>')
+    });
+
+    const describedIds = screen
+      .getAllByRole('link')
+      .map((link) => link.getAttribute('aria-describedby'))
+      .filter((id): id is string => Boolean(id));
+
+    expect(describedIds).toHaveLength(2);
+    expect(new Set(describedIds).size).toBe(2);
+  });
+
+  it('ガイドを持たないナビ項目は既存のマークアップのままdescribedbyを付けない', () => {
+    render(AppShell, {
+      title: '先生用',
+      navItems: [{ href: '/teacher/', label: 'ホーム' }],
+      currentPath: '/teacher/',
+      children: textSnippet('<p>今日の状況</p>')
+    });
+
+    expect(screen.queryByRole('tooltip', { hidden: true })).toBeNull();
+    expect(screen.getByRole('link', { name: 'ホーム' })).not.toHaveAttribute(
+      'aria-describedby'
+    );
+  });
+
+  it('Escapeでナビガイドを閉じ、離れて戻ると再表示できる', async () => {
+    render(AppShell, {
+      title: '先生用',
+      navItems: [
+        {
+          href: '/teacher/review/',
+          label: 'レビュー待ち',
+          guide: 'AI候補や手入力の日誌を確認し、承認・却下します。'
+        }
+      ],
+      currentPath: '/teacher/',
+      children: textSnippet('<p>今日の状況</p>')
+    });
+
+    const link = screen.getByRole('link', { name: 'レビュー待ち' });
+    const guide = screen.getByRole('tooltip', { hidden: true });
+    const wrapper = guide.parentElement;
+    expect(wrapper).not.toBeNull();
+
+    await fireEvent.focusIn(link);
+    await fireEvent.keyDown(link, { key: 'Escape' });
+    expect(wrapper).toHaveClass('ss-app-shell__nav-item--guide-dismissed');
+
+    await fireEvent.focusOut(link, { relatedTarget: document.body });
+    await fireEvent.pointerEnter(wrapper!);
+    expect(wrapper).not.toHaveClass('ss-app-shell__nav-item--guide-dismissed');
+  });
 });

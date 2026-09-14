@@ -6,37 +6,81 @@ import {
 } from './navigation-badges';
 
 export const TEACHER_NAV_ITEMS = [
-  { href: '/teacher/', label: 'ホーム', icon: 'home' },
-  { href: '/teacher/review/', label: 'レビュー待ち', icon: 'review' },
-  { href: '/teacher/records/', label: '記録履歴', icon: 'history' },
+  {
+    href: '/teacher/',
+    label: 'ホーム',
+    icon: 'home',
+    guide: '今日の要確認件数と園全体の状況を確認します。'
+  },
+  {
+    href: '/teacher/review/',
+    label: 'レビュー待ち',
+    icon: 'review',
+    guide: 'AI候補や手入力の日誌を確認し、承認・却下します。'
+  },
+  {
+    href: '/teacher/records/',
+    label: '記録履歴',
+    icon: 'history',
+    guide: '過去の日誌を検索し、内容や配信状態を確認します。'
+  },
   {
     href: '/teacher/notifications/',
     label: '通知状況',
-    icon: 'notifications'
+    icon: 'notifications',
+    guide: 'LINE通知の送信予定・結果・失敗を確認します。'
   },
   {
     href: '/teacher/audio-jobs/',
     label: '音声処理状況',
-    icon: 'audio'
+    icon: 'audio',
+    guide: '音声処理の進み具合や失敗内容を確認します。'
   },
-  { href: '/teacher/children/', label: '園児・保護者', icon: 'child' },
+  {
+    href: '/teacher/children/',
+    label: '園児・保護者',
+    icon: 'child',
+    guide: '園児情報、保護者のLINE連携、招待コードを管理します。'
+  },
   {
     href: '/teacher/voice-consent/',
     label: '声紋設定',
-    icon: 'microphone'
+    icon: 'microphone',
+    guide: '先生の声紋登録に関する同意状況を確認・変更します。'
   }
 ] as const satisfies readonly AppShellNavItem[];
 
 export const ADMIN_NAV_ITEMS = [
-  { href: '/teacher/settings/', label: '園の設定', icon: 'schedule' },
-  { href: '/teacher/teachers/', label: '先生管理', icon: 'group' },
-  { href: '/teacher/devices/', label: '録音端末', icon: 'microphone' },
+  {
+    href: '/teacher/settings/',
+    label: '園の設定',
+    icon: 'schedule',
+    guide: '成長記録をまとめて配信する既定時刻を設定します。'
+  },
+  {
+    href: '/teacher/teachers/',
+    label: '先生管理',
+    icon: 'group',
+    guide: '先生の登録、権限変更、利用停止を管理します。'
+  },
+  {
+    href: '/teacher/devices/',
+    label: '録音端末',
+    icon: 'microphone',
+    guide: '録音端末の登録、担当先生、接続用キーを管理します。'
+  },
   {
     href: '/teacher/readiness/',
     label: '稼働準備チェック',
-    icon: 'checklist'
+    icon: 'checklist',
+    guide: '本番運用に必要な設定や外部連携の不足を確認します。'
   },
-  { href: '/teacher/audit/', label: '操作履歴', icon: 'privacy' }
+  {
+    href: '/teacher/audit/',
+    label: '操作履歴',
+    icon: 'privacy',
+    guide: '先生や管理者が行った操作の履歴を確認します。'
+  }
 ] as const satisfies readonly AppShellNavItem[];
 
 function countBadge(
