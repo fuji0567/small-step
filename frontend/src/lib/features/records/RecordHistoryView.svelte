@@ -221,6 +221,7 @@
         <Button
           variant="secondary"
           onclick={() => (exportConfirmation = true)}
+          guide="現在の検索結果を保存します。個人情報を含むため取り扱いに注意してください。"
           disabled={loading || records.length === 0}>CSVをダウンロード</Button
         >
       {/if}

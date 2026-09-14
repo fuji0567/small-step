@@ -99,6 +99,36 @@ describe('teacher shell navigation', () => {
     });
   });
 
+  it('全12項目に用途を説明するガイドを持つ', () => {
+    const items = teacherNavItems(true);
+    expect(items).toHaveLength(12);
+    for (const item of items) {
+      expect(item.guide).toBeTruthy();
+    }
+  });
+
+  it('バッジ合成後もガイドを保持する', () => {
+    const counts: NavigationBadgeCounts = {
+      pending_review_records: 3,
+      notification_attention: 4,
+      failed_audio_jobs: 2,
+      invitations_not_issued: 1,
+      readiness_issues: 5
+    };
+    const byHref = new Map(
+      teacherNavItems(true, counts).map((item) => [item.href, item])
+    );
+
+    expect(byHref.get('/teacher/review/')).toMatchObject({
+      badge: '3件',
+      guide: 'AI候補や手入力の日誌を確認し、承認・却下します。'
+    });
+    expect(byHref.get('/teacher/readiness/')).toMatchObject({
+      badge: '!5項目',
+      guide: '本番運用に必要な設定や外部連携の不足を確認します。'
+    });
+  });
+
   it('一般の先生には管理者用バッジを渡さない', () => {
     const counts: NavigationBadgeCounts = {
       pending_review_records: 1,

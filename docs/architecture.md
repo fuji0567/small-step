@@ -29,7 +29,7 @@ flowchart TB
         REC["record_edge_audio.py<br/>app/edge_recorder.py"]
         INBOX[("ローカル音声インボックス<br/>data/edge-audio-inbox")]
         WATCH["watch_edge_audio.py"]
-        LOCAL["app/edge_audio.py<br/>文字起こし + 話者分離 + 匿名化"]
+        LOCAL["app/edge_audio.py<br/>文字起こし + 匿名化"]
         LLM["ローカルLLM<br/>Ollama / vLLM"]
     end
 
@@ -64,7 +64,7 @@ flowchart TB
 
     WATCH -->|"クラウド処理モード<br/>POST /edge/audio-jobs"| API
     API --> JOBS
-    WORKER -->|"ジョブ取得 / 完了報告"| API
+    WORKER <-->|"ジョブ取得 / 記録作成"| DB
     JOBS <-.-> WORKER
 
     TEACHER --> WEB --> API

@@ -96,7 +96,7 @@ VRT ホスト上で動かす Ollama / vLLM をコンテナから参照するた�
 | `DATABASE_URL` | `sqlite:///./data/otayori.db` | 非 SQLite を強制 |
 | `EDGE_AUDIO_PROCESSING_MODE` | `local` | `local` / `cloud` |
 | `CLOUD_AUDIO_ENABLED` | `false` | 必要なときだけ `true` |
-| `GUARDIAN_ARCHIVE_BASE_URL` | `http://127.0.0.1:8000` | HTTPS を強制 |
+| `GUARDIAN_ARCHIVE_BASE_URL` | `http://127.0.0.1:8000` | アーカイブ有効時は HTTPS を強制 |
 | 移行の適用 | アプリ起動時に自動（SQLite のみ） | `migrate` サービスで明示適用 |
 
 `APP_ENV=production` のときは `app/config.py` の `reject_unsafe_production_configuration()` が

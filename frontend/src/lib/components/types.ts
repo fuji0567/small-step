@@ -31,6 +31,7 @@ export type AppShellNavItem = {
   badge?: string;
   badgeAriaLabel?: string;
   badgeTone?: 'default' | 'warning';
+  guide?: string;
 };
 
 export type OptionalSnippet = Snippet | undefined;

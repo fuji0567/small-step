@@ -79,6 +79,14 @@ describe('TeachersView', () => {
       await screen.findByText('自分自身の権限変更・利用停止はできません。')
     ).toBeInTheDocument();
     const promote = screen.getByRole('button', { name: '管理者にする' });
+    expect(promote).toHaveAccessibleDescription(
+      '園児・先生・端末・通知などの管理操作を許可します。'
+    );
+    expect(
+      screen.getByRole('button', { name: '利用停止' })
+    ).toHaveAccessibleDescription(
+      'この先生のログインと担当端末の利用を停止します。履歴は残ります。'
+    );
     await fireEvent.click(promote);
     await fireEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
     expect(

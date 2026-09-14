@@ -10,22 +10,28 @@
 
 ### 通知の送信
 
-送信は API プロセスではなく、別プロセスのワーカーが行います。
+送信は API プロセスではなく、別プロセスのワーカーが行います。ワーカーは API を呼ばず、
+API と同じデータベースを直接読み書きするため、先生のアクセストークンを必要としません。
 
 ```
-scripts/send_pending_line_notifications.py [--watch]
-  ├ GET /api/v1/notifications/ready          … scheduled_for を過ぎた pending を取得
+scripts/send_pending_line_notifications.py [--watch] [--dry-run] [--retry-failed]
+  ├ DB から scheduled_for を過ぎた pending を取得（--retry-failed なら failed も）
   ├ app/line.py push_text_message()          … LINE へ push
-  └ POST /api/v1/notifications/{id}/mark-sent … 送信結果を記録（record は dispatched へ）
+  └ DB に送信結果を記録                        … 成功なら sent（record は dispatched へ）、失敗なら failed
 ```
 
 - `--watch` で常駐し、`LINE_WORKER_POLL_SECONDS`（既定 15 秒）ごとにポーリングします。
   Compose の VRT 構成では `line-worker` サービスとして常駐します。
-- `X-LINE-Retry-Key` に通知 ID 由来の値を渡すため、ワーカーが再試行しても LINE 側で重複配信されません。
+- `--dry-run` は LINE への push を行いません。ただし、送信先または対応する記録がない期限到来通知は
+  `failed`（`guardian_not_linked`）へ更新するため、データベースに対して完全な読み取り専用ではありません。
+- `X-Line-Retry-Key` に通知 ID を渡します。再送予約でも同じ通知 ID を使うため、LINE 側で同じ再試行キーとして扱われます。
 - 本文は `build_notification_text()` が `summary` と `conversation_prompt` から組み立て、
   `truncate_line_text()` が LINE の上限（UTF-16 コードユニット単位）に収まるよう切り詰めます。
-- 失敗した通知は `failed` になり、`last_failure_kind` と `delivery_attempts` が残ります。
-  先生管理者は画面から再送（`POST /notifications/{id}/retry`）や取り消しができます。
+- 失敗した通知は `failed` になり、`last_failure_kind` と `delivery_attempts` が残ります。通常の実行では自動再送しません。
+  先生管理者は画面から `failed` の再送予約（`POST /notifications/{id}/retry`）、
+  `pending` / `waiting_guardian_link` の取り消し（`POST /notifications/{id}/cancel`）と
+  日時変更（`PATCH /notifications/{id}/schedule`）ができます。
+- 送信先の LINE ユーザー ID がない `pending` 通知は、送信せずに `failed`（`guardian_not_linked`）にします。
 
 ### 保護者アカウントの紐付け
 
@@ -45,16 +51,17 @@ sequenceDiagram
     G->>LINE: 公式アカウントにコードを送信
     LINE->>API: POST /line/webhook（署名つき）
     API->>API: コード照合 → children.guardian_line_user_id を設定
-    Note over API: waiting_guardian_link / failed の通知が pending に戻る
+    Note over API: 連携待ち・未連携で失敗した通知が pending に戻る
 ```
 
 Webhook（`POST /api/v1/line/webhook`）の扱い:
 
 1. `X-Line-Signature` を生ボディで検証する（JSON パースより前）。不一致なら 401。
 2. イベント配列を走査し、テキストメッセージから `parse_link_code()` で招待コードらしき文字列だけを取り出す。
-3. `hash_link_code(code, channel_secret)` で照合する。**保護者が送ったメッセージ本文は一切保存しません。**
-4. 一致したら `children.guardian_line_user_id` を設定し、`line_link_invitations.used_at` を埋める。
-5. その園児の `waiting_guardian_link` / `failed` の通知を配信対象に戻す。
+3. `hash_link_code(code, channel_secret)` で、未使用・未失効・期限内の招待コードと照合する。
+   **保護者が送ったメッセージ本文は一切保存しません。**
+4. 一致し、園児が在園中なら `children.guardian_line_user_id` を設定し、`line_link_invitations.used_at` を埋める。
+5. その園児の `waiting_guardian_link` の通知と、`guardian_not_linked` で `failed` になった通知を `pending` に戻す。
 6. `guardian_line_linked` を監査ログに残す。
 
 | 操作 | エンドポイント | 権限 |

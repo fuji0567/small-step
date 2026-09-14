@@ -284,12 +284,15 @@
             {/if}
           </div>
           <div class="records-actions">
-            <Button onclick={() => (confirmation = 'approve')} disabled={saving}
-              >承認する</Button
+            <Button
+              onclick={() => (confirmation = 'approve')}
+              guide="編集内容を保存し、保護者へのLINE通知を準備します。"
+              disabled={saving}>承認する</Button
             >
             <Button
               variant="danger"
               onclick={() => (confirmation = 'reject')}
+              guide="確認待ちから外します。保護者には通知されません。"
               disabled={saving}>却下する</Button
             >
           </div>

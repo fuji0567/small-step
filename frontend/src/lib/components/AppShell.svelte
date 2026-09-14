@@ -31,11 +31,70 @@
     children
   }: Props = $props();
 
+  const componentId = $props.id();
+
   function isCurrent(item: AppShellNavItem): boolean {
     const href = resolve(item.href);
     if (currentPath === href) return true;
     if (href === resolve('/teacher/')) return false;
     return currentPath.startsWith(href);
+  }
+
+  function navGuideId(index: number): string {
+    return `${componentId}-nav-guide-${index}`;
+  }
+
+  function dismissibleGuide(node: HTMLElement) {
+    let pointerWithin = false;
+    let focusWithin = false;
+
+    function clearDismissed(): void {
+      node.classList.remove('ss-app-shell__nav-item--guide-dismissed');
+    }
+
+    function handlePointerEnter(): void {
+      pointerWithin = true;
+      clearDismissed();
+    }
+
+    function handlePointerLeave(): void {
+      pointerWithin = false;
+      if (!focusWithin) clearDismissed();
+    }
+
+    function handleFocusIn(): void {
+      if (!focusWithin) clearDismissed();
+      focusWithin = true;
+    }
+
+    function handleFocusOut(event: FocusEvent): void {
+      const nextTarget = event.relatedTarget;
+      if (nextTarget instanceof Node && node.contains(nextTarget)) return;
+      focusWithin = false;
+      if (!pointerWithin) clearDismissed();
+    }
+
+    function handleKeydown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') {
+        node.classList.add('ss-app-shell__nav-item--guide-dismissed');
+      }
+    }
+
+    node.addEventListener('pointerenter', handlePointerEnter);
+    node.addEventListener('pointerleave', handlePointerLeave);
+    node.addEventListener('focusin', handleFocusIn);
+    node.addEventListener('focusout', handleFocusOut);
+    node.addEventListener('keydown', handleKeydown);
+
+    return {
+      destroy(): void {
+        node.removeEventListener('pointerenter', handlePointerEnter);
+        node.removeEventListener('pointerleave', handlePointerLeave);
+        node.removeEventListener('focusin', handleFocusIn);
+        node.removeEventListener('focusout', handleFocusOut);
+        node.removeEventListener('keydown', handleKeydown);
+      }
+    };
   }
 </script>
 
@@ -60,21 +119,52 @@
   <div class="ss-app-shell__body">
     <nav class="ss-app-shell__nav" aria-label={navLabel}>
       <ul>
-        {#each navItems as item (item.href)}
+        {#each navItems as item, index (item.href)}
           <li>
-            <a
-              href={resolve(item.href)}
-              aria-current={isCurrent(item) ? 'page' : undefined}
-            >
-              {#if item.icon}<Icon name={item.icon} decorative={true} />{/if}
-              <span>{item.label}</span>
-              {#if item.badge}
-                <span
-                  class={`ss-app-shell__badge ss-app-shell__badge--${item.badgeTone ?? 'default'}`}
-                  aria-label={item.badgeAriaLabel}>{item.badge}</span
+            {#if item.guide}
+              <span class="ss-app-shell__nav-item" use:dismissibleGuide>
+                <a
+                  href={resolve(item.href)}
+                  aria-current={isCurrent(item) ? 'page' : undefined}
+                  aria-describedby={navGuideId(index)}
                 >
-              {/if}
-            </a>
+                  {#if item.icon}<Icon
+                      name={item.icon}
+                      decorative={true}
+                    />{/if}
+                  <span>{item.label}</span>
+                  {#if item.badge}
+                    <span
+                      class={`ss-app-shell__badge ss-app-shell__badge--${item.badgeTone ?? 'default'}`}
+                      aria-label={item.badgeAriaLabel}>{item.badge}</span
+                    >
+                  {/if}
+                </a>
+                <span
+                  class="ss-app-shell__guide"
+                  id={navGuideId(index)}
+                  role="tooltip"
+                  >{item.guide}{#if item.badge && item.badgeAriaLabel}<br
+                      aria-hidden="true"
+                    /><strong aria-hidden="true">{item.badgeAriaLabel}</strong
+                    >{/if}</span
+                >
+              </span>
+            {:else}
+              <a
+                href={resolve(item.href)}
+                aria-current={isCurrent(item) ? 'page' : undefined}
+              >
+                {#if item.icon}<Icon name={item.icon} decorative={true} />{/if}
+                <span>{item.label}</span>
+                {#if item.badge}
+                  <span
+                    class={`ss-app-shell__badge ss-app-shell__badge--${item.badgeTone ?? 'default'}`}
+                    aria-label={item.badgeAriaLabel}>{item.badge}</span
+                  >
+                {/if}
+              </a>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -174,6 +264,7 @@
 
   .ss-app-shell__nav {
     position: sticky;
+    z-index: 100;
     top: 0;
     min-width: 0;
     padding: var(--ss-space-2, 1rem);
@@ -218,6 +309,56 @@
     outline: 4px solid var(--ss-color-focus-inner, #ffd43d);
     outline-offset: 0;
     box-shadow: 0 0 0 6px var(--ss-color-focus-outer, #000000);
+  }
+
+  .ss-app-shell__nav-item {
+    position: relative;
+    display: block;
+  }
+
+  .ss-app-shell__guide {
+    position: absolute;
+    z-index: 100;
+    top: 50%;
+    left: calc(100% + var(--ss-space-1, 0.5rem));
+    width: max-content;
+    max-width: min(20rem, calc(100vw - 2rem));
+    box-sizing: border-box;
+    border-radius: var(--ss-radius-medium, 0.5rem);
+    padding: var(--ss-space-1, 0.5rem) var(--ss-space-2, 1rem);
+    color: var(--ss-color-surface, #ffffff);
+    background: rgb(0 0 0 / 88%);
+    background: color-mix(
+      in srgb,
+      var(--ss-color-focus-outer, #000000) 88%,
+      transparent
+    );
+    font-size: var(--ss-font-size-small, 0.875rem);
+    font-weight: var(--ss-font-weight-regular, 400);
+    line-height: 1.75;
+    pointer-events: auto;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-50%);
+    transition:
+      opacity 120ms linear,
+      visibility 0s linear 120ms;
+  }
+
+  .ss-app-shell__nav-item:not(.ss-app-shell__nav-item--guide-dismissed):hover
+    .ss-app-shell__guide {
+    opacity: 1;
+    visibility: visible;
+    transition-delay: 600ms;
+  }
+
+  .ss-app-shell__nav-item:not(
+      .ss-app-shell__nav-item--guide-dismissed
+    ):focus-within
+    .ss-app-shell__guide {
+    opacity: 1;
+    visibility: visible;
+    transition-delay: 0s;
   }
 
   .ss-app-shell__badge {
@@ -278,6 +419,25 @@
 
     .ss-app-shell__main {
       padding: var(--ss-space-2, 1rem);
+    }
+
+    .ss-app-shell__guide {
+      position: fixed;
+      top: auto;
+      right: var(--ss-space-2, 1rem);
+      bottom: var(--ss-space-2, 1rem);
+      left: var(--ss-space-2, 1rem);
+      width: auto;
+      max-width: none;
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ss-app-shell__guide {
+      transition:
+        opacity 0s linear,
+        visibility 0s linear 120ms;
     }
   }
 </style>

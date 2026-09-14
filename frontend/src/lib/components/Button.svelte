@@ -8,6 +8,7 @@
     variant?: 'primary' | 'secondary' | 'tertiary' | 'danger';
     size?: 'default' | 'compact';
     loading?: boolean;
+    guide?: string;
     type?: 'button' | 'submit' | 'reset';
     class?: string;
   };
@@ -18,20 +19,59 @@
     variant = 'primary',
     size = 'default',
     loading = false,
+    guide,
     type = 'button',
     disabled = false,
     class: className = '',
+    'aria-describedby': ariaDescribedby,
     ...attributes
   }: Props = $props();
+
+  const componentId = $props.id();
+  const guideId = `${componentId}-guide`;
+  const buttonDescription = $derived(
+    guide
+      ? `${ariaDescribedby ? `${ariaDescribedby} ` : ''}${guideId}`
+      : ariaDescribedby
+  );
+
+  let guideDismissed = $state(false);
+  let guidePointerWithin = $state(false);
+  let guideFocusWithin = $state(false);
+
+  function handleGuidePointerEnter(): void {
+    guidePointerWithin = true;
+    guideDismissed = false;
+  }
+
+  function handleGuidePointerLeave(): void {
+    guidePointerWithin = false;
+    if (!guideFocusWithin) guideDismissed = false;
+  }
+
+  function handleGuideFocusIn(): void {
+    if (!guideFocusWithin) guideDismissed = false;
+    guideFocusWithin = true;
+  }
+
+  function handleGuideFocusOut(event: FocusEvent): void {
+    const nextTarget = event.relatedTarget;
+    if (
+      nextTarget instanceof Node &&
+      (event.currentTarget as HTMLElement).contains(nextTarget)
+    )
+      return;
+
+    guideFocusWithin = false;
+    if (!guidePointerWithin) guideDismissed = false;
+  }
+
+  function handleGuideKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') guideDismissed = true;
+  }
 </script>
 
-<button
-  {...attributes}
-  {type}
-  class={`ss-button ss-button--${variant} ss-button--${size} ${className}`.trim()}
-  disabled={disabled || loading}
-  aria-busy={loading ? 'true' : undefined}
->
+{#snippet buttonContent()}
   {#if loading}
     <span class="ss-button__spinner" aria-hidden="true"></span>
   {:else if leading}
@@ -40,9 +80,100 @@
     >
   {/if}
   <span>{@render children()}</span>
-</button>
+{/snippet}
+
+{#if guide}
+  <span
+    role="presentation"
+    class:ss-button-guide--dismissed={guideDismissed}
+    class="ss-button-guide"
+    onpointerenter={handleGuidePointerEnter}
+    onpointerleave={handleGuidePointerLeave}
+    onfocusin={handleGuideFocusIn}
+    onfocusout={handleGuideFocusOut}
+    onkeydown={handleGuideKeydown}
+  >
+    <button
+      {...attributes}
+      {type}
+      class={`ss-button ss-button--${variant} ss-button--${size} ${className}`.trim()}
+      disabled={disabled || loading}
+      aria-busy={loading ? 'true' : undefined}
+      aria-describedby={buttonDescription}
+    >
+      {@render buttonContent()}
+    </button>
+    <span class="ss-button-guide__content" id={guideId} role="tooltip"
+      >{guide}</span
+    >
+  </span>
+{:else}
+  <button
+    {...attributes}
+    {type}
+    class={`ss-button ss-button--${variant} ss-button--${size} ${className}`.trim()}
+    disabled={disabled || loading}
+    aria-busy={loading ? 'true' : undefined}
+    aria-describedby={buttonDescription}
+  >
+    {@render buttonContent()}
+  </button>
+{/if}
 
 <style>
+  .ss-button-guide {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .ss-button-guide > .ss-button {
+    width: 100%;
+  }
+
+  .ss-button-guide__content {
+    position: absolute;
+    z-index: 100;
+    top: calc(100% + var(--ss-space-1, 0.5rem));
+    left: 50%;
+    width: max-content;
+    max-width: min(24rem, calc(100vw - 2rem));
+    box-sizing: border-box;
+    border-radius: var(--ss-radius-medium, 0.5rem);
+    padding: var(--ss-space-1, 0.5rem) var(--ss-space-2, 1rem);
+    color: var(--ss-color-surface, #ffffff);
+    background: rgb(0 0 0 / 88%);
+    background: color-mix(
+      in srgb,
+      var(--ss-color-focus-outer, #000000) 88%,
+      transparent
+    );
+    font-family: var(--ss-font-sans, sans-serif);
+    font-size: var(--ss-font-size-small, 0.875rem);
+    font-weight: var(--ss-font-weight-regular, 400);
+    line-height: 1.75;
+    pointer-events: auto;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateX(-50%);
+    transition:
+      opacity 120ms linear,
+      visibility 0s linear 120ms;
+  }
+
+  .ss-button-guide:not(.ss-button-guide--dismissed):hover
+    .ss-button-guide__content {
+    opacity: 1;
+    visibility: visible;
+    transition-delay: 600ms;
+  }
+
+  .ss-button-guide:not(.ss-button-guide--dismissed):focus-within
+    .ss-button-guide__content {
+    opacity: 1;
+    visibility: visible;
+    transition-delay: 0s;
+  }
+
   .ss-button {
     display: inline-flex;
     min-height: 44px;
@@ -138,6 +269,12 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
+    .ss-button-guide__content {
+      transition:
+        opacity 0s linear,
+        visibility 0s linear 120ms;
+    }
+
     .ss-button__spinner {
       animation: none;
     }

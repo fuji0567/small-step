@@ -63,7 +63,7 @@ stateDiagram-v2
 | テーブル | カラム | 状態 |
 | --- | --- | --- |
 | `records` | `status` | `pending_review` → `approved` / `rejected` → `dispatched` |
-| `notifications` | `status` | `pending` / `waiting_guardian_link` → `sent` / `failed` / `cancelled` |
+| `notifications` | `status` | `waiting_guardian_link` → `pending`（保護者連携）→ `sent` / `failed`。`failed` → `pending`（再送予約）。`pending` / `waiting_guardian_link` → `cancelled` |
 | `cloud_audio_jobs` | `status` | `queued` → `processing` → `completed` / `failed` / `expired` |
 | `teachers` | `role` | `teacher` / `school_admin` |
 | `records` | `category` | `growth`（成長の記録） / `injury`（けがの記録） |

@@ -289,6 +289,7 @@
                   size="compact"
                   variant="secondary"
                   onclick={() => (confirmation = { kind: 'rotate', device })}
+                  guide="現在の端末キーを無効にし、新しいキーを一度だけ表示します。"
                   >鍵を再発行</Button
                 >
                 {#if device.is_active}
@@ -296,6 +297,7 @@
                     size="compact"
                     variant="danger"
                     onclick={() => (confirmation = { kind: 'disable', device })}
+                    guide="この端末からの新しいデータ送信を停止します。"
                     >端末を無効化</Button
                   >
                 {/if}

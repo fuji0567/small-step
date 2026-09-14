@@ -72,7 +72,9 @@ describe('NotificationsView', () => {
 
     expect(
       await screen.findByRole('button', { name: '再送を予約' })
-    ).toBeInTheDocument();
+    ).toHaveAccessibleDescription(
+      '送信に失敗した通知を、もう一度送信待ちに戻します。'
+    );
   });
 
   it('先生管理者には送信待ち通知の日時変更と取消を表示する', async () => {
@@ -93,9 +95,13 @@ describe('NotificationsView', () => {
 
     expect(
       await screen.findByRole('button', { name: '日時を変更' })
-    ).toBeInTheDocument();
+    ).toHaveAccessibleDescription(
+      'LINE送信が始まる前に限り、配信予定を変更できます。'
+    );
     expect(
       screen.getByRole('button', { name: '配信を取消' })
-    ).toBeInTheDocument();
+    ).toHaveAccessibleDescription(
+      'この通知を送信対象から外します。自動では再開されません。'
+    );
   });
 });

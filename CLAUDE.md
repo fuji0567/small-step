@@ -8,7 +8,7 @@ Small Step（お便りAI）は、幼稚園の会話から「成長の記録」�
 UI・ドキュメント・ユーザー向け文言はすべて日本語です。
 
 中心にある制約は **生音声と生の文字起こしを API のデータベースへ持ち込まない** こと。
-匿名化は園内のエッジ端末で済ませ、`POST /api/v1/records` には加工済みテキストだけが届きます。
+匿名化は園内のエッジ端末で済ませ、`POST /api/v1/edge/records` には加工済みテキストだけが届きます。
 機能を足すときは、まずこの前提を壊していないか確認してください。
 
 ## コマンド
@@ -35,7 +35,7 @@ pytest -k notion -q                                       # 名前で絞り込�
 ```bash
 python scripts/prepare_database.py                        # 移行の明示適用（PostgreSQL では必須）
 python scripts/check_runtime_readiness.py                 # 不足している設定の洗い出し
-python scripts/send_pending_line_notifications.py --dry-run   # 送信対象の確認（実行前に必ず）
+python scripts/send_pending_line_notifications.py --dry-run   # LINE 送信なし（未連携の期限到来通知は failed に更新）
 python scripts/send_pending_line_notifications.py --watch      # LINE 送信ワーカー（常駐）
 python scripts/process_cloud_audio_jobs.py                     # GPU ワーカー（常駐・VRT 用）
 python -m app.mcp_server --streamable-http --port 8002          # MCP（ローカル専用）
@@ -126,7 +126,7 @@ prerender 済みページと `/_app/*` を静的配信し、`/teacher/*` だけ�
 
 ### 音声パイプライン
 
-`EDGE_AUDIO_PROCESSING_MODE=local`（既定）は園内で文字起こし・話者分離・匿名化まで完了させ、
+`EDGE_AUDIO_PROCESSING_MODE=local`（既定）は園内で文字起こし・匿名化まで完了させ、
 テキストだけを送ります。`cloud` は `CLOUD_AUDIO_ENABLED=true` も必要な明示的オプトインで、
 音声は短命ジョブ保管に置かれ処理後に削除されます。
 `LLM_ALLOW_EXTERNAL=false`（既定）のとき `LLM_BASE_URL` はループバックに限定され、
@@ -176,7 +176,9 @@ prerender 済みページと `/_app/*` を静的配信し、`/teacher/*` だけ�
 
 ## ドキュメント
 
-`docs/` に領域別の設計文書があります。実装前にこちらを読むと早いです。
+機能を実装するときは、実装箇所を推測してコードから直接探索し始めないでください。
+まず `docs/architecture.md` と該当領域の設計文書を読み、機能の責務、処理の流れ、関連モジュール、
+既存の判断を把握して、変更候補を大まかに絞ります。その見当を付けてから実コードを確認し、実装に入ります。
 
 | 領域 | ファイル |
 | --- | --- |
@@ -196,4 +198,5 @@ prerender 済みページと `/_app/*` を静的配信し、`/teacher/*` だけ�
 ### コミット時のドキュメント整合
 
 コミットする前に、変更した実装・設定・運用手順と `README.md`、`.env.example`、`docs/` の記述に
-矛盾がないことを必ず確認してください。差異がある場合は、関連ドキュメントを同じコミットで更新します。
+矛盾がないことを必ず確認してください。差異がある場合は、先に関連ドキュメントを更新してからコミットし、
+実装とドキュメントの変更を同じコミットに含めます。
