@@ -138,7 +138,11 @@ describe('RecordDetailView', () => {
     });
 
     await screen.findByDisplayValue(pendingRecord.summary);
-    await fireEvent.click(screen.getByRole('button', { name: '承認する' }));
+    const approve = screen.getByRole('button', { name: '承認する' });
+    expect(approve).toHaveAccessibleDescription(
+      '編集内容を保存し、保護者へのLINE通知を準備します。'
+    );
+    await fireEvent.click(approve);
     await fireEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
     expect(
       fetchMock.mock.calls.some(([url]) => String(url).includes('/approve'))
@@ -173,7 +177,11 @@ describe('RecordDetailView', () => {
     });
 
     await screen.findByDisplayValue(pendingRecord.summary);
-    await fireEvent.click(screen.getByRole('button', { name: '却下する' }));
+    const reject = screen.getByRole('button', { name: '却下する' });
+    expect(reject).toHaveAccessibleDescription(
+      '確認待ちから外します。保護者には通知されません。'
+    );
+    await fireEvent.click(reject);
     const rejectButtons = screen.getAllByRole('button', { name: '却下する' });
     await fireEvent.click(rejectButtons.at(-1)!);
 
@@ -206,9 +214,13 @@ describe('ManualRecordView', () => {
     await fireEvent.input(screen.getByLabelText('保護者へ伝える内容'), {
       target: { value: '手入力の日誌です。' }
     });
-    await fireEvent.click(
-      screen.getByRole('button', { name: 'レビュー待ちに追加' })
+    const addToReview = screen.getByRole('button', {
+      name: 'レビュー待ちに追加'
+    });
+    expect(addToReview).toHaveAccessibleDescription(
+      '保護者には送信せず、先生の確認待ちとして保存します。'
     );
+    await fireEvent.click(addToReview);
 
     await waitFor(() =>
       expect(onNavigate).toHaveBeenCalledWith('/teacher/review/record-1/')
@@ -244,7 +256,9 @@ describe('RecordHistoryView', () => {
     expect(await screen.findByText(pendingRecord.summary)).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'CSVをダウンロード' })
-    ).toBeInTheDocument();
+    ).toHaveAccessibleDescription(
+      '現在の検索結果を保存します。個人情報を含むため取り扱いに注意してください。'
+    );
     expect(
       screen.getByRole('link', { name: '日誌の詳細を開く' })
     ).toHaveAttribute('href', '/teacher/review/record-1/');

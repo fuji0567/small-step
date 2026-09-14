@@ -83,6 +83,9 @@ describe('ChildrenView', () => {
     const issue = await screen.findByRole('button', {
       name: '招待コードを発行'
     });
+    expect(issue).toHaveAccessibleDescription(
+      '保護者がLINE連携に使うコードを発行します。一度だけ表示されます。'
+    );
     await fireEvent.click(issue);
     await fireEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
     expect(
@@ -135,9 +138,13 @@ describe('ChildrenView', () => {
     };
     const view = render(ChildrenView, props);
 
-    await fireEvent.click(
-      await screen.findByRole('button', { name: '保護者用URLを発行' })
+    const issueUrl = await screen.findByRole('button', {
+      name: '保護者用URLを発行'
+    });
+    expect(issueUrl).toHaveAccessibleDescription(
+      '過去のお知らせを確認できるURLを発行します。以前のURLは無効になります。'
     );
+    await fireEvent.click(issueUrl);
     await fireEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
     expect(
       fetchMock.mock.calls.some(

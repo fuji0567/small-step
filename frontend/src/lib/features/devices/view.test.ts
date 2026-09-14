@@ -111,6 +111,14 @@ describe('DevicesView', () => {
     });
 
     const rotate = await screen.findByRole('button', { name: '鍵を再発行' });
+    expect(rotate).toHaveAccessibleDescription(
+      '現在の端末キーを無効にし、新しいキーを一度だけ表示します。'
+    );
+    expect(
+      screen.getByRole('button', { name: '端末を無効化' })
+    ).toHaveAccessibleDescription(
+      'この端末からの新しいデータ送信を停止します。'
+    );
     await fireEvent.click(rotate);
     await fireEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
     expect(

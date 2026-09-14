@@ -292,6 +292,7 @@
                   <Button
                     variant="secondary"
                     onclick={() => requestAction('retry', notification)}
+                    guide="送信に失敗した通知を、もう一度送信待ちに戻します。"
                     >再送を予約</Button
                   >
                 {/if}
@@ -299,11 +300,13 @@
                   <Button
                     variant="secondary"
                     onclick={() => beginReschedule(notification)}
+                    guide="LINE送信が始まる前に限り、配信予定を変更できます。"
                     >日時を変更</Button
                   >
                   <Button
                     variant="danger"
                     onclick={() => requestAction('cancel', notification)}
+                    guide="この通知を送信対象から外します。自動では再開されません。"
                     >配信を取消</Button
                   >
                 {/if}

@@ -383,12 +383,14 @@
                       size="compact"
                       variant="secondary"
                       onclick={() => ask({ kind: 'archive-link', child })}
+                      guide="過去のお知らせを確認できるURLを発行します。以前のURLは無効になります。"
                       >保護者用URLを発行</Button
                     >
                     <Button
                       size="compact"
                       variant="danger"
                       onclick={() => ask({ kind: 'unlink', child })}
+                      guide="未送信通知や保護者用URLも無効になります。"
                       >LINE連携を解除</Button
                     >
                   {:else}
@@ -400,13 +402,16 @@
                           kind: 'invitation',
                           child,
                           replacing: invitationByChild.has(child.id)
-                        })}>招待コードを発行</Button
+                        })}
+                      guide="保護者がLINE連携に使うコードを発行します。一度だけ表示されます。"
+                      >招待コードを発行</Button
                     >
                   {/if}
                   <Button
                     size="compact"
                     variant="danger"
                     onclick={() => ask({ kind: 'archive', child })}
+                    guide="新しい記録・通知・LINE連携を停止します。過去の履歴は残ります。"
                     >退園処理</Button
                   >
                 {:else}
@@ -414,6 +419,7 @@
                     size="compact"
                     variant="secondary"
                     onclick={() => ask({ kind: 'restore', child })}
+                    guide="在籍中に戻します。以前のLINE連携などは復元されません。"
                     >復園に戻す</Button
                   >
                 {/if}

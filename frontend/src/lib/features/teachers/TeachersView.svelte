@@ -268,6 +268,9 @@
                               ? 'teacher'
                               : 'school_admin'
                         })}
+                      guide={teacher.role === 'school_admin'
+                        ? '通常の先生に戻し、園全体の管理操作をできないようにします。'
+                        : '園児・先生・端末・通知などの管理操作を許可します。'}
                     >
                       {teacher.role === 'school_admin'
                         ? '通常の先生に戻す'
@@ -277,6 +280,7 @@
                       size="compact"
                       variant="danger"
                       onclick={() => ask({ kind: 'disable', teacher })}
+                      guide="この先生のログインと担当端末の利用を停止します。履歴は残ります。"
                       >利用停止</Button
                     >
                   {/if}

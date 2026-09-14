@@ -265,6 +265,7 @@
           <Button
             type="submit"
             loading={saving}
+            guide="保護者には送信せず、先生の確認待ちとして保存します。"
             disabled={children.length === 0}>レビュー待ちに追加</Button
           >
         </div>

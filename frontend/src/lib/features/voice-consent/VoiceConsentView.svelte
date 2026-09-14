@@ -182,6 +182,7 @@
             <Button
               variant="danger"
               onclick={() => (revokeOpen = true)}
+              guide="今後の声紋登録を停止します。既存データは自動削除されません。"
               disabled={busy}>同意を取り消す</Button
             >
           {/if}

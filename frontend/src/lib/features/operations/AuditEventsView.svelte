@@ -163,6 +163,7 @@
         <Button
           variant="secondary"
           onclick={() => (exportOpen = true)}
+          guide="現在の絞り込み結果を保存します。実行者名を含むため取り扱いに注意してください。"
           disabled={events.length === 0}>CSVをダウンロード</Button
         >
         <StatusBadge

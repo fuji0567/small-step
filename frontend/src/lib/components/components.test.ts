@@ -52,6 +52,76 @@ describe('Button', () => {
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute('aria-busy', 'true');
   });
+
+  it('describes a guided button without changing its accessible name', () => {
+    const existingDescription = document.createElement('p');
+    existingDescription.id = 'existing-description';
+    existingDescription.textContent = '既存の説明です。';
+    document.body.append(existingDescription);
+
+    render(Button, {
+      children: textSnippet('承認する'),
+      guide: '保護者への通知を準備します。',
+      'aria-describedby': existingDescription.id
+    });
+
+    const button = screen.getByRole('button', { name: '承認する' });
+    const tooltip = screen.getByRole('tooltip', { hidden: true });
+    expect(button).toHaveAccessibleName('承認する');
+    expect(button).toHaveAttribute(
+      'aria-describedby',
+      `${existingDescription.id} ${tooltip.id}`
+    );
+    expect(button).toHaveAccessibleDescription(
+      '既存の説明です。 保護者への通知を準備します。'
+    );
+  });
+
+  it('uses a unique guide id and leaves unguided button markup unwrapped', () => {
+    const first = render(Button, {
+      children: textSnippet('承認する'),
+      guide: '通知を準備します。'
+    });
+    const second = render(Button, {
+      children: textSnippet('却下する'),
+      guide: '確認待ちから外します。'
+    });
+    const describedIds = screen
+      .getAllByRole('button')
+      .map((button) => button.getAttribute('aria-describedby'));
+
+    expect(describedIds[0]).toBeTruthy();
+    expect(describedIds[1]).toBeTruthy();
+    expect(describedIds[0]).not.toBe(describedIds[1]);
+
+    first.unmount();
+    second.unmount();
+    const unguided = render(Button, { children: textSnippet('保存') });
+    expect(unguided.container.firstElementChild).toBe(
+      screen.getByRole('button', { name: '保存' })
+    );
+    expect(screen.queryByRole('tooltip', { hidden: true })).toBeNull();
+  });
+
+  it('dismisses a visible guide with Escape and allows a later trigger', async () => {
+    render(Button, {
+      children: textSnippet('承認する'),
+      guide: '通知を準備します。'
+    });
+
+    const button = screen.getByRole('button', { name: '承認する' });
+    const guide = screen.getByRole('tooltip', { hidden: true });
+    const wrapper = guide.parentElement;
+
+    expect(wrapper).not.toBeNull();
+    await fireEvent.focusIn(button);
+    await fireEvent.keyDown(button, { key: 'Escape' });
+    expect(wrapper).toHaveClass('ss-button-guide--dismissed');
+
+    await fireEvent.focusOut(button, { relatedTarget: document.body });
+    await fireEvent.pointerEnter(wrapper!);
+    expect(wrapper).not.toHaveClass('ss-button-guide--dismissed');
+  });
 });
 
 describe('Notice', () => {
