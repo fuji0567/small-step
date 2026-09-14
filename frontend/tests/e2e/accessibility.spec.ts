@@ -65,6 +65,9 @@ test('ボタンの補足ガイドをフォーカスとホバーで確認しEsc�
   expect(
     await guide.evaluate((element) => getComputedStyle(element).backgroundColor)
   ).toMatch(/0\.88|88%/);
+  expect(
+    Number(await guide.evaluate((element) => getComputedStyle(element).zIndex))
+  ).toBeGreaterThan(10);
   const guideBox = await guide.boundingBox();
   expect(guideBox).not.toBeNull();
   expect(guideBox!.x).toBeGreaterThanOrEqual(0);
@@ -95,6 +98,9 @@ test('左ナビの補足ガイドをフォーカスとホバーで確認しEsc�
   const reviewLink = page.getByRole('link', {
     name: 'レビュー待ち レビュー待ち3件'
   });
+  const navigation = page.getByRole('navigation', {
+    name: '先生用メニュー'
+  });
   const guide = page.getByRole('tooltip', {
     name: 'AI候補や手入力の日誌を確認し、承認・却下します。'
   });
@@ -102,9 +108,18 @@ test('左ナビの補足ガイドをフォーカスとホバーで確認しEsc�
   await expect(guide).toBeHidden();
   await reviewLink.focus();
   await expect(guide).toBeVisible();
+  await expect(guide.getByText('レビュー待ち3件')).toBeVisible();
   expect(
     await guide.evaluate((element) => getComputedStyle(element).backgroundColor)
   ).toMatch(/0\.88|88%/);
+  expect(
+    Number(await guide.evaluate((element) => getComputedStyle(element).zIndex))
+  ).toBeGreaterThan(10);
+  expect(
+    Number(
+      await navigation.evaluate((element) => getComputedStyle(element).zIndex)
+    )
+  ).toBeGreaterThan(10);
   const guideId = await guide.getAttribute('id');
   expect(guideId).not.toBeNull();
   await expect(reviewLink).toHaveAttribute('aria-describedby', guideId!);

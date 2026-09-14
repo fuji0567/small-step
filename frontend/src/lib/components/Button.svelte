@@ -132,7 +132,7 @@
 
   .ss-button-guide__content {
     position: absolute;
-    z-index: 10;
+    z-index: 100;
     top: calc(100% + var(--ss-space-1, 0.5rem));
     left: 50%;
     width: max-content;

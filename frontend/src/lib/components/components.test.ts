@@ -395,6 +395,14 @@ describe('AppShell', () => {
       name: 'レビュー待ち レビュー待ち3件'
     });
     const guide = screen.getByRole('tooltip', { hidden: true });
+    expect(guide.querySelector('strong')).toHaveTextContent('レビュー待ち3件');
+    expect(guide.querySelector('strong')).toHaveAttribute(
+      'aria-hidden',
+      'true'
+    );
+    expect(guide.textContent).toBe(
+      'AI候補や手入力の日誌を確認し、承認・却下します。レビュー待ち3件'
+    );
     expect(guide).toHaveTextContent(
       'AI候補や手入力の日誌を確認し、承認・却下します。'
     );
@@ -427,6 +435,10 @@ describe('AppShell', () => {
 
     expect(describedIds).toHaveLength(2);
     expect(new Set(describedIds).size).toBe(2);
+    expect(
+      screen.getAllByRole('tooltip', { hidden: true })[0]
+    ).toHaveTextContent('AI候補や手入力の日誌を確認し、承認・却下します。');
+    expect(screen.queryByText('レビュー待ち3件')).toBeNull();
   });
 
   it('ガイドを持たないナビ項目は既存のマークアップのままdescribedbyを付けない', () => {

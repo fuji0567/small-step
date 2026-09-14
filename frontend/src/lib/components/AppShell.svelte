@@ -143,7 +143,11 @@
                 <span
                   class="ss-app-shell__guide"
                   id={navGuideId(index)}
-                  role="tooltip">{item.guide}</span
+                  role="tooltip"
+                  >{item.guide}{#if item.badge && item.badgeAriaLabel}<br
+                      aria-hidden="true"
+                    /><strong aria-hidden="true">{item.badgeAriaLabel}</strong
+                    >{/if}</span
                 >
               </span>
             {:else}
@@ -260,6 +264,7 @@
 
   .ss-app-shell__nav {
     position: sticky;
+    z-index: 100;
     top: 0;
     min-width: 0;
     padding: var(--ss-space-2, 1rem);
@@ -313,7 +318,7 @@
 
   .ss-app-shell__guide {
     position: absolute;
-    z-index: 10;
+    z-index: 100;
     top: 50%;
     left: calc(100% + var(--ss-space-1, 0.5rem));
     width: max-content;
