@@ -6,7 +6,7 @@ import ManualRecordView from './ManualRecordView.svelte';
 import RecordDetailView from './RecordDetailView.svelte';
 import RecordHistoryView from './RecordHistoryView.svelte';
 import ReviewQueueView from './ReviewQueueView.svelte';
-import type { RecordChild, RecordRead } from './types';
+import type { RecordChild, RecordRead, RecordTeacher } from './types';
 
 const child: RecordChild = {
   id: 'child-1',
@@ -35,6 +35,12 @@ const pendingRecord: RecordRead = {
   created_at: '2026-09-11T01:00:00Z',
   updated_at: '2026-09-11T01:00:00Z'
 };
+
+const teachers: RecordTeacher[] = [
+  { id: 'teacher-1', name: '担当先生', is_active: true },
+  { id: 'teacher-2', name: '引き継ぎ先生', is_active: true },
+  { id: 'teacher-3', name: '利用停止先生', is_active: false }
+];
 
 const json = (value: unknown, status = 200): Response =>
   new Response(JSON.stringify(value), {
@@ -66,6 +72,9 @@ describe('ReviewQueueView', () => {
       screen.getByRole('link', { name: '内容を確認する' })
     ).toHaveAttribute('href', '/teacher/review/record-1/');
     expect(screen.getByLabelText('レビュー待ちの日誌1件')).toBeInTheDocument();
+    expect(
+      screen.getByText('自分の担当分を表示しています')
+    ).toBeInTheDocument();
   });
 });
 
@@ -189,6 +198,54 @@ describe('RecordDetailView', () => {
       expect(onNavigate).toHaveBeenCalledWith('/teacher/review/')
     );
   });
+
+  it('管理者が有効な先生へレビュー待ち日誌を引き継ぐ', async () => {
+    const onReassigned = vi.fn();
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.includes('/children?')) return json([child]);
+      if (url.includes('/teachers?')) return json(teachers);
+      if (url.includes('/assignee') && init?.method === 'PATCH') {
+        return json({ ...pendingRecord, teacher_id: 'teacher-2' });
+      }
+      return json(pendingRecord);
+    });
+
+    render(RecordDetailView, {
+      api: new ApiClient({ fetch: fetchMock }),
+      schoolId: 'school-1',
+      recordId: 'record-1',
+      isSchoolAdmin: true,
+      onNavigate: vi.fn(),
+      onReassigned
+    });
+
+    const assignee = await screen.findByLabelText('引き継ぎ先の先生');
+    expect(screen.getByText('現在の担当: 担当先生')).toBeInTheDocument();
+    expect(
+      screen.getByRole('option', { name: '利用停止先生（利用停止中）' })
+    ).toBeDisabled();
+    await fireEvent.change(assignee, { target: { value: 'teacher-2' } });
+    await fireEvent.click(screen.getByRole('button', { name: '担当を変更' }));
+    const confirmButtons = screen.getAllByRole('button', {
+      name: '担当を変更'
+    });
+    await fireEvent.click(confirmButtons.at(-1)!);
+
+    expect(
+      await screen.findByText('引き継ぎ先生へ担当を引き継ぎました。')
+    ).toBeInTheDocument();
+    const request = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes('/assignee')
+    );
+    expect(request?.[1]).toEqual(
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ teacher_id: 'teacher-2' })
+      })
+    );
+    expect(onReassigned).toHaveBeenCalledOnce();
+  });
 });
 
 describe('ManualRecordView', () => {
@@ -241,11 +298,12 @@ describe('ManualRecordView', () => {
 
 describe('RecordHistoryView', () => {
   it('履歴を表示し、管理者にだけCSV操作を提供する', async () => {
-    const fetchMock = vi.fn<typeof fetch>(async (input) =>
-      String(input).includes('/children?')
-        ? json([child])
-        : json([pendingRecord])
-    );
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.includes('/children?')) return json([child]);
+      if (url.includes('/teachers?')) return json(teachers);
+      return json([pendingRecord]);
+    });
 
     render(RecordHistoryView, {
       api: new ApiClient({ fetch: fetchMock }),

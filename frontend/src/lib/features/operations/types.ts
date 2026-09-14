@@ -25,6 +25,7 @@ export type AuditEventAction =
   | 'guardian_line_unlinked'
   | 'guardian_archive_issued'
   | 'guardian_archive_revoked'
+  | 'record_reassigned'
   | 'record_approved'
   | 'record_rejected'
   | 'notification_retry_scheduled'

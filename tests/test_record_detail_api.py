@@ -74,6 +74,9 @@ def record_detail_context(tmp_path, monkeypatch):
         school_a_id = school_a_response.json()["id"]
 
         teachers = {}
+        admin_a = client.get("/api/v1/auth/me", headers=headers["admin_a"])
+        assert admin_a.status_code == 200
+        teachers["admin_a"] = admin_a.json()
         for name, email in (
             ("teacher_a", "teacher-a@example.com"),
             ("teacher_b", "teacher-b@example.com"),
@@ -179,6 +182,7 @@ def record_detail_context(tmp_path, monkeypatch):
             "client": client,
             "headers": headers,
             "school_a_id": school_a_id,
+            "teachers": teachers,
             "records": {
                 "pending": pending,
                 "approved": approved,
@@ -265,3 +269,123 @@ def test_record_detail_returns_each_status_without_secrets_and_keeps_export_rout
     )
     assert export_response.status_code == 200
     assert export_response.headers["content-type"].startswith("text/csv")
+
+
+def test_record_reassignment_is_admin_only_school_scoped_and_changes_teacher_access(record_detail_context):
+    client = record_detail_context["client"]
+    headers = record_detail_context["headers"]
+    records = record_detail_context["records"]
+    teachers = record_detail_context["teachers"]
+    pending_id = records["pending"]["id"]
+
+    unauthenticated = client.patch(
+        f"/api/v1/records/{pending_id}/assignee",
+        json={"teacher_id": teachers["teacher_b"]["id"]},
+    )
+    assert unauthenticated.status_code == 401
+
+    regular_teacher = client.patch(
+        f"/api/v1/records/{pending_id}/assignee",
+        headers=headers["teacher_a"],
+        json={"teacher_id": teachers["teacher_b"]["id"]},
+    )
+    assert regular_teacher.status_code == 403
+
+    cross_school = client.patch(
+        f"/api/v1/records/{pending_id}/assignee",
+        headers=headers["admin_a"],
+        json={"teacher_id": teachers["admin_b"]["id"]},
+    )
+    assert cross_school.status_code == 422
+
+    same_teacher = client.patch(
+        f"/api/v1/records/{pending_id}/assignee",
+        headers=headers["admin_a"],
+        json={"teacher_id": teachers["teacher_a"]["id"]},
+    )
+    assert same_teacher.status_code == 409
+
+    inactive = client.post(
+        "/api/v1/teachers",
+        headers=headers["admin_a"],
+        json={
+            "school_id": record_detail_context["school_a_id"],
+            "name": "利用停止先生",
+            "email": "inactive@example.com",
+        },
+    )
+    assert inactive.status_code == 201
+    disabled = client.post(
+        f"/api/v1/teachers/{inactive.json()['id']}/disable",
+        headers=headers["admin_a"],
+    )
+    assert disabled.status_code == 200
+    inactive_target = client.patch(
+        f"/api/v1/records/{pending_id}/assignee",
+        headers=headers["admin_a"],
+        json={"teacher_id": inactive.json()["id"]},
+    )
+    assert inactive_target.status_code == 409
+
+    processed = client.patch(
+        f"/api/v1/records/{records['approved']['id']}/assignee",
+        headers=headers["admin_a"],
+        json={"teacher_id": teachers["teacher_b"]["id"]},
+    )
+    assert processed.status_code == 409
+
+    reassigned = client.patch(
+        f"/api/v1/records/{pending_id}/assignee",
+        headers=headers["admin_a"],
+        json={"teacher_id": teachers["teacher_b"]["id"]},
+    )
+    assert reassigned.status_code == 200
+    assert reassigned.json()["teacher_id"] == teachers["teacher_b"]["id"]
+
+    assert client.get(
+        f"/api/v1/records/{pending_id}", headers=headers["teacher_a"]
+    ).status_code == 403
+    assert client.get(
+        f"/api/v1/records/{pending_id}", headers=headers["teacher_b"]
+    ).status_code == 200
+    old_assignee_records = client.get(
+        "/api/v1/records",
+        headers=headers["teacher_a"],
+        params={
+            "school_id": record_detail_context["school_a_id"],
+            "record_status": "pending_review",
+        },
+    )
+    assert old_assignee_records.status_code == 200
+    assert old_assignee_records.json() == []
+    new_assignee_records = client.get(
+        "/api/v1/records",
+        headers=headers["teacher_b"],
+        params={
+            "school_id": record_detail_context["school_a_id"],
+            "record_status": "pending_review",
+        },
+    )
+    assert new_assignee_records.status_code == 200
+    assert {record["id"] for record in new_assignee_records.json()} == {
+        pending_id,
+        records["other_teacher"]["id"],
+    }
+
+    audit_events = client.get(
+        "/api/v1/audit-events",
+        headers=headers["admin_a"],
+        params={
+            "school_id": record_detail_context["school_a_id"],
+            "action": "record_reassigned",
+        },
+    )
+    assert audit_events.status_code == 200
+    assert audit_events.json() == [
+        {
+            "action": "record_reassigned",
+            "target_type": "record",
+            "actor_display_name": "A園管理者",
+            "created_at": audit_events.json()[0]["created_at"],
+        }
+    ]

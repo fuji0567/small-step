@@ -68,6 +68,7 @@ class AuditEventAction(str, enum.Enum):
     guardian_line_unlinked = "guardian_line_unlinked"
     guardian_archive_issued = "guardian_archive_issued"
     guardian_archive_revoked = "guardian_archive_revoked"
+    record_reassigned = "record_reassigned"
     record_approved = "record_approved"
     record_rejected = "record_rejected"
     notification_retry_scheduled = "notification_retry_scheduled"

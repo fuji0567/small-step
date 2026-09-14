@@ -2,6 +2,7 @@ import { ApiClient, ApiInvalidResponseError } from '$lib/api';
 
 import type {
   ManualRecordInput,
+  RecordAssigneeInput,
   RecordChild,
   RecordHistoryFilters,
   RecordRead,
@@ -110,6 +111,18 @@ export class RecordsService {
       await this.client.requestJson<RecordRead>(
         `records/${encodeURIComponent(recordId)}/reject`,
         { method: 'POST' }
+      )
+    );
+  }
+
+  async reassign(
+    recordId: string,
+    input: RecordAssigneeInput
+  ): Promise<RecordRead> {
+    return required(
+      await this.client.requestJson<RecordRead>(
+        `records/${encodeURIComponent(recordId)}/assignee`,
+        { method: 'PATCH', json: input }
       )
     );
   }

@@ -6,23 +6,33 @@
   import { categoryLabel, formatDateTime, recordDetailPath } from './format';
   import './records.css';
   import { RecordsService } from './service';
-  import type { RecordChild, RecordRead } from './types';
+  import type { RecordChild, RecordRead, RecordTeacher } from './types';
 
   type Props = {
     api: ApiClient;
     schoolId: string | null;
+    isSchoolAdmin?: boolean;
   };
 
-  let { api, schoolId }: Props = $props();
+  let { api, schoolId, isSchoolAdmin = false }: Props = $props();
   const service = $derived(new RecordsService(api));
   let records = $state.raw<RecordRead[]>([]);
   let children = $state.raw<RecordChild[]>([]);
+  let teachers = $state.raw<RecordTeacher[]>([]);
   let loading = $state(false);
   let errorMessage = $state<string | null>(null);
   let requestVersion = 0;
 
   const childNames = $derived(
     new Map(children.map((child) => [child.id, child.display_name]))
+  );
+  const teacherNames = $derived(
+    new Map(
+      teachers.map((teacher) => [
+        teacher.id,
+        `${teacher.name}${teacher.is_active ? '' : '（利用停止中）'}`
+      ])
+    )
   );
 
   async function load(signal?: AbortSignal): Promise<void> {
@@ -31,18 +41,23 @@
     if (!selectedSchoolId) {
       records = [];
       children = [];
+      teachers = [];
       return;
     }
     loading = true;
     errorMessage = null;
     try {
-      const [nextChildren, nextRecords] = await Promise.all([
+      const [nextChildren, nextRecords, nextTeachers] = await Promise.all([
         service.listChildren(selectedSchoolId, signal),
-        service.listPending(selectedSchoolId, signal)
+        service.listPending(selectedSchoolId, signal),
+        isSchoolAdmin
+          ? service.listTeachers(selectedSchoolId, signal)
+          : Promise.resolve([])
       ]);
       if (version !== requestVersion) return;
       children = nextChildren;
       records = nextRecords;
+      teachers = nextTeachers;
     } catch (error) {
       if (signal?.aborted || version !== requestVersion) return;
       errorMessage =
@@ -54,7 +69,9 @@
 
   $effect(() => {
     const currentSchool = schoolId;
+    const currentAdminAccess = isSchoolAdmin;
     void currentSchool;
+    void currentAdminAccess;
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
@@ -66,6 +83,12 @@
     <h2 id="review-queue-heading">レビュー待ち日誌</h2>
     <p>内容を確認してから、保護者への配信を承認してください。</p>
   </header>
+
+  {#if !isSchoolAdmin}
+    <Notice tone="info" title="自分の担当分を表示しています">
+      <p>ほかの先生から引き継いだ日誌も、ここへ自動的に追加されます。</p>
+    </Notice>
+  {/if}
 
   <div class="records-toolbar">
     <StatusBadge
@@ -113,6 +136,10 @@
             <p class="records-meta">
               発生: {formatDateTime(record.occurred_at)}・信頼度
               {Math.round(record.confidence * 100)}%
+              {#if isSchoolAdmin}
+                ・担当: {teacherNames.get(record.teacher_id) ??
+                  '担当先生を確認できません'}
+              {/if}
             </p>
             <p>{record.summary}</p>
             <a class="records-link" href={resolve(recordDetailPath(record.id))}

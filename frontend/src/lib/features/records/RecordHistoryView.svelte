@@ -18,7 +18,12 @@
   } from './format';
   import './records.css';
   import { RecordsService } from './service';
-  import type { RecordChild, RecordHistoryFilters, RecordRead } from './types';
+  import type {
+    RecordChild,
+    RecordHistoryFilters,
+    RecordRead,
+    RecordTeacher
+  } from './types';
 
   type Props = {
     api: ApiClient;
@@ -30,6 +35,7 @@
   const service = $derived(new RecordsService(api));
   let records = $state.raw<RecordRead[]>([]);
   let children = $state.raw<RecordChild[]>([]);
+  let teachers = $state.raw<RecordTeacher[]>([]);
   let search = $state('');
   let childId = $state('');
   let status = $state<RecordStatus | ''>('');
@@ -45,6 +51,14 @@
 
   const childNames = $derived(
     new Map(children.map((child) => [child.id, child.display_name]))
+  );
+  const teacherNames = $derived(
+    new Map(
+      teachers.map((teacher) => [
+        teacher.id,
+        `${teacher.name}${teacher.is_active ? '' : '（利用停止中）'}`
+      ])
+    )
   );
 
   function currentFilters(): RecordHistoryFilters {
@@ -68,19 +82,24 @@
     if (!selectedSchoolId) {
       records = [];
       children = [];
+      teachers = [];
       return;
     }
     loading = true;
     errorMessage = null;
     successMessage = null;
     try {
-      const [nextChildren, nextRecords] = await Promise.all([
+      const [nextChildren, nextRecords, nextTeachers] = await Promise.all([
         service.listChildren(selectedSchoolId, signal),
-        service.listHistory(selectedSchoolId, filters, signal)
+        service.listHistory(selectedSchoolId, filters, signal),
+        isSchoolAdmin
+          ? service.listTeachers(selectedSchoolId, signal)
+          : Promise.resolve([])
       ]);
       if (version !== requestVersion) return;
       children = nextChildren;
       records = nextRecords;
+      teachers = nextTeachers;
     } catch (error) {
       if (signal?.aborted || version !== requestVersion) return;
       errorMessage =
@@ -140,6 +159,12 @@
     <h2 id="record-history-heading">記録履歴</h2>
     <p>レビュー待ち、承認済み、却下、配信済みの日誌を検索できます。</p>
   </header>
+
+  {#if !isSchoolAdmin}
+    <Notice tone="info" title="自分の担当記録を表示しています">
+      <p>一般の先生は、自分が担当した記録だけを検索できます。</p>
+    </Notice>
+  {/if}
 
   <form
     class="records-card records-form"
@@ -274,6 +299,10 @@
               発生: {formatDateTime(record.occurred_at)}{record.reviewed_at
                 ? `・確認: ${formatDateTime(record.reviewed_at)}`
                 : ''}
+              {#if isSchoolAdmin}
+                ・担当: {teacherNames.get(record.teacher_id) ??
+                  '担当先生を確認できません'}
+              {/if}
             </p>
             <p>{record.summary}</p>
             {#if record.conversation_prompt}<p>

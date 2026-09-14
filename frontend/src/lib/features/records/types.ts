@@ -35,6 +35,10 @@ export interface RecordReviewInput {
   scheduled_for?: string;
 }
 
+export interface RecordAssigneeInput {
+  teacher_id: string;
+}
+
 export interface RecordHistoryFilters {
   search?: string;
   childId?: string;

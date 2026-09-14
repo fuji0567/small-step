@@ -78,6 +78,7 @@ from app.schemas import (
     NotificationReschedule,
     NotificationSent,
     NotionSyncRead,
+    RecordAssigneeUpdate,
     RecordCreate,
     RecordRead,
     RecordReview,
@@ -109,6 +110,7 @@ AUDIT_EVENT_LABELS = {
     AuditEventAction.guardian_line_unlinked: "保護者LINEの連携を解除",
     AuditEventAction.guardian_archive_issued: "配信アーカイブURLを発行",
     AuditEventAction.guardian_archive_revoked: "配信アーカイブURLを無効化",
+    AuditEventAction.record_reassigned: "記録の担当先生を変更",
     AuditEventAction.record_approved: "記録を承認",
     AuditEventAction.record_rejected: "記録を却下",
     AuditEventAction.notification_retry_scheduled: "LINE通知の再送を予約",
@@ -159,6 +161,15 @@ def require_entity(db: Session, model: type, entity_id: str, label: str):
     if entity is None:
         raise HTTPException(status_code=404, detail=f"{label} not found")
     return entity
+
+
+def require_record_for_update(db: Session, record_id: str) -> Record:
+    """Lock a record while changing its review state or assignee."""
+
+    record = db.scalar(select(Record).where(Record.id == record_id).with_for_update())
+    if record is None:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return record
 
 
 def require_active_child_for_school(db: Session, child_id: str, school_id: str) -> Child:
@@ -2039,6 +2050,47 @@ def get_record(
     return record
 
 
+@router.patch("/records/{record_id}/assignee", response_model=RecordRead, tags=["records"])
+def change_record_assignee(
+    record_id: str,
+    payload: RecordAssigneeUpdate,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> Record:
+    """Hand a pending record to another active teacher in the same school."""
+
+    record = require_record_for_update(db, record_id)
+    assert_school_access(current_teacher, record.school_id)
+    assert_school_admin(current_teacher)
+    if record.status != RecordStatus.pending_review:
+        raise HTTPException(status_code=409, detail="Only pending records can be reassigned")
+
+    next_teacher = db.scalar(
+        select(Teacher).where(
+            Teacher.id == as_id(payload.teacher_id),
+            Teacher.school_id == record.school_id,
+        )
+    )
+    if next_teacher is None:
+        raise HTTPException(status_code=422, detail="Teacher does not belong to this school")
+    if not next_teacher.is_active:
+        raise HTTPException(status_code=409, detail="Disabled teachers cannot receive records")
+    if next_teacher.id == record.teacher_id:
+        raise HTTPException(status_code=409, detail="The teacher is already assigned to this record")
+
+    record.teacher_id = next_teacher.id
+    add_audit_event(
+        db,
+        school_id=record.school_id,
+        action=AuditEventAction.record_reassigned,
+        target_type="record",
+        current_teacher=current_teacher,
+    )
+    db.commit()
+    db.refresh(record)
+    return record
+
+
 @router.post("/records/{record_id}/approve", response_model=RecordRead, tags=["records"])
 def approve_record(
     record_id: str,
@@ -2047,7 +2099,7 @@ def approve_record(
     current_teacher: CurrentTeacher = Depends(get_current_teacher),
     db: Session = Depends(get_db),
 ) -> Record:
-    record = require_entity(db, Record, record_id, "Record")
+    record = require_record_for_update(db, record_id)
     assert_record_access(current_teacher, record)
     if record.status != RecordStatus.pending_review:
         raise HTTPException(status_code=409, detail="Only pending records can be approved")
@@ -2106,7 +2158,7 @@ def reject_record(
     current_teacher: CurrentTeacher = Depends(get_current_teacher),
     db: Session = Depends(get_db),
 ) -> Record:
-    record = require_entity(db, Record, record_id, "Record")
+    record = require_record_for_update(db, record_id)
     assert_record_access(current_teacher, record)
     if record.status != RecordStatus.pending_review:
         raise HTTPException(status_code=409, detail="Only pending records can be rejected")

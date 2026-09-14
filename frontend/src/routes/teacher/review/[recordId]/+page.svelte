@@ -17,5 +17,8 @@
   api={shell.api}
   schoolId={shell.schools.schoolId}
   {recordId}
+  isSchoolAdmin={shell.isSchoolAdmin}
   onNavigate={(path) => goto(resolve(path))}
+  onReassigned={() =>
+    shell.refresh(['records', 'recordHistory', 'auditEvents'])}
 />

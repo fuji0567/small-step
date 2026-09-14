@@ -47,6 +47,23 @@ describe('RecordsService', () => {
     );
   });
 
+  it('担当変更を専用URLへPATCHする', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response({}));
+    const service = new RecordsService(new ApiClient({ fetch: fetchMock }));
+
+    await service.reassign('record/id', { teacher_id: 'teacher-2' });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/v1/records/record%2Fid/assignee'
+    );
+    expect(fetchMock.mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ teacher_id: 'teacher-2' })
+      })
+    );
+  });
+
   it('履歴検索の空条件を除外し、CSVではlimitを送らない', () => {
     const filters: RecordHistoryFilters = {
       search: ' 成長 ',

@@ -21,19 +21,34 @@
   } from './format';
   import './records.css';
   import { RecordsService } from './service';
-  import type { RecordChild, RecordRead, RecordReviewInput } from './types';
+  import type {
+    RecordChild,
+    RecordRead,
+    RecordReviewInput,
+    RecordTeacher
+  } from './types';
 
   type Props = {
     api: ApiClient;
     schoolId: string | null;
     recordId: string;
+    isSchoolAdmin?: boolean;
     onNavigate: (path: Pathname) => void | Promise<void>;
+    onReassigned?: () => void | Promise<void>;
   };
 
-  let { api, schoolId, recordId, onNavigate }: Props = $props();
+  let {
+    api,
+    schoolId,
+    recordId,
+    isSchoolAdmin = false,
+    onNavigate,
+    onReassigned
+  }: Props = $props();
   const service = $derived(new RecordsService(api));
   let record = $state<RecordRead | null>(null);
   let children = $state.raw<RecordChild[]>([]);
+  let teachers = $state.raw<RecordTeacher[]>([]);
   let summary = $state('');
   let conversationPrompt = $state('');
   let childId = $state('');
@@ -41,9 +56,13 @@
   let scheduledFor = $state('');
   let loading = $state(false);
   let saving = $state(false);
+  let assigning = $state(false);
+  let assigneeId = $state('');
   let errorMessage = $state<string | null>(null);
+  let successMessage = $state<string | null>(null);
   let errorStatus = $state<number | null>(null);
   let confirmation = $state<'approve' | 'reject' | null>(null);
+  let assignmentConfirmation = $state(false);
   let requestVersion = 0;
 
   const isPending = $derived(record?.status === 'pending_review');
@@ -55,12 +74,25 @@
         scheduledEnabled)
   );
   const activeChildren = $derived(children.filter((child) => child.is_active));
+  const currentAssignee = $derived(
+    teachers.find((teacher) => teacher.id === record?.teacher_id)
+  );
+  const selectedAssignee = $derived(
+    teachers.find((teacher) => teacher.id === assigneeId)
+  );
+  const canReassign = $derived(
+    isSchoolAdmin &&
+      isPending &&
+      Boolean(selectedAssignee?.is_active) &&
+      assigneeId !== record?.teacher_id
+  );
 
   function applyRecord(nextRecord: RecordRead): void {
     record = nextRecord;
     summary = nextRecord.summary;
     conversationPrompt = nextRecord.conversation_prompt ?? '';
     childId = nextRecord.child_id ?? '';
+    assigneeId = nextRecord.teacher_id;
     scheduledEnabled = false;
     scheduledFor = localDateTimeValue();
   }
@@ -83,22 +115,58 @@
     const version = ++requestVersion;
     record = null;
     errorMessage = null;
+    successMessage = null;
     errorStatus = null;
     if (!selectedSchoolId) return;
     loading = true;
     try {
-      const [nextRecord, nextChildren] = await Promise.all([
+      const [nextRecord, nextChildren, nextTeachers] = await Promise.all([
         service.get(selectedRecordId, signal),
-        service.listChildren(selectedSchoolId, signal)
+        service.listChildren(selectedSchoolId, signal),
+        isSchoolAdmin
+          ? service.listTeachers(selectedSchoolId, signal)
+          : Promise.resolve([])
       ]);
       if (version !== requestVersion) return;
       children = nextChildren;
+      teachers = nextTeachers;
       applyRecord(nextRecord);
     } catch (error) {
       if (signal?.aborted || version !== requestVersion) return;
       loadError(error);
     } finally {
       if (version === requestVersion) loading = false;
+    }
+  }
+
+  async function reassignRecord(): Promise<void> {
+    if (!record || !canReassign) return;
+    assigning = true;
+    errorMessage = null;
+    successMessage = null;
+    try {
+      const nextRecord = await service.reassign(record.id, {
+        teacher_id: assigneeId
+      });
+      record = nextRecord;
+      assigneeId = nextRecord.teacher_id;
+      successMessage = `${selectedAssignee?.name ?? '選択した先生'}へ担当を引き継ぎました。`;
+    } catch (error) {
+      errorMessage =
+        error instanceof ApiHttpError && [409, 422].includes(error.status)
+          ? '担当を変更できませんでした。記録と先生の状態を再読み込みして確認してください。'
+          : error instanceof Error
+            ? error.message
+            : '担当を変更できませんでした。';
+      return;
+    } finally {
+      assigning = false;
+      assignmentConfirmation = false;
+    }
+    try {
+      await onReassigned?.();
+    } catch {
+      // Badge refresh is supplemental; the assignment itself has succeeded.
     }
   }
 
@@ -168,8 +236,10 @@
   $effect(() => {
     const currentRecord = recordId;
     const currentSchool = schoolId;
+    const currentAdminAccess = isSchoolAdmin;
     void currentRecord;
     void currentSchool;
+    void currentAdminAccess;
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
@@ -201,6 +271,11 @@
       <p>園を選択してから日誌を開いてください。</p>
     </Notice>
   {:else if record}
+    {#if !isSchoolAdmin}
+      <Notice tone="info" title="自分が担当する日誌です">
+        <p>一般の先生には、自分に割り当てられた日誌だけを表示します。</p>
+      </Notice>
+    {/if}
     {#if record.status !== 'pending_review'}
       <Notice tone="warning" title="この日誌は処理済みです">
         <p>
@@ -213,6 +288,11 @@
     {#if errorMessage}
       <Notice tone="error" title="操作を完了できませんでした">
         <p>{errorMessage}</p>
+      </Notice>
+    {/if}
+    {#if successMessage}
+      <Notice tone="success" title="担当を変更しました">
+        <p>{successMessage}</p>
       </Notice>
     {/if}
 
@@ -230,6 +310,56 @@
         )}%
       </p>
 
+      {#if isSchoolAdmin}
+        <section
+          class="records-assignment"
+          aria-labelledby="record-assignment-heading"
+        >
+          <div>
+            <h3 id="record-assignment-heading">担当の割り当て・引き継ぎ</h3>
+            <p class="records-meta">
+              現在の担当: {currentAssignee?.name ??
+                '担当先生を確認できません'}{currentAssignee &&
+              !currentAssignee.is_active
+                ? '（利用停止中）'
+                : ''}
+            </p>
+          </div>
+          {#if isPending}
+            <div class="records-assignment-controls">
+              <div class="records-field">
+                <label for="record-assignee">引き継ぎ先の先生</label>
+                <select
+                  id="record-assignee"
+                  class="records-control"
+                  bind:value={assigneeId}
+                  disabled={saving || assigning}
+                >
+                  {#each teachers as teacher (teacher.id)}
+                    <option value={teacher.id} disabled={!teacher.is_active}
+                      >{teacher.name}{teacher.is_active
+                        ? ''
+                        : '（利用停止中）'}</option
+                    >
+                  {/each}
+                </select>
+              </div>
+              <Button
+                variant="secondary"
+                onclick={() => (assignmentConfirmation = true)}
+                guide="選択した先生のレビュー待ち一覧へ、この日誌を移します。"
+                disabled={!canReassign || saving}
+                loading={assigning}>担当を変更</Button
+              >
+            </div>
+          {:else}
+            <p class="records-support">
+              承認・却下・配信済みの記録は、履歴を保つため担当を変更できません。
+            </p>
+          {/if}
+        </section>
+      {/if}
+
       <form class="records-form" onsubmit={(event) => event.preventDefault()}>
         <div class="records-field">
           <label for="record-child">園児</label>
@@ -237,7 +367,7 @@
             id="record-child"
             class="records-control"
             bind:value={childId}
-            disabled={!isPending || saving}
+            disabled={!isPending || saving || assigning}
           >
             <option value="">未選択</option>
             {#each activeChildren as child (child.id)}
@@ -252,7 +382,8 @@
             class="records-control"
             maxlength="4000"
             bind:value={summary}
-            disabled={!isPending || saving}></textarea>
+            disabled={!isPending || saving || assigning}
+          ></textarea>
           <span class="records-support">{summary.length}/4000文字</span>
         </div>
         <div class="records-field">
@@ -262,7 +393,8 @@
             class="records-control"
             maxlength="4000"
             bind:value={conversationPrompt}
-            disabled={!isPending || saving}></textarea>
+            disabled={!isPending || saving || assigning}
+          ></textarea>
         </div>
         {#if isPending}
           <div class="records-field">
@@ -270,7 +402,7 @@
               ><input
                 type="checkbox"
                 bind:checked={scheduledEnabled}
-                disabled={saving}
+                disabled={saving || assigning}
               /> 配信日時を指定する</label
             >
             {#if scheduledEnabled}
@@ -279,7 +411,7 @@
                 class="records-control"
                 type="datetime-local"
                 bind:value={scheduledFor}
-                disabled={saving}
+                disabled={saving || assigning}
               />
             {/if}
           </div>
@@ -287,13 +419,13 @@
             <Button
               onclick={() => (confirmation = 'approve')}
               guide="編集内容を保存し、保護者へのLINE通知を準備します。"
-              disabled={saving}>承認する</Button
+              disabled={saving || assigning}>承認する</Button
             >
             <Button
               variant="danger"
               onclick={() => (confirmation = 'reject')}
               guide="確認待ちから外します。保護者には通知されません。"
-              disabled={saving}>却下する</Button
+              disabled={saving || assigning}>却下する</Button
             >
           </div>
         {/if}
@@ -315,4 +447,14 @@
   busy={saving}
   onConfirm={() => finishReview(confirmation ?? 'approve')}
   onCancel={() => (confirmation = null)}
+/>
+
+<ConfirmDialog
+  bind:open={assignmentConfirmation}
+  title="担当を変更しますか？"
+  description={`${selectedAssignee?.name ?? '選択した先生'}のレビュー待ち一覧へ、この日誌を移します。日誌の本文は変更されません。`}
+  confirmLabel="担当を変更"
+  busy={assigning}
+  onConfirm={reassignRecord}
+  onCancel={() => (assignmentConfirmation = false)}
 />

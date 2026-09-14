@@ -9,4 +9,8 @@
   <title>レビュー待ち日誌 | Small Step</title>
 </svelte:head>
 
-<ReviewQueueView api={shell.api} schoolId={shell.schools.schoolId} />
+<ReviewQueueView
+  api={shell.api}
+  schoolId={shell.schools.schoolId}
+  isSchoolAdmin={shell.isSchoolAdmin}
+/>

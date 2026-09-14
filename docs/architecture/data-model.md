@@ -15,7 +15,7 @@ erDiagram
     School ||--o{ Child : "在籍"
     School ||--o{ EdgeDevice : "設置"
     School ||--o{ AuditEvent : "記録"
-    Teacher ||--o{ Record : "レビュー"
+    Teacher ||--o{ Record : "担当"
     Teacher ||--o| VoiceEnrollmentConsent : "声紋同意"
     Child ||--o{ Record : "対象"
     Child ||--o{ LineLinkInvitation : "招待コード"
@@ -53,6 +53,7 @@ erDiagram
 stateDiagram-v2
     direction LR
     [*] --> pending_review: エッジ処理 / 手入力で作成
+    pending_review --> pending_review: 管理者が担当変更
     pending_review --> approved: 先生が承認（notifications を作成）
     pending_review --> rejected: 先生が却下
     approved --> dispatched: LINE 送信完了
@@ -103,11 +104,11 @@ stateDiagram-v2
 ## 監査イベント
 
 `audit_events` は「誰が」「いつ」「どの種類の操作を」「どの種別の対象に」行ったかだけを残します。
-本文・園児名・トークン・音声は入りません。記録される操作は次の 24 種類です。
+本文・園児名・トークン・音声は入りません。記録される操作は次の 25 種類です。
 
 | 分類 | `action` |
 | --- | --- |
-| 記録 | `record_approved`, `record_rejected`, `manual_record_created`, `record_history_exported` |
+| 記録 | `record_reassigned`, `record_approved`, `record_rejected`, `manual_record_created`, `record_history_exported` |
 | 通知 | `notification_retry_scheduled`, `notification_cancelled`, `notification_rescheduled` |
 | 保護者連携 | `line_link_invitation_issued`, `guardian_line_linked`, `guardian_line_unlinked` |
 | アーカイブ | `guardian_archive_issued`, `guardian_archive_revoked` |

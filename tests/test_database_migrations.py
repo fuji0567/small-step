@@ -38,7 +38,7 @@ def test_initial_migration_creates_the_current_schema(tmp_path):
         "worker_heartbeats",
     } <= tables
     assert {"detected_speaker_count", "used_low_volume_retry", "candidate_category"} <= columns
-    assert migration_revision(database_url) == "0019_cloud_audio_candidate_category"
+    assert migration_revision(database_url) == "0020_record_reassignment_audit"
 
 
 def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_path):
@@ -52,4 +52,4 @@ def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_pat
     message = prepare_database(database_url)
 
     assert "登録しました" in message
-    assert migration_revision(database_url) == "0019_cloud_audio_candidate_category"
+    assert migration_revision(database_url) == "0020_record_reassignment_audit"

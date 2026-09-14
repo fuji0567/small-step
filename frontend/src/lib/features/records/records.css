@@ -63,6 +63,25 @@
   justify-content: space-between;
 }
 
+.records-assignment {
+  display: grid;
+  gap: var(--ss-space-2);
+  border-block: 2px solid var(--ss-color-border);
+  padding-block: var(--ss-space-2);
+}
+
+.records-assignment h3,
+.records-assignment p {
+  margin: 0;
+}
+
+.records-assignment-controls {
+  display: grid;
+  grid-template-columns: minmax(14rem, 1fr) auto;
+  align-items: end;
+  gap: var(--ss-space-2);
+}
+
 .records-link {
   color: var(--ss-color-action-hover);
   font-weight: var(--ss-font-weight-bold);
@@ -130,5 +149,9 @@ textarea.records-control {
   .records-card-header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .records-assignment-controls {
+    grid-template-columns: 1fr;
   }
 }

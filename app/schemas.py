@@ -310,6 +310,12 @@ class RecordReview(BaseModel):
     scheduled_for: datetime | None = None
 
 
+class RecordAssigneeUpdate(BaseModel):
+    """Assign a pending record to another active teacher in the same school."""
+
+    teacher_id: UUID
+
+
 class RecordRead(APIModel):
     id: UUID
     school_id: UUID

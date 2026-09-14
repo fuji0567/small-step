@@ -34,6 +34,7 @@ export const AUDIT_ACTION_LABELS: Record<AuditEventAction, string> = {
   guardian_line_unlinked: '保護者LINEの連携を解除',
   guardian_archive_issued: '配信アーカイブURLを発行',
   guardian_archive_revoked: '配信アーカイブURLを無効化',
+  record_reassigned: '記録の担当先生を変更',
   record_approved: '記録を承認',
   record_rejected: '記録を却下',
   notification_retry_scheduled: 'LINE通知の再送を予約',
