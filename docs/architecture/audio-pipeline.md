@@ -28,27 +28,29 @@ flowchart LR
     REC --> INBOX[("data/edge-audio-inbox")]
     INBOX --> WATCH["watch_edge_audio.py"]
     WATCH --> TRANS["faster-whisper<br/>文字起こし"]
-    TRANS --> DIAR["app/speaker_diarization.py<br/>話者分離"]
-    DIAR --> LLM["ローカルLLM<br/>匿名化と要約"]
-    LLM --> POST["POST /api/v1/edge/records"]
-    POST --> DEL["音声ファイルを削除"]
+    TRANS --> LLM["ローカルLLM<br/>匿名化と要約"]
+    LLM --> DEL["音声ファイルを削除<br/>（成否にかかわらず）"]
+    DEL --> POST["POST /api/v1/edge/records"]
 ```
+
+話者分離（`app/speaker_diarization.py`）はこの処理経路に含まれず、`scripts/diarize_edge_audio.py` で単体確認する機能です。
 
 | ステップ | 実装 | 補足 |
 | --- | --- | --- |
 | 録音 | `app/edge_recorder.py` | `EDGE_AUDIO_RECORD_CHUNK_SECONDS`（既定 30 秒）で分割 |
 | 監視 | `scripts/watch_edge_audio.py` | `EDGE_AUDIO_WATCH_POLL_SECONDS` ごとに走査。書き込み途中を避けるため `EDGE_AUDIO_WATCH_MIN_AGE_SECONDS` を待つ |
 | 文字起こし | `app/edge_audio.py` | faster-whisper。既定は `small` / `cpu` / `int8` |
-| 話者分離 | `app/speaker_diarization.py` | pyannote。ラベルは `speaker_01` 形式の一時 ID のみ |
 | 匿名化 | `app/edge_audio.py` → ローカル LLM | OpenAI 互換 API。園児名などを含まない候補文を生成 |
 | 送信 | `POST /edge/records` | 端末 APIキーで認証。本文・種別・信頼度・発生時刻を送る |
-| 後始末 | `EDGE_AUDIO_DELETE_AFTER_PROCESSING` | 既定 `true`。処理済みの音声を削除 |
+| 後始末 | `EDGE_AUDIO_DELETE_AFTER_PROCESSING` | 既定 `true`。文字起こし・要約の成否にかかわらず、API へ送る前に音声を削除 |
 
 ### 再試行
 
-送信や処理に失敗した音声は、指数バックオフで再試行します
+ローカル処理モードでは再試行しません。既定では処理を始めた音声を削除するため、失敗した音声は残りません。
+
+クラウド処理モードでアップロードに失敗した音声は、端末のインボックスに残したまま指数バックオフで再送します
 （`EDGE_AUDIO_RETRY_INITIAL_SECONDS` の 10 秒から `EDGE_AUDIO_RETRY_MAX_SECONDS` の 300 秒まで）。
-再試行中もファイルはインボックスに留まり、成功して初めて削除されます。
+API が受け付けた応答を確認して初めて削除されます。
 
 ### LLM の外部送信ガード
 
@@ -67,18 +69,22 @@ flowchart LR
 sequenceDiagram
     participant Edge as エッジ端末
     participant API as FastAPI
+    participant DB as データベース
     participant Store as 短命ジョブ保管
     participant GPU as gpu-worker（VRT）
 
     Edge->>API: POST /edge/audio-jobs（音声 + X-Edge-Upload-Id）
     API->>Store: ランダムキーで保存（元ファイル名は破棄）
+    API->>DB: cloud_audio_jobs に queued で登録
     API-->>Edge: job_id / status=queued
-    GPU->>API: ジョブ要求（claim_token で排他）
+    GPU->>DB: ジョブを取得（claim_token で排他）
     GPU->>Store: 音声を取得して文字起こし・匿名化
-    GPU->>API: 記録を作成して完了報告
-    API->>Store: 音声を削除
+    GPU->>DB: pending_review の記録を作成し completed / failed に更新
+    GPU->>Store: 成否にかかわらず音声を削除
     Note over API,Store: 成否にかかわらず保持期限（既定 15 分）で失効
 ```
+
+GPU ワーカーは API を呼ばず、API と同じデータベースとジョブ保管ディレクトリを直接使います。
 
 | 仕組み | 実装 | 目的 |
 | --- | --- | --- |
@@ -119,10 +125,15 @@ sequenceDiagram
 ## MCP サーバー
 
 `app/mcp_server.py` は、公開 API ではなくマイクや GPU ワーカーの隣で動かすローカル専用サーバーです。
-録音・文字起こし・記録送信といった操作を MCP のツールとして公開し、
-手元のエージェントから園内パイプラインを操作できるようにします。
+公開するツールは次の 3 つだけで、録音や LINE 送信のツールはありません。
 
-待ち受けアドレスは検証され、ローカルネットワーク外へは公開されない前提です。
+| ツール | 内容 |
+| --- | --- |
+| `edge_audio_status` | 秘密情報を返さず、設定の準備状況だけを返す |
+| `analyze_audio_file` | インボックス内の音声を匿名化済み候補へ変換する。API へは保存しない |
+| `submit_analyzed_audio_file` | 匿名化済み候補を `POST /edge/records` で承認待ち記録として登録する |
+
+既定は標準入出力で起動します。`--streamable-http` を指定した場合、`--host` が `localhost` またはループバック IP でなければ起動を止めます。
 
 ---
 
