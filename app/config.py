@@ -84,6 +84,14 @@ class Settings(BaseSettings):
     )
     database_backup_worker_poll_seconds: float = Field(default=300.0, ge=30.0, le=3_600.0)
     database_backup_retention_count: int = Field(default=0, ge=0, le=365)
+    database_backup_offsite_enabled: bool = False
+    database_backup_age_recipient: str | None = None
+    database_backup_s3_bucket: str | None = None
+    database_backup_s3_prefix: str = "small-step/database"
+    database_backup_s3_endpoint_url: str | None = None
+    database_backup_s3_region: str | None = None
+    database_backup_s3_sse: Literal["AES256", "aws:kms", "none"] = "AES256"
+    database_backup_s3_kms_key_id: str | None = None
 
     @model_validator(mode="after")
     def reject_unsafe_production_configuration(self) -> "Settings":
@@ -93,6 +101,23 @@ class Settings(BaseSettings):
             raise ValueError(
                 "WORKER_HEARTBEAT_STALE_SECONDS must be greater than WORKER_HEARTBEAT_INTERVAL_SECONDS"
             )
+        if self.database_backup_offsite_enabled:
+            if not self.database_backup_age_recipient or not self.database_backup_s3_bucket:
+                raise ValueError(
+                    "Off-site backup requires DATABASE_BACKUP_AGE_RECIPIENT and "
+                    "DATABASE_BACKUP_S3_BUCKET"
+                )
+            if self.database_backup_s3_endpoint_url:
+                endpoint_url = urlparse(self.database_backup_s3_endpoint_url)
+                if endpoint_url.scheme != "https" or not endpoint_url.netloc:
+                    raise ValueError("Off-site backup S3 endpoint must use HTTPS")
+            if (
+                self.database_backup_s3_sse == "aws:kms"
+                and not self.database_backup_s3_kms_key_id
+            ):
+                raise ValueError(
+                    "aws:kms backup encryption requires DATABASE_BACKUP_S3_KMS_KEY_ID"
+                )
         if self.app_env != "production":
             return self
 

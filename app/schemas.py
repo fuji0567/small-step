@@ -283,6 +283,7 @@ class CloudAudioJobRead(APIModel):
     attempts: int
     detected_speaker_count: int | None
     used_low_volume_retry: bool | None
+    candidate_category: RecordCategory | None
     record_id: UUID | None
     queued_at: datetime
     processing_started_at: datetime | None

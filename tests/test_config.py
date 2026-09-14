@@ -74,3 +74,24 @@ def test_database_backup_schedule_rejects_invalid_settings():
 
     with pytest.raises(ValidationError):
         Settings(database_backup_retention_count=-1)
+
+
+def test_offsite_backup_requires_public_key_bucket_and_secure_endpoint():
+    with pytest.raises(ValidationError, match="AGE_RECIPIENT"):
+        Settings(database_backup_offsite_enabled=True)
+
+    with pytest.raises(ValidationError, match="must use HTTPS"):
+        Settings(
+            database_backup_offsite_enabled=True,
+            database_backup_age_recipient="age1examplepublicrecipient",
+            database_backup_s3_bucket="small-step-backups",
+            database_backup_s3_endpoint_url="http://storage.example.test",
+        )
+
+    with pytest.raises(ValidationError, match="KMS_KEY_ID"):
+        Settings(
+            database_backup_offsite_enabled=True,
+            database_backup_age_recipient="age1examplepublicrecipient",
+            database_backup_s3_bucket="small-step-backups",
+            database_backup_s3_sse="aws:kms",
+        )

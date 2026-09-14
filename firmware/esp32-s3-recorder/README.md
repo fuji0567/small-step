@@ -7,7 +7,8 @@ ESP32-S3とEV_INMP621-FXのPDMマイクで30秒ごとの音声を録音し、Sma
 - PDMマイクの左右スロットを読み、信号がある側を自動選択する
 - 音量がしきい値未満の区間は端末内で破棄し、VRTへ送らない
 - 音声をPSRAMに置き、送信成功時は端末へ保存しない
-- 通信失敗時だけ1件をSPIFFSへ保存し、同じアップロードIDで再送する
+- 通信切断・混雑・サーバー障害時だけ1件をSPIFFSへ保存し、同じアップロードIDで再送する
+- 無効な端末キーや設定不備でサーバーに拒否された音声は、安全のため端末から削除して次の録音へ進む
 - 待機音声を送信できるまで新しい録音を止め、古い音声を上書きしない
 - 60秒ごとに、音声を含まない端末の死活通知を送る
 
@@ -67,7 +68,12 @@ idf.py build
 idf.py -p /dev/cu.usbmodemXXXX flash monitor
 ```
 
-`Wi-Fi connected`、`Heartbeat sent`、`Audio upload HTTP status: 201`の順に出ればVRTへの送信成功です。終了は`Control+]`です。
+起動直後にPSRAM容量、再送領域、PDMのGPIOを自己診断します。`Startup diagnostics passed`、
+`Wi-Fi connected`、`Heartbeat sent`、`Audio upload HTTP status: 201`の順に出れば、録音領域と
+VRTへの送信は正常です。容量や配線設定が不正な場合は録音を始めず停止するため、音声が失われ続ける状態を
+避けられます。終了は`Control+]`です。
+
+通信切断、HTTP `408`・`425`・`429`、HTTP `5xx`は一時障害として待避音声を再送します。その他のHTTP `4xx`は、端末キー・公開URL・園児IDなどの設定不備として扱います。その音声を再送し続けても成功しないため端末から削除し、`Recording rejected and discarded; check device configuration`を表示して次の録音へ進みます。この表示が出た場合は、先生画面で端末が有効かを確認し、`main/secrets.h`を修正して再書き込みしてください。
 
 最初は静かな部屋と普通の会話をそれぞれ30秒録音し、ログのRMS値を比べます。普通の会話まで`Quiet chunk discarded`になる場合は、`main/device_config.h`の`SMALL_STEP_SPEECH_RMS_THRESHOLD`を下げます。
 
@@ -77,6 +83,7 @@ idf.py -p /dev/cu.usbmodemXXXX flash monitor
 - GPIO 4・5が実機で使用可能か
 - 声量差、雑音、複数話者を含む音声のRMSしきい値
 - Wi-Fi切断後に待避した1件が、再接続後に一度だけ登録されること
+- 無効な端末キーで拒否された録音が端末に残らず、設定修正後に次の録音を送れること
 - Quick Tunnelから固定HTTPS URLへ変更後の再書き込み
 
 このファームウェアはMVP実験用です。電池、充電、筐体、物理的な録音停止スイッチを確定するまでは、園児がいる現場で連続運用しません。

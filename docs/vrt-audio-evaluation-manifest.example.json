@@ -1,28 +1,55 @@
 {
+  "acceptance": {
+    "min_processing_completion_rate": 1.0,
+    "min_speaker_count_accuracy": 0.8,
+    "min_candidate_accuracy": 0.9,
+    "min_category_accuracy": 0.9,
+    "max_p95_elapsed_seconds": 180,
+    "min_summary_approval_rate": 0.8,
+    "min_conversation_prompt_approval_rate": 0.8
+  },
   "cases": [
     {
       "case_id": "single-speaker-no-event",
       "audio_path": "../data/vrt-evaluation/single-speaker-no-event.wav",
       "expected_speaker_count": 1,
-      "expected_candidate": false
+      "expected_candidate": false,
+      "expected_category": null
     },
     {
       "case_id": "two-speakers-balanced",
       "audio_path": "../data/vrt-evaluation/two-speakers-balanced.wav",
       "expected_speaker_count": 2,
-      "expected_candidate": true
+      "expected_candidate": true,
+      "expected_category": "growth"
     },
     {
       "case_id": "two-speakers-volume-gap",
       "audio_path": "../data/vrt-evaluation/two-speakers-volume-gap.wav",
       "expected_speaker_count": 2,
-      "expected_candidate": true
+      "expected_candidate": true,
+      "expected_category": "growth"
     },
     {
       "case_id": "background-noise-no-event",
       "audio_path": "../data/vrt-evaluation/background-noise-no-event.wav",
       "expected_speaker_count": 0,
-      "expected_candidate": false
+      "expected_candidate": false,
+      "expected_category": null
+    },
+    {
+      "case_id": "two-speakers-injury",
+      "audio_path": "../data/vrt-evaluation/two-speakers-injury.wav",
+      "expected_speaker_count": 2,
+      "expected_candidate": true,
+      "expected_category": "injury"
+    },
+    {
+      "case_id": "two-speakers-overlap",
+      "audio_path": "../data/vrt-evaluation/two-speakers-overlap.wav",
+      "expected_speaker_count": 2,
+      "expected_candidate": true,
+      "expected_category": "growth"
     }
   ]
 }

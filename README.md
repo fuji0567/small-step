@@ -174,13 +174,22 @@ VRT上では、FastAPIを起動した後に別プロセスでGPUワーカーを�
 ```bash
 .venv313/bin/python scripts/evaluate_vrt_audio_samples.py \
   docs/vrt-audio-evaluation-manifest.example.json \
-  --api-url http://127.0.0.1:18000
+  --api-url http://127.0.0.1:18000 \
+  --interactive-review
 ```
 
 VRTの受付状態を一度確認してから、ケースを1件ずつ処理します。評価項目は検出話者数、
-記録候補の作成有無、音量差補正の使用有無、処理時間です。作成された候補は承認待ちで止まり、
-LINEへ自動送信されません。集計は既定で`data/vrt-audio-evaluation-report.json`へ保存します。
+記録候補の作成有無、成長／怪我の分類、誤検出・見逃し、音量差補正の使用有無、処理時間の
+中央値・95パーセンタイルです。`--interactive-review`を付けると候補作成後に処理を一時停止し、
+先生画面で最新候補を確認して、要約と会話のきっかけをそれぞれ合否入力できます。作成された候補は
+承認待ちで止まり、LINEへ自動送信されません。集計は既定で
+`data/vrt-audio-evaluation-report.json`へ保存します。
 レポートには音声、文字起こし、ファイルパス、人物名、ジョブID、記録IDを含めません。
+
+マニフェストの`acceptance`には、処理完了率、話者数・候補判定・分類・人手確認の最低精度と、処理時間の上限を
+設定できます。すべての基準を満たすと終了コード0、満たさない場合は終了コード2になります。
+生成文の基準を設定したマニフェストでは`--interactive-review`が必須です。`expected_category`は
+候補が必要なケースで`growth`または`injury`、候補が不要なケースでは`null`にします。
 
 話者数は生体情報や声紋ではなく、その音声内だけの匿名集計値として音声処理ジョブへ保存します。
 話者分離が無効な環境では人数が未計測となり、期待値との照合は不合格になります。
@@ -620,7 +629,7 @@ Supabaseのメールアドレス・パスワードで、管理者認証まで通
 
 ESP32-S3とEV_INMP621-FXを使う実機ファームウェア、配線、秘密値の設定、書き込み手順は
 [`firmware/esp32-s3-recorder/README.md`](firmware/esp32-s3-recorder/README.md) にあります。
-通信失敗時は同じアップロードIDで1件を再送するため、VRT側の重複防止と組み合わせて二重登録を避けます。
+通信切断・混雑・サーバー障害のときは同じアップロードIDで1件を再送するため、VRT側の重複防止と組み合わせて二重登録を避けます。無効な端末キーなど、再送しても直らないHTTP `4xx`では音声を端末から削除し、設定ミスで新しい録音が止まり続けないようにします。
 
 起動中の開発APIへ、端末の立場で匿名化済みのテスト候補を送るには次を使います。`【端末テスト】` と明示した記録が作成され、先生の承認待ちになります。
 
@@ -691,9 +700,10 @@ sudo docker compose \
   ps backup-worker
 ```
 
-`DATABASE_BACKUP_RETENTION_COUNT=0`は自動削除なしです。暗号化された外部保管先へのコピーと復元確認が
-運用化されるまでは`0`を維持してください。保持数を1以上へ変更した場合も、完全なアーカイブと
-チェックサムの組だけが古い順に削除対象となります。
+`DATABASE_BACKUP_RETENTION_COUNT=0`は自動削除なしです。後述の外部保管を有効にするまでは`0`を維持して
+ください。外部保管を有効にすると、日次ワーカーは「作成・検証、公開鍵暗号化、外部アップロード、外部の
+サイズと検証値の確認」のすべてに成功してから古いローカル世代を削除します。外部保存に失敗した日は、
+新しいローカルバックアップを残したまま再試行し、過去世代を削除しません。
 
 保存先は既定でホストの`./data/database-backups`です。変更するときだけ`.env`の
 `DATABASE_BACKUP_HOST_DIR`へ絶対パスを設定します。NVMeのモデルキャッシュ領域は、障害時に
@@ -740,6 +750,68 @@ sudo docker compose \
 それらを含むプロジェクト全体の復旧はSupabase側のバックアップ方針と合わせて管理してください。また、
 VRT内に1部あるだけではVRT障害への備えにならないため、作成後は暗号化された外部保管先へ複製します。
 復元リハーサルに成功したファイルだけを正式な世代として扱い、世代削除は外部保管を確認してから行います。
+
+### 暗号化した外部バックアップ
+
+VRTの故障や誤削除に備え、検証済みバックアップを`age`公開鍵で暗号化し、AWS S3またはS3互換の非公開
+バケットへ自動保存できます。VRTに置くのは暗号化用の公開Recipientだけです。復号用の秘密Identityは
+VRT、Git、チャットへ置かず、管理責任者がオフラインで保管してください。S3のアクセスキーには対象
+プレフィックスへのアップロードと確認に必要な最小権限だけを与え、削除権限は与えません。
+
+まず安全な別端末で鍵を作ります。表示された`age1...`だけをVRTで使い、`.agekey`ファイルはUSBメモリなど
+別の安全な場所へ二重保管します。
+
+```bash
+umask 077
+age-keygen -o small-step-backup.agekey
+age-keygen -y small-step-backup.agekey
+```
+
+VRTの`.env`へ次を設定します。AWS S3では`DATABASE_BACKUP_S3_ENDPOINT_URL`を空にします。S3互換サービスでは
+そのサービスのHTTPSエンドポイントを設定します。サービス側暗号化ヘッダーに非対応でも、`none`を選べば
+`age`による端末側暗号化は維持されます。
+
+```dotenv
+DATABASE_BACKUP_OFFSITE_ENABLED=true
+DATABASE_BACKUP_AGE_RECIPIENT=age1から始まる公開Recipient
+DATABASE_BACKUP_S3_BUCKET=非公開バケット名
+DATABASE_BACKUP_S3_PREFIX=small-step/database
+DATABASE_BACKUP_S3_ENDPOINT_URL=
+DATABASE_BACKUP_S3_REGION=ap-northeast-1
+DATABASE_BACKUP_S3_SSE=AES256
+DATABASE_BACKUP_S3_KMS_KEY_ID=
+AWS_ACCESS_KEY_ID=外部保存専用アクセスキー
+AWS_SECRET_ACCESS_KEY=外部保存専用シークレット
+```
+
+自動削除を有効にする前に、最新の1件を手動で外部保存して確認します。成功すると外部オブジェクトの
+サイズ、平文と暗号文のSHA-256、サービス側暗号化方式を確認し、個人情報を含まない確認状態を
+`.small-step-offsite-backup.json`へ保存します。
+
+```bash
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile operations \
+  build database-tools
+
+sudo docker compose \
+  -f compose.yaml \
+  -f compose.vrt.yaml \
+  --profile operations \
+  run --rm database-tools \
+  python scripts/upload_latest_database_backup.py
+```
+
+外部保存を有効にすると`operations-monitor`も、外部保存の欠落、最新世代との不一致、26時間以上の遅延を
+検知してLINEへ知らせます。外部から復元するときは暗号化オブジェクトを安全な作業端末へダウンロードし、
+保管していた秘密Identityで`age --decrypt`します。復号後は`pg_restore --list`と使い捨てDBへの復元
+リハーサルを行ってから、本番復旧を判断してください。
+
+Supabase AuthユーザーとSupabase Storageは、この`public`スキーマのバックアップ対象外です。現在Small Stepの
+音声はVRT内の短期保存で、Supabase Storageは使用していません。Authを含むプロジェクト全体の障害には、
+Supabase公式のDatabase Backupsとプロジェクト復旧手順を併用します。`auth`や`storage`スキーマをこの
+スクリプトで上書きすると認証を壊す可能性があるため、自動復元の対象にはしていません。
 
 ## VRTの障害をLINEで受け取る
 
@@ -792,11 +864,37 @@ sudo docker compose \
 ```
 
 最新バックアップが26時間を超えると警告になるため、日次ワーカーが停止した場合も検知できます。監視自体が
-VRT内で動く都合上、VRT全体の停止やインターネット回線断はLINEへ送れません。その検知は固定HTTPS URLへ
-切り替えた後、外部の稼働監視を追加します。
+VRT内で動く都合上、VRT全体の停止やインターネット回線断はLINEへ送れません。その範囲は次のGitHub Actions
+外部監視で補います。Quick Tunnelでも利用できますが、URLが変わるたびにGitHub Secretの更新が必要です。
 
-## 次に実装するもの
+## VRT全体の停止を外部から検知する
 
-1. 複数話者・雑音・声量差を含む匿名テストセットを収録し、一括評価レポートで精度を確認する
+`.github/workflows/external-vrt-monitor.yml`は、GitHub Actionsから5分ごとに公開中の
+`/api/v1/health`を3回確認します。APIとデータベースへ接続できない状態では専用のGitHub Issueを1件だけ作成し、
+復旧時にコメントを追加して閉じます。LINE用Secretも設定した場合は、最初の障害と復旧だけを運用責任者へ通知します。
+同じ障害を確認し続けてもIssueを増やさず、LINEには同じ再試行キーを使います。
+
+GitHubのリポジトリで `Settings` → `Secrets and variables` → `Actions` を開き、次を登録します。
+
+| 種類 | 名前 | 設定する値 |
+| --- | --- | --- |
+| Variable | `SMALL_STEP_EXTERNAL_MONITOR_ENABLED` | 準備完了後に `true` |
+| Secret | `SMALL_STEP_EXTERNAL_HEALTH_URL` | `https://公開URL/api/v1/health` |
+| Secret | `LINE_CHANNEL_ACCESS_TOKEN` | VRT内部監視と同じLINEチャネルアクセストークン |
+| Secret | `OPERATIONS_ALERT_LINE_USER_ID` | 通知を受ける運用責任者のLINEユーザーID |
+
+LINE用の2つのSecretを省略した場合もGitHub Issueによる障害記録は動きます。片方だけを設定してはいけません。
+Quick Tunnelを使っている間は再起動のたびにURLが変わるため、`SMALL_STEP_EXTERNAL_HEALTH_URL`も直ちに更新します。
+固定URLへ切り替えた後は、このSecretの変更だけで監視を継続できます。
+
+有効化前に `Actions` → `Small Step external VRT monitor` → `Run workflow` で手動実行します。
+正常時に `外部監視: 正常` と表示されたらVariableを `true` にします。監視先URL、LINEの秘密値、園児、音声は
+Issueや実行ログへ出力しません。GitHub Actionsの定期実行は数分遅れる場合があるため、これは即時フェイルオーバーではなく
+VRT全体の停止を知らせる補助監視です。GPU・LINEワーカー・バックアップの詳細はVRT内の`operations-monitor`が確認します。
+
+## コード反映後に残る実機・外部設定
+
+1. 複数話者・雑音・声量差を含む匿名テストセットを収録し、設定済みの合格基準を満たすまで調整する
 2. ESP32-S3録音端末を実機へ書き込み、PSRAM・マイク配線・無音しきい値・再送を確認する
-3. VRTのLINE障害通知を実機確認し、Quick Tunnelから固定HTTPS URLと外部監視へ切り替える
+3. GitHub Actionsの外部監視を実機確認し、Quick Tunnelから固定HTTPS URLへ切り替える
+4. 外部バックアップ用の非公開S3バケットと`age`鍵を準備し、外部保存と復号リハーサルを実施する

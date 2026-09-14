@@ -21,6 +21,7 @@ from app.database_backup import (
     backup_checksum_is_valid,
     latest_database_backup,
 )
+from app.offsite_backup import load_offsite_receipt, offsite_state_path
 
 
 ISSUE_MESSAGES = {
@@ -37,6 +38,10 @@ ISSUE_MESSAGES = {
     "backup_missing": "業務データのバックアップが見つかりません。",
     "backup_stale": "業務データのバックアップが所定時間更新されていません。",
     "backup_invalid": "最新バックアップのチェックサムを確認できません。",
+    "offsite_backup_missing": "暗号化した外部バックアップの保存記録がありません。",
+    "offsite_backup_outdated": "最新バックアップの外部保存が完了していません。",
+    "offsite_backup_stale": "外部バックアップが所定時間更新されていません。",
+    "offsite_backup_invalid": "外部バックアップの保存記録を確認できません。",
     "disk_space_low": "サーバーの空き容量がしきい値を下回っています。",
     "disk_space_unavailable": "サーバーの保存領域を確認できません。",
 }
@@ -177,6 +182,38 @@ def _check_disk_space(
     return issues
 
 
+def _check_offsite_backup(
+    *,
+    backup_dir: Path,
+    max_age: timedelta,
+    now: datetime,
+) -> list[OperationsIssue]:
+    state_path = offsite_state_path(backup_dir)
+    receipt = load_offsite_receipt(backup_dir)
+    if receipt is None:
+        return [
+            _issue("offsite_backup_invalid")
+            if state_path.exists()
+            else _issue("offsite_backup_missing")
+        ]
+
+    issues: list[OperationsIssue] = []
+    if now - receipt.uploaded_at > max_age:
+        issues.append(_issue("offsite_backup_stale"))
+    try:
+        archive = latest_database_backup(backup_dir)
+        checksum_parts = archive.with_suffix(".dump.sha256").read_text(encoding="ascii").split()
+        if (
+            archive.name != receipt.archive_name
+            or len(checksum_parts) != 2
+            or checksum_parts[0] != receipt.archive_sha256
+        ):
+            issues.append(_issue("offsite_backup_outdated"))
+    except (DatabaseBackupError, OSError, UnicodeError):
+        issues.append(_issue("offsite_backup_invalid"))
+    return issues
+
+
 def collect_operations_issues(
     *,
     api_readiness_url: str,
@@ -186,6 +223,7 @@ def collect_operations_issues(
     disk_paths: Sequence[Path],
     min_disk_free_bytes: int,
     timeout_seconds: float,
+    offsite_backup_required: bool = False,
     now: datetime | None = None,
     requester: Callable[..., httpx.Response] = httpx.get,
     disk_usage: Callable[[Path], object] = shutil.disk_usage,
@@ -208,6 +246,15 @@ def collect_operations_issues(
             backup_dir=backup_dir,
             max_age=backup_max_age,
             now=current_time,
+        ),
+        *(
+            _check_offsite_backup(
+                backup_dir=backup_dir,
+                max_age=backup_max_age,
+                now=current_time,
+            )
+            if offsite_backup_required
+            else []
         ),
         *_check_disk_space(
             disk_paths=disk_paths,

@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 import httpx
 
 from app.edge_audio import EdgeAudioError, audio_media_type, resolve_audio_path
-from app.models import CloudAudioJobStatus
+from app.models import CloudAudioJobStatus, RecordCategory
 
 
 class VrtPipelineVerificationError(RuntimeError):
@@ -29,6 +29,7 @@ class VrtPipelineVerificationResult:
     record_id: str | None
     detected_speaker_count: int | None = None
     used_low_volume_retry: bool | None = None
+    candidate_category: RecordCategory | None = None
 
     @property
     def created_candidate(self) -> bool:
@@ -120,6 +121,14 @@ def _job_result(payload: object) -> VrtPipelineVerificationResult:
         used_low_volume_retry = payload.get("used_low_volume_retry")
         if used_low_volume_retry is not None and not isinstance(used_low_volume_retry, bool):
             raise ValueError("invalid low-volume retry state")
+        raw_candidate_category = payload.get("candidate_category")
+        candidate_category = (
+            RecordCategory(raw_candidate_category)
+            if raw_candidate_category is not None
+            else None
+        )
+        if record_id is None and candidate_category is not None:
+            raise ValueError("non-candidate job cannot have a category")
     except (KeyError, TypeError, ValueError) as error:
         raise VrtPipelineVerificationError("VRTから不正な処理状態が返されました。") from error
     return VrtPipelineVerificationResult(
@@ -128,6 +137,7 @@ def _job_result(payload: object) -> VrtPipelineVerificationResult:
         record_id=record_id,
         detected_speaker_count=detected_speaker_count,
         used_low_volume_retry=used_low_volume_retry,
+        candidate_category=candidate_category,
     )
 
 

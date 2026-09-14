@@ -1939,7 +1939,7 @@ async function saveVoiceConsent() {
 async function revokeVoiceConsent() {
   const confirmed = await requestConfirmation({
     title: "声紋登録への同意を取り消しますか？",
-    message: "以後の声紋登録は開始できなくなります。すでに登録済みの声紋を削除する機能は、次の実装で追加します。",
+    message: "以後の声紋登録は開始できなくなります。現在は音声や声紋の特徴量を保存していないため、削除対象の声紋はありません。",
     confirmLabel: "同意を取り消す",
     confirmIcon: "close",
   });

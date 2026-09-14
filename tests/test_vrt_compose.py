@@ -88,6 +88,7 @@ def test_backup_worker_is_scheduled_hardened_and_uses_the_private_backup_mount()
     assert "Dockerfile.database-tools" in backup_worker
     assert "scripts/schedule_database_backups.py" in backup_worker
     assert "DATABASE_BACKUP_HOST_DIR" in backup_worker
+    assert "DATABASE_BACKUP_OFFSITE_ENABLED" in VRT_COMPOSE.read_text(encoding="utf-8")
     assert "no-new-privileges:true" in backup_worker
     assert "read_only: true" in backup_worker
     assert "restart: unless-stopped" in backup_worker

@@ -8,6 +8,7 @@
 
 #include "audio_recorder.h"
 #include "device_config.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_spiffs.h"
@@ -152,12 +153,22 @@ static void retry_pending_audio(void)
         vTaskDelay(pdMS_TO_TICKS(SMALL_STEP_RETRY_INTERVAL_SECONDS * 1000U));
         return;
     }
-    if (small_step_upload_wav_file(SMALL_STEP_PENDING_WAV_PATH, upload_id)) {
+    small_step_upload_result_t result = small_step_upload_wav_file(
+        SMALL_STEP_PENDING_WAV_PATH,
+        upload_id
+    );
+    if (result == SMALL_STEP_UPLOAD_ACCEPTED) {
         clear_pending();
         ESP_LOGI(TAG, "Pending recording accepted and deleted locally");
-    } else {
+    } else if (result == SMALL_STEP_UPLOAD_RETRYABLE) {
         ESP_LOGW(TAG, "Pending recording upload failed; retrying later");
         vTaskDelay(pdMS_TO_TICKS(SMALL_STEP_RETRY_INTERVAL_SECONDS * 1000U));
+    } else {
+        clear_pending();
+        ESP_LOGE(
+            TAG,
+            "Pending recording rejected and deleted locally; check device configuration"
+        );
     }
 }
 
@@ -192,6 +203,53 @@ static void initialize_storage(void)
     remove(SMALL_STEP_PENDING_ID_TEMP_PATH);
 }
 
+static void run_startup_diagnostics(void)
+{
+    const size_t required_audio_bytes =
+        SMALL_STEP_SAMPLE_RATE_HZ * SMALL_STEP_RECORD_SECONDS * sizeof(int16_t);
+    const size_t required_retry_bytes = required_audio_bytes + SMALL_STEP_WAV_HEADER_BYTES;
+    size_t psram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    size_t storage_total = 0U;
+    size_t storage_used = 0U;
+    esp_err_t storage_error = esp_spiffs_info("retry", &storage_total, &storage_used);
+
+    ESP_LOGI(
+        TAG,
+        "Startup diagnostics: PSRAM total=%u free=%u required=%u",
+        (unsigned int)psram_total,
+        (unsigned int)psram_free,
+        (unsigned int)required_audio_bytes
+    );
+    ESP_LOGI(
+        TAG,
+        "Startup diagnostics: retry storage total=%u used=%u required=%u",
+        (unsigned int)storage_total,
+        (unsigned int)storage_used,
+        (unsigned int)required_retry_bytes
+    );
+    ESP_LOGI(
+        TAG,
+        "Startup diagnostics: PDM CLK GPIO=%d DATA GPIO=%d",
+        SMALL_STEP_PDM_CLK_GPIO,
+        SMALL_STEP_PDM_DATA_GPIO
+    );
+
+    if (psram_total < required_audio_bytes || psram_free < required_audio_bytes) {
+        ESP_LOGE(TAG, "Startup diagnostics failed: recording buffer does not fit in PSRAM");
+        abort();
+    }
+    if (storage_error != ESP_OK || storage_total < required_retry_bytes) {
+        ESP_LOGE(TAG, "Startup diagnostics failed: retry storage is unavailable or too small");
+        abort();
+    }
+    if (SMALL_STEP_PDM_CLK_GPIO == SMALL_STEP_PDM_DATA_GPIO) {
+        ESP_LOGE(TAG, "Startup diagnostics failed: PDM clock and data GPIO must differ");
+        abort();
+    }
+    ESP_LOGI(TAG, "Startup diagnostics passed");
+}
+
 void app_main(void)
 {
     validate_configuration();
@@ -202,6 +260,7 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(nvs_error);
     initialize_storage();
+    run_startup_diagnostics();
     ESP_ERROR_CHECK(small_step_wifi_init());
     ESP_ERROR_CHECK(small_step_audio_init());
 
@@ -235,11 +294,20 @@ void app_main(void)
             continue;
         }
 
-        bool uploaded = small_step_wifi_wait(10000U)
-            && small_step_upload_pcm(audio.samples, audio.sample_count, upload_id);
-        if (uploaded) {
+        small_step_upload_result_t upload_result = SMALL_STEP_UPLOAD_RETRYABLE;
+        if (small_step_wifi_wait(10000U)) {
+            upload_result = small_step_upload_pcm(
+                audio.samples,
+                audio.sample_count,
+                upload_id
+            );
+        }
+        if (upload_result == SMALL_STEP_UPLOAD_ACCEPTED) {
             remove(SMALL_STEP_PENDING_ID_PATH);
             ESP_LOGI(TAG, "Recording accepted; no local audio retained");
+        } else if (upload_result == SMALL_STEP_UPLOAD_REJECTED) {
+            remove(SMALL_STEP_PENDING_ID_PATH);
+            ESP_LOGE(TAG, "Recording rejected and discarded; check device configuration");
         } else if (save_pending_audio(&audio)) {
             ESP_LOGW(TAG, "Upload failed; one recording saved for retry");
         } else {

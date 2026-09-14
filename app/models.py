@@ -176,6 +176,9 @@ class CloudAudioJob(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     detected_speaker_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     used_low_volume_retry: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    candidate_category: Mapped[RecordCategory | None] = mapped_column(
+        Enum(RecordCategory), nullable=True
+    )
     claim_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
     record_id: Mapped[str | None] = mapped_column(ForeignKey("records.id"), nullable=True, index=True)
     queued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)

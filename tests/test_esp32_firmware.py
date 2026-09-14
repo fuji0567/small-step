@@ -58,8 +58,70 @@ def test_esp32_requires_https_and_deduplicated_retry():
     assert 'strncmp(SMALL_STEP_API_BASE_URL, "https://"' in source
     assert "generate_upload_id(upload_id)" in source
     assert "save_upload_id(upload_id)" in source
-    assert "small_step_upload_wav_file(SMALL_STEP_PENDING_WAV_PATH, upload_id)" in source
+    assert re.search(
+        r"small_step_upload_wav_file\(\s*SMALL_STEP_PENDING_WAV_PATH,\s*upload_id\s*\)",
+        source,
+    )
     assert "small_step_audio_release(&audio)" in source
+
+
+def test_esp32_checks_psram_retry_storage_and_gpio_before_recording():
+    source = (FIRMWARE / "main" / "main.c").read_text(encoding="utf-8")
+
+    diagnostics = source.index("run_startup_diagnostics();")
+    audio_initialization = source.index("small_step_audio_init()")
+    assert diagnostics < audio_initialization
+    assert "heap_caps_get_total_size(MALLOC_CAP_SPIRAM)" in source
+    assert 'esp_spiffs_info("retry"' in source
+    assert "SMALL_STEP_PDM_CLK_GPIO == SMALL_STEP_PDM_DATA_GPIO" in source
+    assert 'ESP_LOGI(TAG, "Startup diagnostics passed")' in source
+
+
+def test_esp32_retries_only_transient_upload_failures(tmp_path):
+    compiler = shutil.which("cc")
+    if compiler is None:
+        pytest.skip("A C compiler is required for the portable upload policy test")
+    runner = tmp_path / "upload_policy_test.c"
+    binary = tmp_path / "upload_policy_test"
+    runner.write_text(
+        """
+#include <stdbool.h>
+#include "upload_policy.h"
+
+int main(void) {
+    if (small_step_classify_upload_status(false, 0) != SMALL_STEP_UPLOAD_RETRYABLE) return 1;
+    if (small_step_classify_upload_status(true, 201) != SMALL_STEP_UPLOAD_ACCEPTED) return 2;
+    if (small_step_classify_upload_status(true, 408) != SMALL_STEP_UPLOAD_RETRYABLE) return 3;
+    if (small_step_classify_upload_status(true, 425) != SMALL_STEP_UPLOAD_RETRYABLE) return 4;
+    if (small_step_classify_upload_status(true, 429) != SMALL_STEP_UPLOAD_RETRYABLE) return 5;
+    if (small_step_classify_upload_status(true, 503) != SMALL_STEP_UPLOAD_RETRYABLE) return 6;
+    if (small_step_classify_upload_status(true, 401) != SMALL_STEP_UPLOAD_REJECTED) return 7;
+    if (small_step_classify_upload_status(true, 403) != SMALL_STEP_UPLOAD_REJECTED) return 8;
+    if (small_step_classify_upload_status(true, 404) != SMALL_STEP_UPLOAD_REJECTED) return 9;
+    if (small_step_classify_upload_status(true, 413) != SMALL_STEP_UPLOAD_REJECTED) return 10;
+    if (small_step_classify_upload_status(true, 422) != SMALL_STEP_UPLOAD_REJECTED) return 11;
+    return 0;
+}
+""",
+        encoding="ascii",
+    )
+    subprocess.run(
+        [
+            compiler,
+            "-std=c11",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-I",
+            str(FIRMWARE / "main"),
+            str(runner),
+            str(FIRMWARE / "main" / "upload_policy.c"),
+            "-o",
+            str(binary),
+        ],
+        check=True,
+    )
+    subprocess.run([str(binary)], check=True)
 
 
 def test_esp32_wav_header_is_valid_pcm(tmp_path):

@@ -78,12 +78,12 @@ static bool write_wav_source(esp_http_client_handle_t client, wav_source_t *sour
         && write_all(client, source->memory, source->memory_size);
 }
 
-static bool upload_wav(wav_source_t *source, const char *upload_id)
+static small_step_upload_result_t upload_wav(wav_source_t *source, const char *upload_id)
 {
     char endpoint[320];
     if (!build_endpoint(endpoint, sizeof(endpoint), "/api/v1/edge/audio-jobs")) {
         ESP_LOGE(TAG, "API URL is too long");
-        return false;
+        return SMALL_STEP_UPLOAD_REJECTED;
     }
 
     char prefix[512];
@@ -108,14 +108,14 @@ static bool upload_wav(wav_source_t *source, const char *upload_id)
     if (prefix_length < 0 || audio_prefix_length < 0
         || (size_t)(prefix_length + audio_prefix_length) >= sizeof(prefix)) {
         ESP_LOGE(TAG, "Multipart metadata is too long");
-        return false;
+        return SMALL_STEP_UPLOAD_REJECTED;
     }
     prefix_length += audio_prefix_length;
 
     static const char suffix[] = "\r\n--" MULTIPART_BOUNDARY "--\r\n";
     size_t content_length = (size_t)prefix_length + source->wav_size + sizeof(suffix) - 1U;
     if (content_length > INT_MAX) {
-        return false;
+        return SMALL_STEP_UPLOAD_REJECTED;
     }
 
     esp_http_client_config_t config = {
@@ -126,7 +126,7 @@ static bool upload_wav(wav_source_t *source, const char *upload_id)
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (client == NULL) {
-        return false;
+        return SMALL_STEP_UPLOAD_RETRYABLE;
     }
 
     char content_type[96];
@@ -136,7 +136,7 @@ static bool upload_wav(wav_source_t *source, const char *upload_id)
     esp_http_client_set_header(client, "X-Edge-Api-Key", SMALL_STEP_EDGE_API_KEY);
     esp_http_client_set_header(client, "X-Edge-Upload-Id", upload_id);
 
-    bool accepted = false;
+    small_step_upload_result_t result = SMALL_STEP_UPLOAD_RETRYABLE;
     esp_err_t error = esp_http_client_open(client, (int)content_length);
     if (error == ESP_OK
         && write_all(client, (const uint8_t *)prefix, (size_t)prefix_length)
@@ -147,7 +147,7 @@ static bool upload_wav(wav_source_t *source, const char *upload_id)
         while (esp_http_client_read(client, (char *)response, sizeof(response)) > 0) {
         }
         int status = esp_http_client_get_status_code(client);
-        accepted = status >= 200 && status < 300;
+        result = small_step_classify_upload_status(true, status);
         ESP_LOGI(TAG, "Audio upload HTTP status: %d", status);
     } else {
         ESP_LOGW(TAG, "Audio upload connection failed: %s", esp_err_to_name(error));
@@ -155,7 +155,7 @@ static bool upload_wav(wav_source_t *source, const char *upload_id)
 
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
-    return accepted;
+    return result;
 }
 
 bool small_step_send_heartbeat(void)
@@ -182,14 +182,14 @@ bool small_step_send_heartbeat(void)
     return error == ESP_OK && status >= 200 && status < 300;
 }
 
-bool small_step_upload_pcm(
+small_step_upload_result_t small_step_upload_pcm(
     const int16_t *samples,
     size_t sample_count,
     const char *upload_id
 )
 {
     if (samples == NULL || sample_count == 0U || upload_id == NULL) {
-        return false;
+        return SMALL_STEP_UPLOAD_REJECTED;
     }
     wav_source_t source = {
         .memory = (const uint8_t *)samples,
@@ -200,20 +200,23 @@ bool small_step_upload_pcm(
     return upload_wav(&source, upload_id);
 }
 
-bool small_step_upload_wav_file(const char *path, const char *upload_id)
+small_step_upload_result_t small_step_upload_wav_file(
+    const char *path,
+    const char *upload_id
+)
 {
     FILE *file = fopen(path, "rb");
     if (file == NULL) {
-        return false;
+        return SMALL_STEP_UPLOAD_REJECTED;
     }
     if (fseek(file, 0L, SEEK_END) != 0) {
         fclose(file);
-        return false;
+        return SMALL_STEP_UPLOAD_REJECTED;
     }
     long file_size = ftell(file);
     if (file_size <= 0L) {
         fclose(file);
-        return false;
+        return SMALL_STEP_UPLOAD_REJECTED;
     }
     wav_source_t source = {
         .memory = NULL,
@@ -221,7 +224,7 @@ bool small_step_upload_wav_file(const char *path, const char *upload_id)
         .file = file,
         .wav_size = (size_t)file_size,
     };
-    bool accepted = upload_wav(&source, upload_id);
+    small_step_upload_result_t result = upload_wav(&source, upload_id);
     fclose(file);
-    return accepted;
+    return result;
 }

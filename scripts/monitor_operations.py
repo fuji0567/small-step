@@ -40,6 +40,7 @@ def run_monitor_once(*, settings: Settings, dry_run: bool = False) -> tuple[str,
         disk_paths=disk_paths,
         min_disk_free_bytes=int(settings.operations_min_disk_free_gb * 1024**3),
         timeout_seconds=settings.operations_check_timeout_seconds,
+        offsite_backup_required=settings.database_backup_offsite_enabled,
         now=now,
     )
     issue_codes = tuple(issue.code for issue in issues)

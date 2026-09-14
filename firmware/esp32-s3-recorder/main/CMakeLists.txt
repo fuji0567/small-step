@@ -7,6 +7,7 @@ idf_component_register(
         "main.c"
         "audio_recorder.c"
         "small_step_client.c"
+        "upload_policy.c"
         "wifi_connection.c"
         "wav.c"
     INCLUDE_DIRS "."

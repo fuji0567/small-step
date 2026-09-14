@@ -290,6 +290,7 @@ def process_next_cloud_audio_job(
                 record_id=record_id,
                 detected_speaker_count=analysis.detected_speaker_count,
                 used_low_volume_retry=analysis.used_low_volume_retry,
+                candidate_category=candidate.category if candidate.recordable else None,
                 claim_token=None,
                 completed_at=utc_now(),
             )

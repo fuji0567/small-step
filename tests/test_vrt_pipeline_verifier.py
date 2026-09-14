@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from app.models import CloudAudioJobStatus
+from app.models import CloudAudioJobStatus, RecordCategory
 from app.vrt_pipeline_verifier import (
     VrtPipelineVerificationError,
     VrtPipelineVerificationResult,
@@ -97,6 +97,7 @@ def test_verifier_uploads_anonymous_filename_and_waits_for_candidate(tmp_path):
                 "record_id": RECORD_ID if status == "completed" else None,
                 "detected_speaker_count": 2 if status == "completed" else None,
                 "used_low_volume_retry": status == "completed",
+                "candidate_category": "growth" if status == "completed" else None,
             },
         )
 
@@ -123,6 +124,7 @@ def test_verifier_uploads_anonymous_filename_and_waits_for_candidate(tmp_path):
     assert result.created_candidate is True
     assert result.detected_speaker_count == 2
     assert result.used_low_volume_retry is True
+    assert result.candidate_category == RecordCategory.growth
     assert statuses == [
         CloudAudioJobStatus.queued,
         CloudAudioJobStatus.processing,
@@ -155,6 +157,22 @@ def test_verifier_rejects_invalid_quality_metrics(tmp_path):
         ),
     )
 
+    with pytest.raises(VrtPipelineVerificationError, match="不正"):
+        verifier.upload(audio_path=audio, child_id=None)
+
+    verifier.client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                201,
+                json={
+                    "id": JOB_ID,
+                    "status": "completed",
+                    "record_id": RECORD_ID,
+                    "candidate_category": "unknown",
+                },
+            )
+        )
+    )
     with pytest.raises(VrtPipelineVerificationError, match="不正"):
         verifier.upload(audio_path=audio, child_id=None)
 

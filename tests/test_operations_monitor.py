@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -133,6 +134,50 @@ def test_collect_operations_issues_detects_stale_or_modified_backup(tmp_path):
     )
 
     assert {issue.code for issue in issues} == {"backup_invalid", "backup_stale"}
+
+
+def test_collect_operations_issues_detects_missing_and_outdated_offsite_backup(tmp_path):
+    def requester(url, **_kwargs):
+        return (
+            httpx.Response(200, json=healthy_readiness())
+            if url.endswith("/readiness")
+            else httpx.Response(200)
+        )
+
+    backup_dir = tmp_path / "backups"
+    write_backup(backup_dir)
+    required = {
+        "api_readiness_url": "http://api/readiness",
+        "vllm_health_url": "http://vllm/health",
+        "backup_dir": backup_dir,
+        "backup_max_age": timedelta(hours=26),
+        "disk_paths": [],
+        "min_disk_free_bytes": 10 * 1024**3,
+        "timeout_seconds": 3,
+        "offsite_backup_required": True,
+        "now": NOW,
+        "requester": requester,
+    }
+
+    missing = collect_operations_issues(**required)
+    assert {issue.code for issue in missing} == {"offsite_backup_missing"}
+
+    (backup_dir / ".small-step-offsite-backup.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "archive_name": "small-step-public-older.dump",
+                "archive_sha256": "a" * 64,
+                "object_key": "database/older.dump.age",
+                "encrypted_size_bytes": 123,
+                "encrypted_sha256": "b" * 64,
+                "uploaded_at": (NOW - timedelta(hours=1)).isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    outdated = collect_operations_issues(**required)
+    assert {issue.code for issue in outdated} == {"offsite_backup_outdated"}
 
 
 def test_notification_waits_repeats_and_recovers_without_duplicates():

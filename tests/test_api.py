@@ -1984,6 +1984,7 @@ def test_cloud_audio_job_is_opt_in_and_deletes_raw_audio_after_processing(tmp_pa
         assert completed.json()["status"] == "completed"
         assert completed.json()["detected_speaker_count"] == 2
         assert completed.json()["used_low_volume_retry"] is True
+        assert completed.json()["candidate_category"] == "growth"
         visible_jobs = client.get("/api/v1/audio-jobs", params={"school_id": school_id})
         assert visible_jobs.json()[0]["status"] == "completed"
         records = client.get(

@@ -119,6 +119,7 @@ services:
       OPERATIONS_MIN_DISK_FREE_GB: ${OPERATIONS_MIN_DISK_FREE_GB:-10}
       OPERATIONS_DISK_PATHS: /app/data,/backups
       OPERATIONS_MONITOR_STATE_PATH: /app/data/operations-monitor-state.json
+      DATABASE_BACKUP_OFFSITE_ENABLED: ${DATABASE_BACKUP_OFFSITE_ENABLED:-false}
     command: ["python", "scripts/monitor_operations.py", "--watch"]
     networks:
       - default

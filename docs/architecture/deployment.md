@@ -21,11 +21,14 @@ API イメージは小さいまま保てます。
 
 `database-tools`は一度だけ起動し、ホスト側に所有者だけが読めるバックアップを作るためrootで動きます。
 ルートファイルシステムは読み取り専用、権限昇格は禁止し、書き込み先を`/backups`と`/tmp`だけに限定します。
+外部退避を有効にした場合は、`age`公開鍵で暗号化してからS3互換の非公開バケットへ送ります。復号用の
+秘密鍵はコンテナにもVRTにも渡しません。
 
 | イメージ | インストールする extras |
 | --- | --- |
 | `Dockerfile` | `postgres` |
 | `Dockerfile.gpu` | `postgres`, `edge-audio`, `speaker-diarization` |
+| `Dockerfile.database-tools` | `postgres`, `backup-s3`（OSパッケージの`age`も使用） |
 
 ---
 
@@ -85,6 +88,9 @@ Qwenのモデルとコンパイルキャッシュは、既定でNVMe上の
 データベースバックアップはモデルキャッシュと分離し、既定でホストの
 `./data/database-backups`へ保存します。Compose内では`/backups`として見えます。
 バックアップには個人データが含まれるためGit管理せず、復元確認後に暗号化された外部保管先へ複製します。
+日次ワーカーは外部オブジェクトのサイズ、平文と暗号文の検証値、指定したサービス側暗号化を`HEAD`で
+確認した後だけ外部保存成功として記録します。外部送信だけ失敗した場合は新しいDBダンプを重複作成せず、
+最新の検証済み世代を次回の確認時に再送します。保持世代の削除は外部保存成功後だけ実行します。
 `restore-db`のデータ領域はtmpfsなので、コンテナを削除すると復元したデータも消えます。
 
 ### ヘルスチェック
@@ -167,15 +173,20 @@ SQLite の移行は起動時に自動適用されるため、事前準備は不�
 | `watch_edge_audio.py` | エッジ音声インボックスの監視（園内で常駐） |
 | `record_edge_audio.py` | マイクからの連続録音（園内で常駐） |
 | `monitor_operations.py --watch` | VRT内の障害監視と運用責任者へのLINE通知 |
-| `schedule_database_backups.py --watch` | 検証済みPostgreSQLバックアップの日次作成 |
+| `schedule_database_backups.py --watch` | 検証済みPostgreSQLバックアップの日次作成、公開鍵暗号化、外部退避 |
 
 残りは一度きりの管理コマンドです。
 
 `operations-monitor`は`monitoring`プロファイルで明示的に起動します。API停止中にも検知できるよう
 `depends_on`を持たず、Dockerソケットにもアクセスしません。APIの秘密情報を返さないreadiness、vLLMの
-health、バックアップのSHA-256、マウント済み領域の空き容量だけを確認します。監視状態には問題コード、
+health、バックアップのSHA-256、外部退避の完了状態、マウント済み領域の空き容量だけを確認します。監視状態には問題コード、
 時刻、LINEの再試行キーだけを専用ボリュームへ保存し、園児・音声・通知本文・接続先は含めません。
 バックアップを読める権限は持ちますが、業務DB、Supabase、話者分離の認証情報は渡しません。
+
+VRT自体が停止すると内部監視も止まるため、`.github/workflows/external-vrt-monitor.yml`がGitHub Actionsから
+公開HTTPS経由の`/api/v1/health`を確認します。外部監視はAPIとDBの到達性だけを扱い、障害ごとに1件のIssueを
+状態記録として使います。通知文とIssueには監視先URL、園児、音声、認証情報を含めません。LINE通知を有効にした場合は、
+Issue番号から決まる同一の再試行キーで初回障害を送り、復旧通知後にIssueを閉じます。
 
 ---
 
