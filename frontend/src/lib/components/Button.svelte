@@ -141,7 +141,12 @@
     border-radius: var(--ss-radius-medium, 0.5rem);
     padding: var(--ss-space-1, 0.5rem) var(--ss-space-2, 1rem);
     color: var(--ss-color-surface, #ffffff);
-    background: var(--ss-color-focus-outer, #000000);
+    background: rgb(0 0 0 / 88%);
+    background: color-mix(
+      in srgb,
+      var(--ss-color-focus-outer, #000000) 88%,
+      transparent
+    );
     font-family: var(--ss-font-sans, sans-serif);
     font-size: var(--ss-font-size-small, 0.875rem);
     font-weight: var(--ss-font-weight-regular, 400);
@@ -156,7 +161,12 @@
   }
 
   .ss-button-guide:not(.ss-button-guide--dismissed):hover
-    .ss-button-guide__content,
+    .ss-button-guide__content {
+    opacity: 1;
+    visibility: visible;
+    transition-delay: 600ms;
+  }
+
   .ss-button-guide:not(.ss-button-guide--dismissed):focus-within
     .ss-button-guide__content {
     opacity: 1;
@@ -260,7 +270,9 @@
 
   @media (prefers-reduced-motion: reduce) {
     .ss-button-guide__content {
-      transition: none;
+      transition:
+        opacity 0s linear,
+        visibility 0s linear 120ms;
     }
 
     .ss-button__spinner {

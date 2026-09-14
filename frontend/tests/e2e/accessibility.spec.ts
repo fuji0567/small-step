@@ -62,6 +62,9 @@ test('ボタンの補足ガイドをフォーカスとホバーで確認しEsc�
   await expect(guide).toBeHidden();
   await approveButton.focus();
   await expect(guide).toBeVisible();
+  expect(
+    await guide.evaluate((element) => getComputedStyle(element).backgroundColor)
+  ).toMatch(/0\.88|88%/);
   const guideBox = await guide.boundingBox();
   expect(guideBox).not.toBeNull();
   expect(guideBox!.x).toBeGreaterThanOrEqual(0);
@@ -78,6 +81,8 @@ test('ボタンの補足ガイドをフォーカスとホバーで確認しEsc�
   await approveButton.evaluate((button) => button.blur());
   await page.mouse.move(0, 0);
   await approveButton.hover();
+  await page.waitForTimeout(300);
+  await expect(guide).toBeHidden();
   await expect(guide).toBeVisible();
 });
 
@@ -97,6 +102,9 @@ test('左ナビの補足ガイドをフォーカスとホバーで確認しEsc�
   await expect(guide).toBeHidden();
   await reviewLink.focus();
   await expect(guide).toBeVisible();
+  expect(
+    await guide.evaluate((element) => getComputedStyle(element).backgroundColor)
+  ).toMatch(/0\.88|88%/);
   const guideId = await guide.getAttribute('id');
   expect(guideId).not.toBeNull();
   await expect(reviewLink).toHaveAttribute('aria-describedby', guideId!);
@@ -109,6 +117,8 @@ test('左ナビの補足ガイドをフォーカスとホバーで確認しEsc�
   await reviewLink.evaluate((link) => link.blur());
   await page.mouse.move(0, 0);
   await reviewLink.hover();
+  await page.waitForTimeout(300);
+  await expect(guide).toBeHidden();
   await expect(guide).toBeVisible();
 });
 

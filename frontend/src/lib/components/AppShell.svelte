@@ -322,7 +322,12 @@
     border-radius: var(--ss-radius-medium, 0.5rem);
     padding: var(--ss-space-1, 0.5rem) var(--ss-space-2, 1rem);
     color: var(--ss-color-surface, #ffffff);
-    background: var(--ss-color-focus-outer, #000000);
+    background: rgb(0 0 0 / 88%);
+    background: color-mix(
+      in srgb,
+      var(--ss-color-focus-outer, #000000) 88%,
+      transparent
+    );
     font-size: var(--ss-font-size-small, 0.875rem);
     font-weight: var(--ss-font-weight-regular, 400);
     line-height: 1.75;
@@ -336,7 +341,12 @@
   }
 
   .ss-app-shell__nav-item:not(.ss-app-shell__nav-item--guide-dismissed):hover
-    .ss-app-shell__guide,
+    .ss-app-shell__guide {
+    opacity: 1;
+    visibility: visible;
+    transition-delay: 600ms;
+  }
+
   .ss-app-shell__nav-item:not(
       .ss-app-shell__nav-item--guide-dismissed
     ):focus-within
@@ -420,7 +430,9 @@
 
   @media (prefers-reduced-motion: reduce) {
     .ss-app-shell__guide {
-      transition: none;
+      transition:
+        opacity 0s linear,
+        visibility 0s linear 120ms;
     }
   }
 </style>
