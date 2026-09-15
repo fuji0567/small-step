@@ -43,7 +43,10 @@ export class VoiceConsentService {
     await this.api.requestJson('/voiceprint/me', { method: 'DELETE' });
   }
 
-  private submitAudio(path: string, audio: File): Promise<VoiceprintJob | null> {
+  private submitAudio(
+    path: string,
+    audio: File
+  ): Promise<VoiceprintJob | null> {
     const body = new FormData();
     body.append('audio', audio);
     return this.api.requestJson<VoiceprintJob>(path, { method: 'POST', body });

@@ -153,7 +153,9 @@
       successMessage = `${selectedAssignee?.name ?? '選択した先生'}へ担当を引き継ぎました。`;
     } catch (error) {
       errorMessage =
-        error instanceof ApiHttpError && [409, 422].includes(error.status)
+        error instanceof ApiHttpError &&
+        error.status !== null &&
+        [409, 422].includes(error.status)
           ? '担当を変更できませんでした。記録と先生の状態を再読み込みして確認してください。'
           : error instanceof Error
             ? error.message
@@ -382,8 +384,7 @@
             class="records-control"
             maxlength="4000"
             bind:value={summary}
-            disabled={!isPending || saving || assigning}
-          ></textarea>
+            disabled={!isPending || saving || assigning}></textarea>
           <span class="records-support">{summary.length}/4000文字</span>
         </div>
         <div class="records-field">
@@ -393,8 +394,7 @@
             class="records-control"
             maxlength="4000"
             bind:value={conversationPrompt}
-            disabled={!isPending || saving || assigning}
-          ></textarea>
+            disabled={!isPending || saving || assigning}></textarea>
         </div>
         {#if isPending}
           <div class="records-field">

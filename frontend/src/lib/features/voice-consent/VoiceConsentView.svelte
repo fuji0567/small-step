@@ -162,7 +162,8 @@
       }
       if (kind === 'enrollment') {
         voiceprint = await service.getVoiceprint();
-        noticeMessage = '声紋を暗号化して登録しました。元の音声は削除済みです。';
+        noticeMessage =
+          '声紋を暗号化して登録しました。元の音声は削除済みです。';
       } else {
         noticeMessage = activeJob?.matched
           ? '本人の声と一致しました。'
@@ -171,7 +172,9 @@
       audioFile = null;
     } catch (error) {
       errorMessage =
-        error instanceof Error ? error.message : '声紋処理を完了できませんでした。';
+        error instanceof Error
+          ? error.message
+          : '声紋処理を完了できませんでした。';
     } finally {
       busy = false;
     }
@@ -284,11 +287,16 @@
       </form>
 
       {#if consent?.is_active}
-        <section class="voice-enrollment" aria-labelledby="voice-enrollment-heading">
+        <section
+          class="voice-enrollment"
+          aria-labelledby="voice-enrollment-heading"
+        >
           <div class="voice-enrollment__heading">
             <div>
               <h3 id="voice-enrollment-heading">声紋の登録・本人確認</h3>
-              <p>雑音が少なく、先生本人だけが5〜15秒ほど話している音声を使います。</p>
+              <p>
+                雑音が少なく、先生本人だけが5〜15秒ほど話している音声を使います。
+              </p>
             </div>
             {#if voiceprint}
               <StatusBadge label="登録済み" tone="success" />
@@ -305,7 +313,12 @@
           {#if voiceprintEnabled}
             <label class="voice-file">
               <span>先生本人の音声ファイル</span>
-              <input type="file" accept="audio/*" onchange={chooseAudio} disabled={busy} />
+              <input
+                type="file"
+                accept="audio/*"
+                onchange={chooseAudio}
+                disabled={busy}
+              />
               <small
                 >選択した音声は処理完了・失敗・期限切れの時点でサーバーから削除されます。</small
               >
@@ -315,7 +328,8 @@
               <Button
                 onclick={() => submitVoiceprint('enrollment')}
                 loading={busy}
-                disabled={!audioFile}>声紋を{voiceprint ? '再登録' : '登録'}</Button
+                disabled={!audioFile}
+                >声紋を{voiceprint ? '再登録' : '登録'}</Button
               >
               {#if voiceprint}
                 <Button

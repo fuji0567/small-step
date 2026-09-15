@@ -26,11 +26,7 @@ export interface Voiceprint {
 
 export type VoiceprintJobKind = 'enrollment' | 'verification';
 export type VoiceprintJobStatus =
-  | 'queued'
-  | 'processing'
-  | 'completed'
-  | 'failed'
-  | 'expired';
+  'queued' | 'processing' | 'completed' | 'failed' | 'expired';
 
 export interface VoiceprintJob {
   id: string;
