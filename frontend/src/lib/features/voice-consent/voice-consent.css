@@ -97,3 +97,97 @@
 .voice-file span {
   font-weight: var(--ss-font-weight-bold);
 }
+
+.voice-recorder {
+  display: grid;
+  gap: var(--ss-space-2);
+  border: 2px solid var(--ss-color-action);
+  border-radius: var(--ss-radius-large);
+  padding: var(--ss-space-3);
+  background: var(--ss-color-action-soft);
+}
+
+.voice-recorder p,
+.voice-recorder small,
+.voice-recorder__selected {
+  margin: 0;
+}
+
+.voice-recorder__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+  align-items: center;
+}
+
+.voice-recorder__status {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  border: 1px solid var(--ss-color-border);
+  border-radius: var(--ss-radius-full);
+  padding: 0 var(--ss-space-2);
+  color: var(--ss-color-text-muted);
+  background: var(--ss-color-surface);
+  font-size: var(--ss-font-size-small);
+  font-weight: var(--ss-font-weight-bold);
+}
+
+.voice-recorder__status--active {
+  border-color: var(--ss-color-error-border);
+  color: var(--ss-color-error-text);
+  background: var(--ss-color-error-background);
+}
+
+.voice-recorder__status--active::before {
+  width: 0.625rem;
+  height: 0.625rem;
+  margin-right: var(--ss-space-1);
+  border-radius: var(--ss-radius-full);
+  background: currentColor;
+  content: '';
+}
+
+.voice-recorder__preview {
+  width: min(100%, 32rem);
+}
+
+.voice-recorder__selected {
+  font-weight: var(--ss-font-weight-bold);
+}
+
+.voice-file-fallback {
+  border: 1px solid var(--ss-color-border);
+  border-radius: var(--ss-radius-medium);
+  padding: var(--ss-space-2);
+}
+
+.voice-file-fallback summary {
+  cursor: pointer;
+  font-weight: var(--ss-font-weight-bold);
+}
+
+.voice-file-fallback[open] summary {
+  margin-bottom: var(--ss-space-2);
+}
+
+.voice-file-fallback summary:focus-visible {
+  outline: 4px solid var(--ss-color-focus-inner);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px var(--ss-color-focus-outer);
+}
+
+@media (max-width: 40rem) {
+  .voice-recorder {
+    padding: var(--ss-space-2);
+  }
+
+  .voice-recorder__actions > * {
+    width: 100%;
+  }
+
+  .voice-recorder__status {
+    box-sizing: border-box;
+    justify-content: center;
+  }
+}

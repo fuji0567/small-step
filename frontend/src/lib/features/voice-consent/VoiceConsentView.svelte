@@ -17,6 +17,13 @@
     VoiceprintJob,
     VoiceprintJobKind
   } from './types';
+  import {
+    createVoiceRecordingFile,
+    MAX_VOICE_RECORDING_SECONDS,
+    MIN_VOICE_RECORDING_SECONDS,
+    selectVoiceRecordingFormat,
+    type VoiceRecordingFormat
+  } from './voice-recorder';
   import './voice-consent.css';
 
   type Props = {
@@ -32,6 +39,11 @@
   let voiceprint = $state<Voiceprint | null>(null);
   let activeJob = $state<VoiceprintJob | null>(null);
   let audioFile = $state<File | null>(null);
+  let recordingSupported = $state(false);
+  let recordingStarting = $state(false);
+  let recording = $state(false);
+  let recordingSeconds = $state(0);
+  let recordedAudioUrl = $state<string | null>(null);
   let retentionDays = $state(30);
   let accepted = $state(false);
   let loading = $state(false);
@@ -40,6 +52,11 @@
   let noticeMessage = $state<string | null>(null);
   let revokeOpen = $state(false);
   let deleteOpen = $state(false);
+  let mediaRecorder: MediaRecorder | null = null;
+  let mediaStream: MediaStream | null = null;
+  let recordingStartedAt = 0;
+  let recordingRequestId = 0;
+  let recordingTimer: ReturnType<typeof globalThis.setInterval> | null = null;
 
   function formatDateTime(value: string): string {
     return new Intl.DateTimeFormat('ja-JP', {
@@ -110,6 +127,8 @@
       consent = await service.revoke();
       voiceprint = null;
       activeJob = null;
+      cleanupActiveRecording();
+      clearRecordingSelection();
       noticeMessage =
         '同意を取り消し、登録済みの声紋と処理中の音声を削除しました。';
       await controller.refresh(['voiceConsent']);
@@ -121,9 +140,171 @@
     }
   }
 
+  function stopRecordingTimer(): void {
+    if (recordingTimer === null) return;
+    globalThis.clearInterval(recordingTimer);
+    recordingTimer = null;
+  }
+
+  function stopMediaStream(): void {
+    mediaStream?.getTracks().forEach((track) => track.stop());
+    mediaStream = null;
+  }
+
+  function clearRecordingSelection(): void {
+    if (recordedAudioUrl) URL.revokeObjectURL(recordedAudioUrl);
+    recordedAudioUrl = null;
+    audioFile = null;
+    recordingSeconds = 0;
+  }
+
+  function cleanupActiveRecording(): void {
+    recordingRequestId += 1;
+    stopRecordingTimer();
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.onstop = null;
+      mediaRecorder.onerror = null;
+      mediaRecorder.ondataavailable = null;
+      mediaRecorder.stop();
+    }
+    mediaRecorder = null;
+    stopMediaStream();
+    recordingStarting = false;
+    recording = false;
+  }
+
+  function completeRecording(
+    chunks: Blob[],
+    format: VoiceRecordingFormat,
+    durationSeconds: number
+  ): void {
+    stopRecordingTimer();
+    stopMediaStream();
+    mediaRecorder = null;
+    recordingStarting = false;
+    recording = false;
+    recordingSeconds = Math.min(
+      MAX_VOICE_RECORDING_SECONDS,
+      Math.max(0, Math.round(durationSeconds))
+    );
+
+    if (durationSeconds < MIN_VOICE_RECORDING_SECONDS) {
+      errorMessage = `録音が短すぎます。${MIN_VOICE_RECORDING_SECONDS}秒以上話してから停止してください。`;
+      return;
+    }
+    if (!chunks.some((chunk) => chunk.size > 0)) {
+      errorMessage = '音声を録音できませんでした。マイクを確認してください。';
+      return;
+    }
+
+    try {
+      const file = createVoiceRecordingFile(chunks, format.mimeType);
+      clearRecordingSelection();
+      audioFile = file;
+      recordedAudioUrl = URL.createObjectURL(file);
+      recordingSeconds = Math.min(
+        MAX_VOICE_RECORDING_SECONDS,
+        Math.round(durationSeconds)
+      );
+      noticeMessage = '録音が完了しました。内容を確認して登録してください。';
+    } catch (error) {
+      errorMessage =
+        error instanceof Error ? error.message : '録音を保存できませんでした。';
+    }
+  }
+
+  async function startRecording(): Promise<void> {
+    if (recordingStarting || recording) return;
+    errorMessage = null;
+    noticeMessage = null;
+    const format = selectVoiceRecordingFormat((mimeType) =>
+      MediaRecorder.isTypeSupported(mimeType)
+    );
+    if (!format) {
+      errorMessage =
+        'このブラウザの録音形式には対応していません。音声ファイルを選択してください。';
+      return;
+    }
+
+    cleanupActiveRecording();
+    clearRecordingSelection();
+    const requestId = ++recordingRequestId;
+    recordingStarting = true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+      if (requestId !== recordingRequestId) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      mediaStream = stream;
+      const recorder = new MediaRecorder(stream, { mimeType: format.mimeType });
+      const chunks: Blob[] = [];
+      mediaRecorder = recorder;
+      recordingStartedAt = Date.now();
+      recordingSeconds = 0;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      };
+      recorder.onstop = () => {
+        completeRecording(
+          chunks,
+          format,
+          (Date.now() - recordingStartedAt) / 1000
+        );
+      };
+      recorder.onerror = () => {
+        recorder.onstop = null;
+        cleanupActiveRecording();
+        errorMessage = '録音中にエラーが発生しました。もう一度お試しください。';
+      };
+
+      recorder.start(250);
+      recordingStarting = false;
+      recording = true;
+      recordingTimer = globalThis.setInterval(() => {
+        const elapsed = (Date.now() - recordingStartedAt) / 1000;
+        recordingSeconds = Math.min(
+          MAX_VOICE_RECORDING_SECONDS,
+          Math.floor(elapsed)
+        );
+        if (elapsed >= MAX_VOICE_RECORDING_SECONDS) stopRecording();
+      }, 250);
+    } catch (error) {
+      if (requestId !== recordingRequestId) return;
+      cleanupActiveRecording();
+      errorMessage =
+        error instanceof DOMException && error.name === 'NotAllowedError'
+          ? 'マイクの使用が許可されていません。ブラウザの設定から許可してください。'
+          : 'マイクを開始できませんでした。接続とブラウザ設定を確認してください。';
+    }
+  }
+
+  function stopRecording(): void {
+    const recorder = mediaRecorder;
+    if (!recorder || recorder.state === 'inactive') return;
+    stopRecordingTimer();
+    recording = false;
+    recordingSeconds = Math.min(
+      MAX_VOICE_RECORDING_SECONDS,
+      Math.floor((Date.now() - recordingStartedAt) / 1000)
+    );
+    recorder.stop();
+  }
+
   function chooseAudio(event: Event): void {
     const input = event.currentTarget as HTMLInputElement;
+    cleanupActiveRecording();
+    clearRecordingSelection();
     audioFile = input.files?.[0] ?? null;
+    if (audioFile) noticeMessage = '音声ファイルを選択しました。';
   }
 
   async function waitForJob(job: VoiceprintJob): Promise<void> {
@@ -169,7 +350,7 @@
           ? '本人の声と一致しました。'
           : '本人の声と一致しませんでした。別の音声で再確認してください。';
       }
-      audioFile = null;
+      clearRecordingSelection();
     } catch (error) {
       errorMessage =
         error instanceof Error
@@ -187,6 +368,7 @@
       await service.deleteVoiceprint();
       voiceprint = null;
       activeJob = null;
+      clearRecordingSelection();
       noticeMessage = '登録済みの声紋を削除しました。';
     } catch (error) {
       errorMessage =
@@ -196,7 +378,17 @@
     }
   }
 
-  onMount(() => controller.register('voiceConsent', () => load()));
+  onMount(() => {
+    recordingSupported =
+      typeof MediaRecorder !== 'undefined' &&
+      typeof navigator.mediaDevices?.getUserMedia === 'function';
+    const unregister = controller.register('voiceConsent', () => load());
+    return () => {
+      unregister();
+      cleanupActiveRecording();
+      clearRecordingSelection();
+    };
+  });
 
   $effect(() => {
     if (!enabled) return;
@@ -311,31 +503,98 @@
           {/if}
 
           {#if voiceprintEnabled}
-            <label class="voice-file">
-              <span>先生本人の音声ファイル</span>
-              <input
-                type="file"
-                accept="audio/*"
-                onchange={chooseAudio}
-                disabled={busy}
-              />
-              <small
-                >選択した音声は処理完了・失敗・期限切れの時点でサーバーから削除されます。</small
-              >
-            </label>
+            <div class="voice-recorder">
+              <div>
+                <strong>この端末で先生本人の声を録音</strong>
+                <p>
+                  録音開始後、静かな場所で5〜15秒話してください。15秒で自動停止します。
+                </p>
+              </div>
+
+              {#if recordingSupported}
+                <div class="voice-recorder__actions">
+                  {#if recording}
+                    <Button variant="danger" onclick={stopRecording}
+                      >録音を停止</Button
+                    >
+                  {:else}
+                    <Button
+                      variant="secondary"
+                      onclick={startRecording}
+                      loading={recordingStarting}
+                      disabled={busy}>録音を開始</Button
+                    >
+                  {/if}
+                  <span
+                    class:voice-recorder__status--active={recording}
+                    class="voice-recorder__status"
+                    aria-live="polite"
+                  >
+                    {recording
+                      ? `録音中 ${recordingSeconds}秒 / ${MAX_VOICE_RECORDING_SECONDS}秒`
+                      : recordingStarting
+                        ? 'マイクを準備中'
+                        : recordedAudioUrl
+                          ? `録音済み ${recordingSeconds}秒`
+                          : '録音待ち'}
+                  </span>
+                </div>
+
+                {#if recordedAudioUrl}
+                  <!-- svelte-ignore a11y_media_has_caption: private voice samples do not have transcripts -->
+                  <audio
+                    class="voice-recorder__preview"
+                    controls
+                    src={recordedAudioUrl}
+                  ></audio>
+                  <small>問題があれば「録音を開始」から録音し直せます。</small>
+                {/if}
+              {:else}
+                <p>
+                  このブラウザではマイク録音を利用できません。下のファイル選択を使ってください。
+                </p>
+              {/if}
+            </div>
+
+            <details class="voice-file-fallback">
+              <summary>音声ファイルを選んで登録する</summary>
+              <label class="voice-file">
+                <span>先生本人の音声ファイル</span>
+                <input
+                  type="file"
+                  accept="audio/*"
+                  onchange={chooseAudio}
+                  disabled={busy || recordingStarting || recording}
+                />
+                <small
+                  >選択した音声は処理完了・失敗・期限切れの時点でサーバーから削除されます。</small
+                >
+              </label>
+            </details>
+
+            {#if audioFile}
+              <p class="voice-recorder__selected">
+                使用する音声: {recordedAudioUrl
+                  ? 'この端末で録音した音声'
+                  : audioFile.name}
+              </p>
+            {/if}
 
             <div class="voice-actions">
               <Button
                 onclick={() => submitVoiceprint('enrollment')}
                 loading={busy}
-                disabled={!audioFile}
-                >声紋を{voiceprint ? '再登録' : '登録'}</Button
+                disabled={recordingStarting || recording || !audioFile}
+                >この音声で声紋を{voiceprint ? '再登録' : '登録'}</Button
               >
               {#if voiceprint}
                 <Button
                   variant="secondary"
                   onclick={() => submitVoiceprint('verification')}
-                  disabled={busy || !audioFile}>本人確認を試す</Button
+                  disabled={busy ||
+                    recordingStarting ||
+                    recording ||
+                    !audioFile}>この音声で本人確認</Button
                 >
               {/if}
             </div>

@@ -83,6 +83,7 @@ def test_voiceprint_enrollment_and_verification_delete_raw_audio(tmp_path):
             school_id=school.id,
             teacher_id=teacher.id,
             kind=VoiceprintJobKind.enrollment,
+            suffix=".webm",
         )
         enrollment_path = storage.path_for(enrollment.storage_key)
 
