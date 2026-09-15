@@ -19,7 +19,10 @@ dependencies = [
 postgres = ["psycopg[binary]>=3.2.0"]
 backup-s3 = ["boto3>=1.35.0,<2.0.0"]
 edge-audio = ["faster-whisper>=1.1.0,<2.0.0"]
-speaker-diarization = ["pyannote.audio>=4.0.0,<5.0.0"]
+speaker-diarization = [
+  "omegaconf>=2.3.0,<3.0.0",
+  "pyannote.audio>=4.0.0,<5.0.0",
+]
 dev = ["pytest>=8.3.0"]
 
 [tool.pytest.ini_options]
