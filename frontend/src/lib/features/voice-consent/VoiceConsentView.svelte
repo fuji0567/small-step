@@ -541,7 +541,6 @@
                 </div>
 
                 {#if recordedAudioUrl}
-                  <!-- svelte-ignore a11y_media_has_caption: private voice samples do not have transcripts -->
                   <audio
                     class="voice-recorder__preview"
                     controls
