@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 import httpx
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Path, Query, Request, Response, UploadFile, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import delete, exists, func, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -30,6 +30,7 @@ from app.edge_keys import generate_edge_api_key, hash_edge_api_key
 from app.guardian_archive import generate_guardian_archive_token, hash_guardian_archive_token
 from app.line import generate_link_code, hash_link_code, parse_link_code, verify_webhook_signature
 from app.notion import NotionSyncError, create_delivered_notification_page
+from app.recorder import RecorderStorage, RecorderStorageError, normalise_media_type, validate_sha256
 from app.models import (
     AuditEvent,
     AuditEventAction,
@@ -45,6 +46,9 @@ from app.models import (
     Record,
     RecordCategory,
     RecordStatus,
+    RecordingSegment,
+    RecordingSession,
+    RecordingSessionStatus,
     School,
     Teacher,
     TeacherVoiceprint,
@@ -85,6 +89,9 @@ from app.schemas import (
     RecordAssigneeUpdate,
     RecordCreate,
     RecordRead,
+    RecordingSessionCreate,
+    RecordingSessionRead,
+    RecordingSegmentRead,
     RecordReview,
     SchoolCreate,
     SchoolDigestTimeUpdate,
@@ -384,6 +391,136 @@ def cloud_audio_storage(request: Request) -> CloudAudioJobStorage:
     return CloudAudioJobStorage(
         job_dir=settings.cloud_audio_job_dir,
         max_file_bytes=settings.edge_audio_max_file_bytes,
+    )
+
+
+def recorder_storage(request: Request) -> RecorderStorage:
+    settings = request.app.state.settings
+    return RecorderStorage(
+        session_dir=settings.recorder_session_dir,
+        max_segment_bytes=settings.recorder_max_segment_bytes,
+    )
+
+
+def require_recorder_enabled(request: Request) -> bool:
+    """Hide every recorder endpoint consistently while the feature is off."""
+
+    if not request.app.state.settings.recorder_enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return True
+
+
+def recorder_owner(*, current_teacher: CurrentTeacher, db: Session) -> Teacher:
+    """Derive the owner from the authenticated teacher.
+
+    Development mode has no linked teacher by design.  For local API tests and
+    manual development, use the first existing teacher; when a development
+    database has only a school, create a clearly synthetic local owner.  This
+    branch is unreachable in Supabase mode, where ``get_current_teacher``
+    always supplies the linked teacher row.
+    """
+
+    if current_teacher.teacher is not None:
+        return current_teacher.teacher
+    if not current_teacher.is_development:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="A linked teacher account is required")
+
+    existing = db.scalar(select(Teacher).order_by(Teacher.created_at, Teacher.id))
+    if existing is not None:
+        return existing
+    school = db.scalar(select(School).order_by(School.created_at, School.id))
+    if school is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="A school is required for recorder access")
+    owner = Teacher(
+        school_id=school.id,
+        name="Development recorder",
+        email=None,
+        role=TeacherRole.school_admin,
+    )
+    db.add(owner)
+    db.flush()
+    return owner
+
+
+def assert_recorder_session_owner(
+    current_teacher: CurrentTeacher, recorder_session: RecordingSession
+) -> None:
+    """Recorder sessions are owner-only, including for school administrators."""
+
+    if not current_teacher.is_development and (
+        current_teacher.teacher is None
+        or recorder_session.teacher_id != current_teacher.teacher.id
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access to this recording session is denied")
+
+
+def expire_recorder_session_if_needed(
+    *, db: Session, request: Request, recorder_session: RecordingSession, now: datetime | None = None
+) -> bool:
+    """Delete draft audio and mark a session expired when its lease elapsed."""
+
+    now = now or utc_now()
+    if recorder_session.status == RecordingSessionStatus.expired:
+        try:
+            recorder_storage(request).delete_session(recorder_session.id)
+        except OSError as error:
+            raise HTTPException(status_code=503, detail="Recorder audio storage is unavailable") from error
+        return False
+    if recorder_session.status != RecordingSessionStatus.draft:
+        return False
+    if as_utc_datetime(recorder_session.expires_at) > now:
+        return False
+    expired = db.execute(
+        update(RecordingSession)
+        .where(RecordingSession.id == recorder_session.id)
+        .where(RecordingSession.status == RecordingSessionStatus.draft)
+        .where(RecordingSession.expires_at <= now)
+        .values(status=RecordingSessionStatus.expired, updated_at=now)
+        .execution_options(synchronize_session=False)
+    )
+    if expired.rowcount != 1:
+        db.rollback()
+        db.refresh(recorder_session)
+        return False
+    db.commit()
+    db.refresh(recorder_session)
+    try:
+        recorder_storage(request).delete_session(recorder_session.id)
+    except OSError as error:
+        raise HTTPException(status_code=503, detail="Recorder audio storage is unavailable") from error
+    return True
+
+
+def recorder_session_response(db: Session, recorder_session: RecordingSession) -> RecordingSessionRead:
+    segments = list(
+        db.scalars(
+            select(RecordingSegment)
+            .where(RecordingSegment.session_id == recorder_session.id)
+            .order_by(RecordingSegment.sequence)
+        )
+    )
+    record = db.get(Record, recorder_session.record_id) if recorder_session.record_id else None
+    return RecordingSessionRead(
+        id=recorder_session.id,
+        client_session_id=recorder_session.client_session_id,
+        status=recorder_session.status,
+        segments=[
+            RecordingSegmentRead(
+                sequence=segment.sequence,
+                duration_ms=segment.duration_ms,
+                size_bytes=segment.size_bytes,
+                sha256=segment.sha256,
+                media_type=segment.media_type,
+                created_at=as_utc_datetime(segment.created_at),
+            )
+            for segment in segments
+        ],
+        total_duration_ms=sum(segment.duration_ms for segment in segments),
+        expires_at=as_utc_datetime(recorder_session.expires_at),
+        created_at=as_utc_datetime(recorder_session.created_at),
+        updated_at=as_utc_datetime(recorder_session.updated_at),
+        record_id=recorder_session.record_id,
+        audio_processing_incomplete=(record.audio_processing_incomplete if record else None),
     )
 
 
@@ -981,8 +1118,15 @@ def link_supabase_user_to_teacher(
 
 
 @router.get("/auth/me", response_model=TeacherRead, tags=["auth"])
-def get_my_teacher_profile(current_teacher: CurrentTeacher = Depends(get_current_teacher)) -> Teacher:
+def get_my_teacher_profile(
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> Teacher:
     if current_teacher.teacher is None:
+        if current_teacher.is_development:
+            teacher = db.scalar(select(Teacher).order_by(Teacher.created_at, Teacher.id))
+            if teacher is not None:
+                return teacher
         raise HTTPException(status_code=404, detail="Development account has no teacher profile")
     return current_teacher.teacher
 
@@ -1979,6 +2123,405 @@ def create_edge_record_candidate(
         raise HTTPException(status_code=409, detail="source_event_id was already processed") from error
     db.refresh(record)
     return record
+
+
+@router.post(
+    "/recorder/sessions",
+    response_model=RecordingSessionRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["recorder"],
+)
+def create_recorder_session(
+    payload: RecordingSessionCreate,
+    request: Request,
+    _recorder_enabled: bool = Depends(require_recorder_enabled),
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> RecordingSessionRead:
+    """Create one resumable draft, idempotent for the owner and client UUID."""
+
+    owner = recorder_owner(current_teacher=current_teacher, db=db)
+    client_session_id = as_id(payload.client_session_id)
+    existing = db.scalar(
+        select(RecordingSession).where(
+            RecordingSession.teacher_id == owner.id,
+            RecordingSession.client_session_id == client_session_id,
+        )
+    )
+    if existing is not None:
+        # An expired draft remains safely observable for the client so it can
+        # remove its local IndexedDB copy without creating another session.
+        expire_recorder_session_if_needed(db=db, request=request, recorder_session=existing)
+        return recorder_session_response(db, existing)
+
+    # Expire old drafts before enforcing the per-owner limit.  This is the
+    # request-driven cleanup boundary; a worker is responsible for terminal
+    # queued/processing cleanup in a later wave.
+    now = utc_now()
+    drafts = list(
+        db.scalars(
+            select(RecordingSession)
+            .where(RecordingSession.teacher_id == owner.id)
+            .where(RecordingSession.status == RecordingSessionStatus.draft)
+        )
+    )
+    settings = request.app.state.settings
+    for draft in drafts:
+        expire_recorder_session_if_needed(db=db, request=request, recorder_session=draft, now=now)
+    locked_owner = db.scalar(select(Teacher).where(Teacher.id == owner.id).with_for_update())
+    if locked_owner is not None:
+        owner = locked_owner
+    existing = db.scalar(
+        select(RecordingSession).where(
+            RecordingSession.teacher_id == owner.id,
+            RecordingSession.client_session_id == client_session_id,
+        )
+    )
+    if existing is not None:
+        return recorder_session_response(db, existing)
+    active_drafts = db.scalar(
+        select(func.count())
+        .select_from(RecordingSession)
+        .where(RecordingSession.teacher_id == owner.id)
+        .where(RecordingSession.status == RecordingSessionStatus.draft)
+    ) or 0
+    if active_drafts >= settings.recorder_max_draft_sessions:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Recorder draft session limit reached")
+
+    recorder_session = RecordingSession(
+        school_id=owner.school_id,
+        teacher_id=owner.id,
+        client_session_id=client_session_id,
+        status=RecordingSessionStatus.draft,
+        expires_at=now + timedelta(hours=settings.recorder_retention_hours),
+    )
+    db.add(recorder_session)
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        # A concurrent retry may have won the unique owner/client race.  It
+        # is safe to return that row, but never to bypass the owner scope.
+        existing = db.scalar(
+            select(RecordingSession).where(
+                RecordingSession.teacher_id == owner.id,
+                RecordingSession.client_session_id == client_session_id,
+            )
+        )
+        if existing is None:
+            raise HTTPException(status_code=409, detail="Recorder session could not be created") from error
+        return recorder_session_response(db, existing)
+    db.refresh(recorder_session)
+    return recorder_session_response(db, recorder_session)
+
+
+@router.get(
+    "/recorder/sessions",
+    response_model=list[RecordingSessionRead],
+    tags=["recorder"],
+)
+def list_recorder_sessions(
+    request: Request,
+    school_id: str | None = Query(default=None),
+    _recorder_enabled: bool = Depends(require_recorder_enabled),
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> list[RecordingSessionRead]:
+    """List safe recorder state, scoped to one school and the caller's owner."""
+
+    if school_id is None:
+        if current_teacher.teacher is None:
+            query = select(RecordingSession)
+        else:
+            school_id = current_teacher.teacher.school_id
+            assert_school_access(current_teacher, school_id)
+            query = select(RecordingSession).where(RecordingSession.school_id == school_id)
+    else:
+        assert_school_access(current_teacher, school_id)
+        query = select(RecordingSession).where(RecordingSession.school_id == school_id)
+    if (
+        not current_teacher.is_development
+        and not current_teacher.is_school_admin
+        and current_teacher.teacher is not None
+    ):
+        query = query.where(RecordingSession.teacher_id == current_teacher.teacher.id)
+    sessions = list(db.scalars(query.order_by(RecordingSession.updated_at.desc())))
+    for recorder_session in sessions:
+        expire_recorder_session_if_needed(db=db, request=request, recorder_session=recorder_session)
+    # The expiry pass may have committed and invalidated the list objects; the
+    # rows remain attached and response construction re-queries only segments.
+    return [recorder_session_response(db, recorder_session) for recorder_session in sessions]
+
+
+def get_owned_recorder_session(
+    *,
+    session_id: str,
+    request: Request,
+    current_teacher: CurrentTeacher,
+    db: Session,
+    for_update: bool = False,
+) -> RecordingSession:
+    if for_update:
+        recorder_session = db.scalar(
+            select(RecordingSession)
+            .where(RecordingSession.id == session_id)
+            .with_for_update()
+        )
+        if recorder_session is None:
+            raise HTTPException(status_code=404, detail="Recorder session not found")
+    else:
+        recorder_session = require_entity(db, RecordingSession, session_id, "Recorder session")
+    assert_recorder_session_owner(current_teacher, recorder_session)
+    return recorder_session
+
+
+@router.get(
+    "/recorder/sessions/{session_id}",
+    response_model=RecordingSessionRead,
+    tags=["recorder"],
+)
+def get_recorder_session(
+    session_id: str,
+    request: Request,
+    _recorder_enabled: bool = Depends(require_recorder_enabled),
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> RecordingSessionRead:
+    recorder_session = get_owned_recorder_session(
+        session_id=session_id, request=request, current_teacher=current_teacher, db=db
+    )
+    expire_recorder_session_if_needed(db=db, request=request, recorder_session=recorder_session)
+    return recorder_session_response(db, recorder_session)
+
+
+@router.put(
+    "/recorder/sessions/{session_id}/segments/{sequence}",
+    response_model=RecordingSessionRead,
+    tags=["recorder"],
+)
+async def upload_recorder_segment(
+    session_id: str,
+    request: Request,
+    sequence: int = Path(..., ge=0),
+    file: UploadFile = File(...),
+    duration_ms: int = Form(...),
+    sha256: str = Form(...),
+    _recorder_enabled: bool = Depends(require_recorder_enabled),
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> RecordingSessionRead:
+    """Store one segment after owner, state, size, MIME, and digest checks."""
+
+    recorder_session = get_owned_recorder_session(
+        session_id=session_id, request=request, current_teacher=current_teacher, db=db
+    )
+    if expire_recorder_session_if_needed(db=db, request=request, recorder_session=recorder_session):
+        await file.close()
+        raise HTTPException(status_code=409, detail="Recorder session has expired")
+    if recorder_session.status != RecordingSessionStatus.draft:
+        await file.close()
+        raise HTTPException(status_code=409, detail="Recorder session is not accepting segments")
+
+    settings = request.app.state.settings
+    max_duration_ms = settings.recorder_max_duration_minutes * 60_000
+    if duration_ms < 1 or duration_ms > max_duration_ms:
+        await file.close()
+        raise HTTPException(status_code=422, detail="duration_ms is outside the supported range")
+    try:
+        expected_sha256 = validate_sha256(sha256)
+        media_type = normalise_media_type(file.content_type)
+    except RecorderStorageError as error:
+        await file.close()
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    storage = recorder_storage(request)
+    storage_key: str | None = None
+    try:
+        storage_key, actual_size, computed_sha256 = await storage.store_upload(
+            upload=file,
+            session_id=recorder_session.id,
+            expected_sha256=expected_sha256,
+            media_type=media_type,
+        )
+    except RecorderStorageError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except OSError as error:
+        raise HTTPException(status_code=503, detail="Recorder audio storage is unavailable") from error
+
+    now = utc_now()
+    claimed = db.execute(
+        update(RecordingSession)
+        .where(RecordingSession.id == recorder_session.id)
+        .where(RecordingSession.teacher_id == recorder_session.teacher_id)
+        .where(RecordingSession.status == RecordingSessionStatus.draft)
+        .where(RecordingSession.expires_at > now)
+        .values(
+            updated_at=now,
+            expires_at=now + timedelta(hours=settings.recorder_retention_hours),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if claimed.rowcount != 1:
+        db.rollback()
+        storage.delete(storage_key)
+        raise HTTPException(status_code=409, detail="Recorder session is not accepting segments")
+
+    existing = db.scalar(
+        select(RecordingSegment).where(
+            RecordingSegment.session_id == recorder_session.id,
+            RecordingSegment.sequence == sequence,
+        )
+    )
+    if existing is not None:
+        same_metadata = (
+            existing.duration_ms == duration_ms
+            and existing.size_bytes == actual_size
+            and existing.sha256 == computed_sha256
+            and existing.media_type == media_type
+        )
+        storage.delete(storage_key)
+        if not same_metadata:
+            raise HTTPException(status_code=409, detail="Recorder segment conflicts with existing sequence")
+        db.commit()
+        db.refresh(recorder_session)
+        return recorder_session_response(db, recorder_session)
+
+    received_duration_ms = db.scalar(
+        select(func.coalesce(func.sum(RecordingSegment.duration_ms), 0)).where(
+            RecordingSegment.session_id == recorder_session.id
+        )
+    ) or 0
+    if received_duration_ms + duration_ms > max_duration_ms:
+        db.rollback()
+        storage.delete(storage_key)
+        raise HTTPException(status_code=409, detail="Recorder session exceeds the maximum duration")
+    db.add(
+        RecordingSegment(
+            session_id=recorder_session.id,
+            sequence=sequence,
+            duration_ms=duration_ms,
+            size_bytes=actual_size,
+            sha256=computed_sha256,
+            media_type=media_type,
+            storage_key=storage_key,
+        )
+    )
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        storage.delete(storage_key)
+        existing = db.scalar(
+            select(RecordingSegment).where(
+                RecordingSegment.session_id == recorder_session.id,
+                RecordingSegment.sequence == sequence,
+            )
+        )
+        if existing is not None and (
+            existing.duration_ms == duration_ms
+            and existing.size_bytes == actual_size
+            and existing.sha256 == computed_sha256
+            and existing.media_type == media_type
+        ):
+            db.refresh(recorder_session)
+            return recorder_session_response(db, recorder_session)
+        raise HTTPException(status_code=409, detail="Recorder segment conflicts with existing sequence") from error
+    except SQLAlchemyError as error:
+        db.rollback()
+        storage.delete(storage_key)
+        raise HTTPException(status_code=503, detail="Recorder metadata storage is unavailable") from error
+    db.refresh(recorder_session)
+    return recorder_session_response(db, recorder_session)
+
+
+@router.post(
+    "/recorder/sessions/{session_id}/finalize",
+    response_model=RecordingSessionRead,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["recorder"],
+)
+def finalize_recorder_session(
+    session_id: str,
+    request: Request,
+    _recorder_enabled: bool = Depends(require_recorder_enabled),
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> RecordingSessionRead:
+    """Validate contiguous segments and queue a draft for the future worker."""
+
+    recorder_session = get_owned_recorder_session(
+        session_id=session_id,
+        request=request,
+        current_teacher=current_teacher,
+        db=db,
+        for_update=True,
+    )
+    if expire_recorder_session_if_needed(db=db, request=request, recorder_session=recorder_session):
+        raise HTTPException(status_code=409, detail="Recorder session has expired")
+    if recorder_session.status != RecordingSessionStatus.draft:
+        raise HTTPException(status_code=409, detail="Recorder session is not a draft")
+    segments = list(
+        db.scalars(
+            select(RecordingSegment)
+            .where(RecordingSegment.session_id == recorder_session.id)
+            .order_by(RecordingSegment.sequence)
+        )
+    )
+    if not segments or [segment.sequence for segment in segments] != list(range(len(segments))):
+        raise HTTPException(status_code=409, detail="Recorder segments must be contiguous from sequence zero")
+    total_duration_ms = sum(segment.duration_ms for segment in segments)
+    if total_duration_ms > request.app.state.settings.recorder_max_duration_minutes * 60_000:
+        raise HTTPException(status_code=409, detail="Recorder session exceeds the maximum duration")
+
+    recorder_session.status = RecordingSessionStatus.queued
+    recorder_session.updated_at = utc_now()
+    recorder_session.expires_at = recorder_session.updated_at + timedelta(
+        hours=request.app.state.settings.recorder_retention_hours
+    )
+    db.commit()
+    db.refresh(recorder_session)
+    return recorder_session_response(db, recorder_session)
+
+
+@router.delete(
+    "/recorder/sessions/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["recorder"],
+)
+def discard_recorder_session(
+    session_id: str,
+    request: Request,
+    _recorder_enabled: bool = Depends(require_recorder_enabled),
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Discard only a draft and remove its server-side audio files."""
+
+    recorder_session = get_owned_recorder_session(
+        session_id=session_id,
+        request=request,
+        current_teacher=current_teacher,
+        db=db,
+        for_update=True,
+    )
+    if expire_recorder_session_if_needed(db=db, request=request, recorder_session=recorder_session):
+        raise HTTPException(status_code=409, detail="Recorder session has expired")
+    if recorder_session.status == RecordingSessionStatus.discarded:
+        try:
+            recorder_storage(request).delete_session(recorder_session.id)
+        except OSError as error:
+            raise HTTPException(status_code=503, detail="Recorder audio storage is unavailable") from error
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if recorder_session.status != RecordingSessionStatus.draft:
+        raise HTTPException(status_code=409, detail="Only draft recorder sessions can be discarded")
+    recorder_session.status = RecordingSessionStatus.discarded
+    recorder_session.updated_at = utc_now()
+    db.commit()
+    try:
+        recorder_storage(request).delete_session(recorder_session.id)
+    except OSError as error:
+        raise HTTPException(status_code=503, detail="Recorder audio storage is unavailable") from error
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

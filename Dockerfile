@@ -13,6 +13,21 @@ RUN mkdir -p /build/app \
     && npm run test:unit \
     && npm run build
 
+FROM node:24.19.0-bookworm-slim AS recorder-frontend-build
+
+WORKDIR /build/recorder_frontend
+
+COPY recorder_frontend/package.json recorder_frontend/package-lock.json ./
+RUN npm ci
+
+COPY recorder_frontend ./
+RUN mkdir -p /build/app \
+    && npm run format:check \
+    && npm run lint \
+    && npm run check \
+    && npm run test:unit \
+    && npm run build
+
 FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -26,6 +41,7 @@ COPY pyproject.toml ./
 COPY alembic.ini ./
 COPY app ./app
 COPY --from=frontend-build /build/app/frontend_dist ./app/frontend_dist
+COPY --from=recorder-frontend-build /build/app/recorder_dist ./app/recorder_dist
 COPY migrations ./migrations
 COPY scripts ./scripts
 RUN pip install --upgrade pip && pip install .[postgres]

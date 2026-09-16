@@ -12,6 +12,8 @@ frontend/coverage/
 frontend/playwright-report/
 frontend/test-results/
 app/frontend_dist/
+app/recorder_dist/
+recorder_frontend/node_modules/
 /firmware/esp32-s3-recorder/build/
 /firmware/esp32-s3-recorder/sdkconfig
 /firmware/esp32-s3-recorder/sdkconfig.old

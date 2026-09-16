@@ -4,10 +4,23 @@
   import type { AppController } from '$lib/state';
   import { onMount } from 'svelte';
 
-  import { audioDescription, audioStatusLabel, formatDateTime } from './format';
+  import {
+    audioDescription,
+    audioStatusLabel,
+    formatDateTime,
+    recorderDescription,
+    recorderDuration,
+    recorderSize,
+    recorderStatusLabel,
+    recorderTone
+  } from './format';
   import './operations.css';
   import { OperationsService } from './service';
-  import type { CloudAudioJob, CloudAudioJobStatus } from './types';
+  import type {
+    CloudAudioJob,
+    CloudAudioJobStatus,
+    RecorderSession
+  } from './types';
 
   type Props = {
     api: ApiClient;
@@ -18,8 +31,9 @@
   let { api, schoolId, controller }: Props = $props();
   const service = $derived(new OperationsService(api));
   let jobs = $state.raw<CloudAudioJob[]>([]);
+  let recorderSessions = $state.raw<RecorderSession[]>([]);
   let loading = $state(false);
-  let errorMessage = $state<string | null>(null);
+  let errorMessages = $state<string[]>([]);
   let requestVersion = 0;
 
   function tone(status: CloudAudioJobStatus) {
@@ -33,24 +47,45 @@
   async function load(signal?: AbortSignal): Promise<void> {
     const selectedSchoolId = schoolId;
     const version = ++requestVersion;
+    errorMessages = [];
     if (!selectedSchoolId) {
       jobs = [];
+      recorderSessions = [];
+      loading = false;
       return;
     }
+    jobs = [];
+    recorderSessions = [];
     loading = true;
-    errorMessage = null;
-    try {
-      const value = await service.listAudioJobs(selectedSchoolId, signal);
-      if (version === requestVersion) jobs = value;
-    } catch (error) {
-      if (signal?.aborted || version !== requestVersion) return;
-      errorMessage =
-        error instanceof Error
-          ? error.message
-          : '音声処理状況を取得できませんでした。';
-    } finally {
-      if (version === requestVersion) loading = false;
+
+    const results = await Promise.allSettled([
+      service.listAudioJobs(selectedSchoolId, signal),
+      service.listRecorderSessions(selectedSchoolId, signal)
+    ]);
+    if (signal?.aborted || version !== requestVersion) return;
+
+    const [audioJobsResult, recorderSessionsResult] = results;
+    const nextErrors: string[] = [];
+    if (audioJobsResult.status === 'fulfilled') {
+      jobs = audioJobsResult.value;
+    } else {
+      nextErrors.push(
+        audioJobsResult.reason instanceof Error
+          ? `クラウド音声処理ジョブ: ${audioJobsResult.reason.message}`
+          : 'クラウド音声処理ジョブを取得できませんでした。'
+      );
     }
+    if (recorderSessionsResult.status === 'fulfilled') {
+      recorderSessions = recorderSessionsResult.value;
+    } else {
+      nextErrors.push(
+        recorderSessionsResult.reason instanceof Error
+          ? `録音セッション: ${recorderSessionsResult.reason.message}`
+          : '録音セッションを取得できませんでした。'
+      );
+    }
+    errorMessages = nextErrors;
+    loading = false;
   }
 
   onMount(() => controller.register('audioJobs', () => load()));
@@ -72,8 +107,8 @@
 
   <div class="operations-toolbar">
     <StatusBadge
-      label={`${jobs.length}件`}
-      ariaLabel={`音声処理ジョブ${jobs.length}件`}
+      label={`${jobs.length + recorderSessions.length}件`}
+      ariaLabel={`音声処理${jobs.length + recorderSessions.length}件`}
     />
     <Button variant="secondary" onclick={() => load()} disabled={loading}
       >再読み込み</Button
@@ -81,15 +116,23 @@
   </div>
 
   {#if loading}<Loading label="音声処理状況を読み込んでいます" />{/if}
-  {#if errorMessage}
-    <Notice tone="error" title="音声処理状況を取得できませんでした"
-      ><p>{errorMessage}</p></Notice
-    >
-  {:else if !loading && !schoolId}
+  {#if errorMessages.length > 0}
+    <Notice tone="error" title="音声処理状況を取得できませんでした">
+      {#if errorMessages.length === 1}
+        <p>一部の一覧を表示しています。</p>
+      {:else}
+        <p>一覧を表示できませんでした。</p>
+      {/if}
+      <ul>
+        {#each errorMessages as message}<li>{message}</li>{/each}
+      </ul>
+    </Notice>
+  {/if}
+  {#if !loading && !schoolId}
     <Notice tone="warning"><p>園を選択してください。</p></Notice>
-  {:else if !loading && jobs.length === 0}
+  {:else if !loading && errorMessages.length === 0 && jobs.length === 0 && recorderSessions.length === 0}
     <div class="operations-empty"><p>音声処理の履歴はまだありません。</p></div>
-  {:else}
+  {:else if !loading && (jobs.length > 0 || recorderSessions.length > 0)}
     <ul class="operations-list">
       {#each jobs as job (job.id)}
         <li>
@@ -107,6 +150,28 @@
               />
             </div>
             <p>{audioDescription(job.status)}</p>
+          </article>
+        </li>
+      {/each}
+      {#each recorderSessions as session (session.id)}
+        <li>
+          <article class="operations-card">
+            <div class="operations-card-header">
+              <div>
+                <h3>録音セッション</h3>
+                <p class="operations-meta">
+                  受付: {formatDateTime(session.created_at)} / 録音時間:
+                  {recorderDuration(session)} / {session.segments
+                    .length}セグメント /
+                  {recorderSize(session)}
+                </p>
+              </div>
+              <StatusBadge
+                label={recorderStatusLabel(session.status)}
+                tone={recorderTone(session.status)}
+              />
+            </div>
+            <p>{recorderDescription(session.status)}</p>
           </article>
         </li>
       {/each}

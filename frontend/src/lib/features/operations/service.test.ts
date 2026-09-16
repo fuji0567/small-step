@@ -22,6 +22,41 @@ describe('OperationsService', () => {
     );
   });
 
+  it('録音セッション一覧を学校スコープで読む', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse([]));
+    const service = new OperationsService(new ApiClient({ fetch: fetchMock }));
+
+    await service.listRecorderSessions('school-1');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      '/api/v1/recorder/sessions?school_id=school-1'
+    );
+  });
+
+  it('録音機能が無効な404は空一覧として扱う', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ detail: 'Not Found' }, 404));
+    const service = new OperationsService(new ApiClient({ fetch: fetchMock }));
+
+    await expect(service.listRecorderSessions('school-1')).resolves.toEqual([]);
+  });
+
+  it('録音セッションの404以外の失敗は呼び出し元へ返す', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        jsonResponse({ detail: '一時的に利用できません' }, 503)
+      );
+    const service = new OperationsService(new ApiClient({ fetch: fetchMock }));
+
+    await expect(
+      service.listRecorderSessions('school-1')
+    ).rejects.toMatchObject({
+      status: 503
+    });
+  });
+
   it('readinessの503を診断結果として返す', async () => {
     const payload = {
       status: 'not_ready',

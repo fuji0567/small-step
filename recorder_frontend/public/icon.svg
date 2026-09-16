@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Small Step 録音">
+  <rect width="512" height="512" rx="96" fill="#fff"/>
+  <rect x="176" y="80" width="160" height="264" rx="80" fill="#fff" stroke="#1a1a1a" stroke-width="32"/>
+  <path d="M120 256a136 136 0 0 0 272 0M256 392v56M184 448h144" fill="none" stroke="#1a1a1a" stroke-width="32" stroke-linecap="round"/>
+  <circle cx="384" cy="128" r="48" fill="#d32f2f"/>
+</svg>

@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     cloud_audio_job_retention_minutes: int = Field(default=15, ge=1, le=1_440)
     cloud_audio_processing_timeout_minutes: int = Field(default=10, ge=1, le=1_440)
     cloud_audio_worker_poll_seconds: float = Field(default=2.0, gt=0)
+    # Independent /rec recorder settings. 25 MB is ample for a one-minute
+    # AAC/WebM segment while still bounding request and disk usage.
+    recorder_enabled: bool = False
+    recorder_session_dir: str = "data/edge-audio-inbox/recorder-sessions"
+    recorder_retention_hours: int = Field(default=24, ge=1, le=720)
+    recorder_max_duration_minutes: int = Field(default=60, ge=1, le=1_440)
+    recorder_max_draft_sessions: int = Field(default=3, ge=1, le=100)
+    recorder_max_segment_bytes: int = Field(default=25_000_000, ge=1, le=1_000_000_000)
+    recorder_worker_heartbeat_required: bool = False
     worker_heartbeat_interval_seconds: float = Field(default=30.0, ge=5.0, le=3_600.0)
     worker_heartbeat_stale_seconds: float = Field(default=90.0, ge=10.0, le=7_200.0)
     speaker_diarization_model: str = "pyannote/speaker-diarization-community-1"

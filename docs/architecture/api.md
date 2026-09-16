@@ -17,13 +17,15 @@ create_app(settings)
   ├ lifespan
   │   └ SQLite のときだけ prepare_database() で移行を適用
   ├ app.state.settings / engine / session_factory
-  ├ middleware: /_app/* は immutable、/teacher・/guardian は no-cache
+  ├ middleware: /_app/*・/rec/assets/* は immutable、HTML は no-cache
   ├ include_router(router)            … app/api/routes.py（prefix /api/v1）
   └ app/frontend_dist が揃っている場合だけ
       ├ mount("/_app",     StaticFiles(frontend_dist/_app))
       ├ mount("/guardian", StaticFiles(frontend_dist/guardian, html=True))
       ├ GET /teacher         → /teacher/ へ redirect
       └ GET /teacher/{path}  → frontend_dist/200.html
+  └ RECORDER_ENABLED=true かつ app/recorder_dist が揃っている場合
+      └ mount("/rec", StaticFiles(recorder_dist, html=True))
 ```
 
 - 設定を引数で差し替えられるため、テストは本番用の環境変数を読まずにアプリを組み立てられます。
@@ -31,6 +33,8 @@ create_app(settings)
   （[data-model.md](data-model.md) を参照）。
 - `app/frontend_dist/` がない場合、開発では UI をマウントせずに API だけで起動し、`APP_ENV=production` では起動を止めます。
   生成物が不完全な場合は環境を問わず起動を止めます。配信契約の詳細は [frontend.md](frontend.md) の「配信」を参照してください。
+- 録音PWAは `RECORDER_ENABLED=false` が既定です。無効時は `app/recorder_dist/` の有無にかかわらず配信せず、
+  有効な本番環境だけ完全な録音ビルドを必須にします。
 
 ---
 
@@ -51,7 +55,7 @@ create_app(settings)
 
 ## エンドポイントの分類
 
-タグごとのエンドポイント数です（`/api/v1` 配下、合計 63 本）。
+タグごとのエンドポイント数です（`/api/v1` 配下、合計 69 本）。
 
 | タグ | 数 | 代表的なエンドポイント |
 | --- | --- | --- |
@@ -68,13 +72,14 @@ create_app(settings)
 | `guardian archive` | 3 | `POST /guardian-archive-links`, `GET /guardian/archive` |
 | `edge` | 3 | `POST /edge/records`, `POST /edge/heartbeat`, `GET /edge/me` |
 | `cloud audio` | 3 | `POST /edge/audio-jobs`, `GET /audio-jobs` |
+| `recorder` | 6 | `POST /recorder/sessions`, `PUT /recorder/sessions/{id}/segments/{sequence}`, `POST /recorder/sessions/{id}/finalize` |
 | `system` | 3 | `GET /health`, `GET /readiness`, `GET /navigation-badges` |
 | `audit` | 2 | `GET /audit-events`, `GET /audit-events/export.csv` |
 | `notion` | 1 | `POST /records/{id}/notion-sync` |
 
 利用者別の入口:
 
-- **先生用アプリ** … `auth` / `records` / `notifications` / `children` / `teachers` / `schools` / `edge devices` / `audit` / `voice consent` / `voiceprint`
+- **先生用アプリ** … `auth` / `records` / `notifications` / `children` / `teachers` / `schools` / `edge devices` / `audit` / `voice consent` / `voiceprint` / `recorder`
 - **録音端末** … `edge` / `cloud audio`（端末 APIキー認証）
 - **LINE** … `line`（Webhook）
 - **保護者** … `guardian archive` の `GET /guardian/archive` のみ
@@ -82,6 +87,16 @@ create_app(settings)
 GPU ワーカー（`process_cloud_audio_jobs.py`、通常音声と任意の声紋ジョブ）と LINE 送信ワーカー（`send_pending_line_notifications.py`）は
 API を経由せず、API と同じデータベースを直接読み書きします。`GET /notifications/ready` と
 `POST /notifications/{id}/mark-sent` は先生管理者の Bearer 認証が必要なエンドポイントで、同梱の LINE 送信ワーカーは使いません。
+
+### 録音セッションAPI
+
+`/recorder/sessions` 以下は既存の先生Bearer認証を使い、園と録音者をサーバー側で決定します。一般の先生は
+自分の一覧だけを取得し、先生管理者は園全体の安全な状態一覧を取得できます。単一セッションの取得、分割音声の送信、
+確定、破棄は先生管理者を含め録音者本人だけに許可します。
+
+分割音声は0始まりの連番、実録音時間、SHA-256を伴うMP4/AACまたはWebM/Opusです。同じ連番・同じ内容の再送は成功し、
+内容が異なる場合は409にします。`finalize` は欠番がなく累計60分以内であることを検証して202を返し、状態を `queued` にします。
+音声本体と元ファイル名はDBへ保存せず、ランダム名で `RECORDER_SESSION_DIR` へ原子的に保存します。
 
 ---
 

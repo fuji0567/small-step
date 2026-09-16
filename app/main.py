@@ -11,6 +11,7 @@ from app.database import create_database_engine, create_session_factory
 from app.database_migrations import prepare_database
 
 FRONTEND_DIST = Path(__file__).parent / "frontend_dist"
+RECORDER_DIST = Path(__file__).parent / "recorder_dist"
 FRONTEND_REQUIRED_PATHS = (
     Path("200.html"),
     Path("_app"),
@@ -36,6 +37,30 @@ def _should_serve_frontend(directory: Path, *, production: bool) -> bool:
         if not any(path.is_file() for path in (directory / "_app").rglob("*")):
             missing.append("_app/<built asset>")
         raise RuntimeError(f"Svelte frontend build is incomplete: {', '.join(missing)}")
+    return True
+
+
+def _recorder_dist_is_complete(directory: Path) -> bool:
+    """Check the intentionally separate /rec static build root."""
+
+    return (directory / "index.html").is_file() and (directory / "assets").is_dir() and any(
+        path.is_file() for path in (directory / "assets").rglob("*")
+    )
+
+
+def _should_serve_recorder(directory: Path, *, enabled: bool, production: bool) -> bool:
+    """Missing /rec output is fine in development, but enabled production needs it."""
+
+    if not enabled:
+        return False
+    if not directory.exists():
+        if enabled and production:
+            raise RuntimeError(
+                "Recorder frontend build is missing. Build the recorder app into app/recorder_dist/."
+            )
+        return False
+    if not _recorder_dist_is_complete(directory):
+        raise RuntimeError("Recorder frontend build is incomplete: index.html and assets/<built asset> are required")
     return True
 
 
@@ -75,6 +100,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response.headers["Cache-Control"] = "no-cache"
         elif path == "/guardian" or path.startswith("/guardian/"):
             response.headers["Cache-Control"] = "no-cache"
+        elif path.startswith("/rec/assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif path == "/rec" or path.startswith("/rec/"):
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
     application.include_router(router)
@@ -98,6 +127,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         @application.get("/teacher/{path:path}", include_in_schema=False)
         def serve_teacher_app() -> FileResponse:
             return FileResponse(FRONTEND_DIST / "200.html", media_type="text/html")
+
+    if _should_serve_recorder(
+        RECORDER_DIST,
+        enabled=runtime_settings.recorder_enabled,
+        production=runtime_settings.app_env == "production",
+    ):
+        application.mount(
+            "/rec",
+            StaticFiles(directory=RECORDER_DIST, html=True),
+            name="recorder-web",
+        )
 
     return application
 

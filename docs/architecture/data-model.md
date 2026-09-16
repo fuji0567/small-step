@@ -26,6 +26,9 @@ erDiagram
     Record ||--o| NotionSync : "同期"
     EdgeDevice ||--o{ CloudAudioJob : "投入"
     CloudAudioJob }o--o| Record : "生成"
+    Teacher ||--o{ RecordingSession : "録音"
+    RecordingSession ||--o{ RecordingSegment : "分割"
+    RecordingSession }o--o| Record : "生成予定"
 ```
 
 ---
@@ -43,6 +46,8 @@ erDiagram
 | `line_link_invitations` | 保護者連携の招待コード | `code_hash` のみ保存。使用・失効を日時で記録 |
 | `guardian_archive_links` | 配信アーカイブの URL | `token_hash` のみ保存。期限つき・失効可能 |
 | `cloud_audio_jobs` | クラウド GPU 処理ジョブ | メタデータのみ。音声本体はファイルシステム上の短命保管 |
+| `recording_sessions` | `/rec/` の録音セッション | 所有者、状態、期限、結果記録IDだけを保存。音声と文字起こしは保存しない |
+| `recording_segments` | 約1分ごとの分割音声メタデータ | 連番、時間、サイズ、SHA-256、MIME、ランダム保存キー。音声本体は短命ファイル |
 | `voice_enrollment_consents` | 声紋登録の同意 | 目的・ポリシー版・保持日数・失効を記録 |
 | `teacher_voiceprints` | 先生の声紋 | 暗号化した特徴量だけを先生ごとに1件保存。元音声は保存しない |
 | `voiceprint_jobs` | 声紋登録・本人確認ジョブ | 一時音声のランダムキーと処理結果。本人以外には返さない |
@@ -71,6 +76,7 @@ stateDiagram-v2
 | `notifications` | `status` | `waiting_guardian_link` → `pending`（保護者連携）→ `sent` / `failed`。`failed` → `pending`（再送予約）。`pending` / `waiting_guardian_link` → `cancelled` |
 | `cloud_audio_jobs` | `status` | `queued` → `processing` → `completed` / `failed` / `expired` |
 | `voiceprint_jobs` | `status` | `queued` → `processing` → `completed` / `failed` / `expired` |
+| `recording_sessions` | `status` | `draft` → `queued` → `processing` → `completed` / `failed`。別経路は `discarded` / `expired` |
 | `teachers` | `role` | `teacher` / `school_admin` |
 | `records` | `category` | `growth`（成長の記録） / `injury`（けがの記録） |
 
@@ -101,6 +107,8 @@ stateDiagram-v2
 | 同じ音声が二重にアップロードされる | `cloud_audio_jobs` の `(device_id, edge_upload_id)` を照合して既存ジョブを返す |
 | 1 記録に通知が二重に作られる | `notifications.record_id` に一意制約 |
 | 複数の GPU ワーカーが同じジョブを取る | `claim_token` による排他取得 |
+| 同じ録音セッションを二重に作る | `recording_sessions(teacher_id, client_session_id)` の一意制約 |
+| 同じ分割番号を二重に保存する | `recording_segments(session_id, sequence)` の一意制約とSHA-256照合 |
 | 招待コードが複数有効になる | 新規発行時に同じ園児の未使用コードを失効 |
 | 同じ記録を Notion へ二重投稿する | `notion_syncs.record_id` に一意制約 |
 

@@ -19,6 +19,39 @@ export interface CloudAudioJob {
   updated_at: string;
 }
 
+export type RecorderSessionStatus =
+  | 'draft'
+  | 'queued'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'discarded'
+  | 'expired';
+
+/** APIが公開する録音セッションの安全なメタデータ。音声本文・保存先は含めない。 */
+export interface RecorderSessionSegment {
+  sequence: number;
+  duration_ms: number;
+  size_bytes: number;
+  sha256: string;
+  media_type: string;
+  created_at: string;
+}
+
+/** APIのRecordingSessionReadに対応する先生画面用の型。内部IDは描画しない。 */
+export interface RecorderSession {
+  id: string;
+  client_session_id: string;
+  status: RecorderSessionStatus;
+  segments: RecorderSessionSegment[];
+  total_duration_ms: number;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+  record_id: string | null;
+  audio_processing_incomplete: boolean | null;
+}
+
 export type AuditEventAction =
   | 'line_link_invitation_issued'
   | 'guardian_line_linked'

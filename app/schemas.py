@@ -10,6 +10,7 @@ from app.models import (
     NotificationStatus,
     RecordCategory,
     RecordStatus,
+    RecordingSessionStatus,
     TeacherRole,
     VoiceprintJobKind,
     VoiceprintJobStatus,
@@ -94,6 +95,44 @@ class RuntimeReadinessRead(BaseModel):
     cloud_audio_worker_ready: bool | None
     line_delivery_configured: bool
     line_delivery_worker_ready: bool | None
+
+
+class RecordingSegmentRead(APIModel):
+    """Safe metadata returned to the recorder so interrupted sends can resume."""
+
+    sequence: int = Field(ge=0)
+    duration_ms: int = Field(ge=1)
+    size_bytes: int = Field(ge=1)
+    sha256: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    media_type: str = Field(min_length=1, max_length=128)
+    created_at: datetime
+
+    @field_validator("created_at")
+    @classmethod
+    def normalise_created_at(cls, value: datetime) -> datetime:
+        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+class RecordingSessionCreate(BaseModel):
+    client_session_id: UUID
+
+
+class RecordingSessionRead(APIModel):
+    id: UUID
+    client_session_id: UUID
+    status: RecordingSessionStatus
+    segments: list[RecordingSegmentRead] = Field(default_factory=list)
+    total_duration_ms: int = Field(ge=0)
+    expires_at: datetime
+    created_at: datetime
+    updated_at: datetime
+    record_id: UUID | None = None
+    audio_processing_incomplete: bool | None = None
+
+    @field_validator("expires_at", "created_at", "updated_at")
+    @classmethod
+    def normalise_session_datetimes(cls, value: datetime) -> datetime:
+        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
 class NavigationBadgeSummaryRead(BaseModel):

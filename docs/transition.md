@@ -179,7 +179,7 @@ stateDiagram-v2
 | `/teacher/review/new/` | 手入力に必要な園児一覧・園設定を取得 |
 | `/teacher/records/` | `GET /records` を履歴条件付きで取得 |
 | `/teacher/notifications/` | `GET /notifications` |
-| `/teacher/audio-jobs/` | `GET /audio-jobs` |
+| `/teacher/audio-jobs/` | `GET /audio-jobs` と `GET /recorder/sessions` |
 | `/teacher/children/` | 園児、連携状況、招待状況を取得 |
 | `/teacher/voice-consent/` | `GET /voice-consent/me` |
 | `/teacher/settings/` | 選択中の園設定を表示 |
@@ -385,7 +385,7 @@ flowchart TD
 | 園児・保護者 | なし（同上） |
 | 通知状況 | `GET /notifications` |
 | 記録履歴 | `GET /records`（履歴条件つき） |
-| 音声処理状況 | `GET /audio-jobs` |
+| 音声処理状況 | `GET /audio-jobs` と `GET /recorder/sessions` |
 | 声紋設定 | `GET /voice-consent/me` と `GET /voiceprint/me` |
 | 録音端末 | `GET /edge-devices` |
 | 園の設定 | 再描画のみ（フェッチなし） |

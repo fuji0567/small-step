@@ -4,7 +4,7 @@
 - 画面一覧と遷移図: [../transition.md](../transition.md)
 - 移行時の判断と履歴: [../svelte-migration-runbook.md](../svelte-migration-runbook.md)
 
-現在のフロントエンドは `frontend/` の Svelte 5 runes、TypeScript、SvelteKit で構成します。
+先生用・保護者用フロントエンドは `frontend/` の Svelte 5 runes、TypeScript、SvelteKit で構成します。
 `@sveltejs/adapter-static` が `app/frontend_dist/` へ生成した静的ファイルを FastAPI が配信します。
 SvelteKit のサーバーへ業務ロジックを移しておらず、API と認可の本体は引き続き FastAPI です。
 
@@ -13,9 +13,29 @@ SvelteKit のサーバーへ業務ロジックを移しておらず、API と認
 | `/teacher/*` | `frontend/src/routes/teacher/` | CSR。`200.html` への先生用限定 SPA fallback | 先生・先生管理者 |
 | `/guardian/` | `frontend/src/routes/guardian/` | prerender 済み静的ページ | 保護者 |
 | `/_app/*` | SvelteKit の content hash 付き asset | `StaticFiles` | 両画面 |
+| `/rec/` | `recorder_frontend/` | 独立したSvelte 5＋Vite PWA | 先生・先生管理者 |
+| `/rec/assets/*` | Viteのcontent hash付きasset | `StaticFiles` | 録音PWA |
 
 `app/web/` と `app/guardian/` の旧 HTML / CSS / JavaScript は、切り替え後のロールバック用に
 ファイルを保持しています。ただし現在の `/teacher/` と `/guardian/` にはマウントされません。
+
+## 独立録音PWA
+
+`recorder_frontend/` は既存SvelteKitアプリとpackage、lockfile、ビルド成果物を共有しません。録音開始前に
+サーバー接続と先生ログインを確認し、MediaRecorderを約1分ごとに停止・再作成して単独送信できるMP4/AACまたは
+WebM/Opusを作ります。一時停止、停止、画面の非表示、マイク中断でも現在の端数を確定し、画面やマイクが中断した後は
+利用者が明示的に再開します。実録音時間だけを数え、60分で自動停止します。
+
+音声と安全な再送メタデータはIndexedDBへ最大3セッション、最終更新から24時間だけ保存します。別の先生の未送信データは
+日時・時間・内容を表示せず、元の録音者のログインだけを求めます。資格情報は `sessionStorage` だけに保存し、独自ログインの
+更新トークンは録音開始前・送信前と録音中の定期更新に使います。自動再送は、利用者が送信を選んだ後に通信が途切れた
+`uploading` 状態だけを対象にし、別タブから録音中・停止後確認中のセッションを確定しません。Service Workerはアプリシェルと
+`/rec/assets/` だけを扱い、API、認証、音声、非GETリクエストをキャッシュしません。`/rec/` のナビゲーションは
+ネットワークを優先し、オフライン時だけキャッシュ済みのシェルへ戻します。
+ブラウザが録音中に終了した場合は、最後の端末保存から約2分経過した `recording` 状態を中断済みとして回収し、
+次回起動時に利用者が送信または破棄を選べる状態へ戻します。
+
+---
 
 ---
 
@@ -32,7 +52,7 @@ SvelteKit のサーバーへ業務ロジックを移しておらず、API と認
 | `/teacher/review/new/` | `teacher/review/new/+page.svelte` | 日誌の手入力 |
 | `/teacher/records/` | `teacher/records/+page.svelte` | 記録履歴、管理者の CSV 出力 |
 | `/teacher/notifications/` | `teacher/notifications/+page.svelte` | 通知状況、管理者操作 |
-| `/teacher/audio-jobs/` | `teacher/audio-jobs/+page.svelte` | 安全な音声処理メタデータ |
+| `/teacher/audio-jobs/` | `teacher/audio-jobs/+page.svelte` | 録音PWAの処理待ちとクラウド音声処理の安全なメタデータ |
 | `/teacher/children/` | `teacher/children/+page.svelte` | 園児・保護者 LINE 連携 |
 | `/teacher/voice-consent/` | `teacher/voice-consent/+page.svelte` | 声紋利用への同意・登録・本人確認・削除 |
 | `/teacher/settings/` | `teacher/settings/+page.svelte` | 園設定（管理者） |
@@ -147,8 +167,9 @@ FastAPI は生成物が揃っている場合だけ Svelte UI を有効にしま�
 HTML は `Cache-Control: no-cache`、`/_app/immutable/*` は
 `Cache-Control: public, max-age=31536000, immutable` です。
 
-Dockerfile は Node.js 24.19.0 の build stage で `npm ci` と検証・ビルドを実行し、Python runtime stage には
-`app/frontend_dist/` だけをコピーします。実運用環境へのデプロイ確認は別途必要です。
+Dockerfile は Node.js 24.19.0 の独立したbuild stageで両packageの `npm ci` と検証・ビルドを実行し、
+Python runtime stageには `app/frontend_dist/` と `app/recorder_dist/` の生成物だけをコピーします。録音PWAは
+`RECORDER_ENABLED=true` のときだけ配信します。実運用環境へのデプロイ確認は別途必要です。
 
 ---
 
@@ -172,6 +193,18 @@ npm run check
 npm run test:unit
 npm run test:e2e:install  # 初回だけ
 npm run test:e2e
+npm run build
+```
+
+録音PWAは別packageとして同じ検証を行います（Playwright実機相当試験は後続です）。
+
+```bash
+cd recorder_frontend
+npm ci
+npm run format:check
+npm run lint
+npm run check
+npm run test:unit
 npm run build
 ```
 

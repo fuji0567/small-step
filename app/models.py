@@ -64,6 +64,18 @@ class VoiceprintJobStatus(str, enum.Enum):
     expired = "expired"
 
 
+class RecordingSessionStatus(str, enum.Enum):
+    """Lifecycle states for the independent recorder application."""
+
+    draft = "draft"
+    queued = "queued"
+    processing = "processing"
+    completed = "completed"
+    failed = "failed"
+    discarded = "discarded"
+    expired = "expired"
+
+
 class WorkerHeartbeat(Base):
     """A data-free liveness marker written by a long-running worker."""
 
@@ -323,9 +335,61 @@ class Record(Base):
     summary: Mapped[str] = mapped_column(Text)
     conversation_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     anonymized_context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Set by the recorder worker when one or more audio ranges could not be
+    # analysed after the permitted retry.  The source audio itself is never a
+    # database field.
+    audio_processing_incomplete: Mapped[bool] = mapped_column(Boolean, default=False)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class RecordingSession(Base):
+    """Metadata for one independently uploaded recorder session.
+
+    Segment bytes live below the configured recorder directory.  Keeping the
+    random storage key here lets a future CPU worker consume the files without
+    ever putting raw audio, an original filename, or a transcript in SQLite or
+    PostgreSQL.
+    """
+
+    __tablename__ = "recording_sessions"
+    __table_args__ = (
+        UniqueConstraint(
+            "teacher_id", "client_session_id", name="uq_recording_session_owner_client"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_text)
+    school_id: Mapped[str] = mapped_column(ForeignKey("schools.id"), index=True)
+    teacher_id: Mapped[str] = mapped_column(ForeignKey("teachers.id"), index=True)
+    client_session_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    status: Mapped[RecordingSessionStatus] = mapped_column(
+        Enum(RecordingSessionStatus), default=RecordingSessionStatus.draft, index=True
+    )
+    record_id: Mapped[str | None] = mapped_column(ForeignKey("records.id"), nullable=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class RecordingSegment(Base):
+    """One independently playable recorder file and its integrity metadata."""
+
+    __tablename__ = "recording_segments"
+    __table_args__ = (
+        UniqueConstraint("session_id", "sequence", name="uq_recording_segment_session_sequence"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_text)
+    session_id: Mapped[str] = mapped_column(ForeignKey("recording_sessions.id"), index=True)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class Notification(Base):

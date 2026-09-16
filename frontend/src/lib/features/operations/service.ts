@@ -1,11 +1,17 @@
 import {
   ApiClient,
+  ApiError,
   ApiInvalidResponseError,
   getRuntimeReadiness,
   type RuntimeReadiness
 } from '$lib/api';
 
-import type { AuditEvent, AuditFilters, CloudAudioJob } from './types';
+import type {
+  AuditEvent,
+  AuditFilters,
+  CloudAudioJob,
+  RecorderSession
+} from './types';
 
 function dateFilterToIso(value: string, endOfDay = false): string | null {
   if (!value) return null;
@@ -43,6 +49,25 @@ export class OperationsService {
     );
     if (!Array.isArray(value)) throw new ApiInvalidResponseError();
     return value;
+  }
+
+  async listRecorderSessions(
+    schoolId: string,
+    signal?: AbortSignal
+  ): Promise<RecorderSession[]> {
+    try {
+      const value = await this.api.requestJson<RecorderSession[]>(
+        `/recorder/sessions?${new URLSearchParams({ school_id: schoolId })}`,
+        { signal }
+      );
+      if (!Array.isArray(value)) throw new ApiInvalidResponseError();
+      return value;
+    } catch (error) {
+      // The recorder API is intentionally absent (404) while RECORDER_ENABLED
+      // is false. That is a normal deployment state, not a teacher-facing error.
+      if (error instanceof ApiError && error.status === 404) return [];
+      throw error;
+    }
   }
 
   readiness(signal?: AbortSignal): Promise<RuntimeReadiness> {

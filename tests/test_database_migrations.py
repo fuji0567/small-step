@@ -29,6 +29,13 @@ def test_initial_migration_creates_the_current_schema(tmp_path):
         voiceprint_job_columns = {
             column["name"] for column in inspector.get_columns("voiceprint_jobs")
         }
+        recording_session_columns = {
+            column["name"] for column in inspector.get_columns("recording_sessions")
+        }
+        recording_segment_columns = {
+            column["name"] for column in inspector.get_columns("recording_segments")
+        }
+        record_columns = {column["name"] for column in inspector.get_columns("records")}
     finally:
         engine.dispose()
 
@@ -41,10 +48,34 @@ def test_initial_migration_creates_the_current_schema(tmp_path):
         "worker_heartbeats",
         "teacher_voiceprints",
         "voiceprint_jobs",
+        "recording_sessions",
+        "recording_segments",
     } <= tables
     assert {"detected_speaker_count", "used_low_volume_retry", "candidate_category"} <= columns
     assert {"kind", "similarity_score", "matched", "claim_token"} <= voiceprint_job_columns
-    assert migration_revision(database_url) == "0021_teacher_voiceprints"
+    assert {
+        "id",
+        "school_id",
+        "teacher_id",
+        "client_session_id",
+        "status",
+        "record_id",
+        "expires_at",
+        "created_at",
+        "updated_at",
+    } <= recording_session_columns
+    assert {
+        "id",
+        "session_id",
+        "sequence",
+        "duration_ms",
+        "size_bytes",
+        "sha256",
+        "media_type",
+        "storage_key",
+    } <= recording_segment_columns
+    assert "audio_processing_incomplete" in record_columns
+    assert migration_revision(database_url) == "0022_recording_sessions"
 
 
 def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_path):
@@ -58,4 +89,4 @@ def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_pat
     message = prepare_database(database_url)
 
     assert "登録しました" in message
-    assert migration_revision(database_url) == "0021_teacher_voiceprints"
+    assert migration_revision(database_url) == "0022_recording_sessions"

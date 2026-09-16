@@ -27,6 +27,15 @@ def write_complete_frontend(directory: Path) -> None:
     (directory / "_app/immutable/app-123.js").write_text("export {};", encoding="utf-8")
 
 
+def write_complete_recorder(directory: Path) -> None:
+    (directory / "assets").mkdir(parents=True)
+    (directory / "index.html").write_text(
+        '<!doctype html><script type="module" src="/rec/assets/app-123.js"></script>',
+        encoding="utf-8",
+    )
+    (directory / "assets/app-123.js").write_text("export {};", encoding="utf-8")
+
+
 def test_development_without_a_build_leaves_frontend_urls_unmounted(tmp_path, monkeypatch):
     monkeypatch.setattr(main_module, "FRONTEND_DIST", tmp_path / "missing-frontend-dist")
     application = main_module.create_app(development_settings(tmp_path))
@@ -52,6 +61,53 @@ def test_production_requires_a_frontend_build(tmp_path):
 
     with pytest.raises(RuntimeError, match="frontend build is missing"):
         main_module._should_serve_frontend(missing, production=True)
+
+
+def test_recorder_build_is_optional_when_disabled_and_required_when_enabled_in_production(tmp_path):
+    missing = tmp_path / "missing-recorder-dist"
+    assert main_module._should_serve_recorder(missing, enabled=False, production=False) is False
+    with pytest.raises(RuntimeError, match="Recorder frontend build is missing"):
+        main_module._should_serve_recorder(missing, enabled=True, production=True)
+
+    incomplete = tmp_path / "stale-recorder-dist"
+    incomplete.mkdir()
+    assert main_module._should_serve_recorder(incomplete, enabled=False, production=True) is False
+
+
+def test_recorder_delivery_redirect_cache_and_isolation(tmp_path, monkeypatch):
+    frontend_dist = tmp_path / "frontend-dist"
+    recorder_dist = tmp_path / "recorder-dist"
+    write_complete_frontend(frontend_dist)
+    write_complete_recorder(recorder_dist)
+    monkeypatch.setattr(main_module, "FRONTEND_DIST", frontend_dist)
+    monkeypatch.setattr(main_module, "RECORDER_DIST", recorder_dist)
+    application = main_module.create_app(
+        Settings(
+            database_url=f"sqlite:///{tmp_path}/recorder.db",
+            auth_mode="development",
+            recorder_enabled=True,
+        )
+    )
+
+    with TestClient(application) as client:
+        root = client.get("/rec", follow_redirects=False)
+        index = client.get("/rec/")
+        asset = client.get("/rec/assets/app-123.js")
+        missing_asset = client.get("/rec/assets/missing.js")
+        teacher = client.get("/teacher/")
+        api = client.get("/api/v1/not-a-route")
+
+    assert root.status_code == 307
+    assert urlsplit(root.headers["location"]).path == "/rec/"
+    assert root.headers["cache-control"] == "no-cache"
+    assert index.status_code == 200
+    assert index.headers["cache-control"] == "no-cache"
+    assert asset.status_code == 200
+    assert asset.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert missing_asset.status_code == 404
+    assert teacher.status_code == 200
+    assert teacher.headers["cache-control"] == "no-cache"
+    assert api.status_code == 404
 
 
 def test_svelte_frontends_use_teacher_only_spa_fallback(tmp_path, monkeypatch):

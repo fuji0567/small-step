@@ -1,4 +1,9 @@
-import type { AuditEventAction, CloudAudioJobStatus } from './types';
+import type {
+  AuditEventAction,
+  CloudAudioJobStatus,
+  RecorderSession,
+  RecorderSessionStatus
+} from './types';
 
 export function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat('ja-JP', {
@@ -26,6 +31,56 @@ export function audioDescription(status: CloudAudioJobStatus): string {
       '音声は削除済みです。録音設定を確認して、もう一度送信してください。',
     expired: '時間内に処理されなかったため、音声を削除しました。'
   }[status];
+}
+
+export function recorderStatusLabel(status: RecorderSessionStatus): string {
+  return {
+    draft: '送信前',
+    queued: 'ワーカー待ち',
+    processing: '処理中',
+    completed: '記録作成済み',
+    failed: '処理失敗',
+    discarded: '破棄済み',
+    expired: '期限切れ'
+  }[status];
+}
+
+export function recorderDescription(status: RecorderSessionStatus): string {
+  return {
+    draft: '録音の送信がまだ確定していません。',
+    queued: '録音を処理するワーカーの作業待ちです。',
+    processing: '録音を処理しています。',
+    completed: 'レビュー待ちの記録を作成しました。',
+    failed: '録音の処理に失敗しました。設定を確認してください。',
+    discarded: '録音は破棄されています。',
+    expired: '期限を過ぎたため、録音を処理できませんでした。'
+  }[status];
+}
+
+export function recorderTone(status: RecorderSessionStatus) {
+  if (status === 'completed') return 'success' as const;
+  if (status === 'failed') return 'error' as const;
+  if (status === 'processing') return 'info' as const;
+  if (status === 'expired') return 'warning' as const;
+  return 'neutral' as const;
+}
+
+export function recorderDuration(session: RecorderSession): string {
+  const totalSeconds = Math.max(
+    0,
+    Math.floor(session.total_duration_ms / 1000)
+  );
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+export function recorderSize(session: RecorderSession): string {
+  const totalBytes = session.segments.reduce(
+    (sum, segment) => sum + Math.max(0, segment.size_bytes),
+    0
+  );
+  return `${new Intl.NumberFormat('ja-JP').format(totalBytes)}バイト`;
 }
 
 export const AUDIT_ACTION_LABELS: Record<AuditEventAction, string> = {

@@ -15,8 +15,9 @@ GPU が必要なのはクラウド音声処理モードのワーカーだけで�
 | `Dockerfile.gpu` | `nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04` | GPU ワーカー専用 |
 | `Dockerfile.database-tools` | `postgres:18.6-bookworm` | PostgreSQLバックアップと復元リハーサル専用 |
 
-`Dockerfile` は multi-stage build です。Node stage で `npm ci`、`format:check`、lint、check、unit、build を実行し、
-`app/frontend_dist/` だけを Python runtime stage へコピーします。Node.js と `node_modules` は runtime image に含めません。
+`Dockerfile` は multi-stage build です。既存 `frontend/` と録音用 `recorder_frontend/` の独立したNode stageで
+`npm ci`、`format:check`、lint、check、unit、buildを実行し、`app/frontend_dist/` と `app/recorder_dist/` だけを
+Python runtime stageへコピーします。Node.jsと `node_modules` はruntime imageに含めません。
 API用とGPU用の2イメージは UID 10001 の非 root ユーザー `appuser` で動きます。
 GPU イメージだけが `edge-audio` / `speaker-diarization` の extras を入れるため、
 API イメージは小さいまま保てます。
@@ -133,6 +134,7 @@ vLLMは初回起動にモデル読込とGPU最適化で数分かかるため、�
 | `DATABASE_URL` | `sqlite:///./data/otayori.db` | 非 SQLite を強制 |
 | `EDGE_AUDIO_PROCESSING_MODE` | `local` | `local` / `cloud` |
 | `CLOUD_AUDIO_ENABLED` | `false` | 必要なときだけ `true` |
+| `RECORDER_ENABLED` | `false` | CPUワーカー・園内HTTPS・実機試験が揃った後だけ `true` |
 | `VOICEPRINT_ENABLED` | `false` | 同意済み先生の登録・本人確認を行うときだけ `true` |
 | `GUARDIAN_ARCHIVE_BASE_URL` | `http://127.0.0.1:8000` | アーカイブ有効時は HTTPS を強制 |
 | 移行の適用 | アプリ起動時に自動（SQLite のみ） | `migrate` サービスで明示適用 |
