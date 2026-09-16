@@ -26,9 +26,8 @@ def test_initial_migration_creates_the_current_schema(tmp_path):
         inspector = inspect(engine)
         tables = set(inspector.get_table_names())
         columns = {column["name"] for column in inspector.get_columns("cloud_audio_jobs")}
-        voiceprint_job_columns = {
-            column["name"] for column in inspector.get_columns("voiceprint_jobs")
-        }
+        voiceprint_job_columns = {column["name"] for column in inspector.get_columns("voiceprint_jobs")}
+        voiceprint_columns = {column["name"] for column in inspector.get_columns("teacher_voiceprints")}
     finally:
         engine.dispose()
 
@@ -42,9 +41,22 @@ def test_initial_migration_creates_the_current_schema(tmp_path):
         "teacher_voiceprints",
         "voiceprint_jobs",
     } <= tables
-    assert {"detected_speaker_count", "used_low_volume_retry", "candidate_category"} <= columns
-    assert {"kind", "similarity_score", "matched", "claim_token"} <= voiceprint_job_columns
-    assert migration_revision(database_url) == "0021_teacher_voiceprints"
+    assert {
+        "detected_speaker_count",
+        "used_low_volume_retry",
+        "candidate_category",
+    } <= columns
+    assert {
+        "kind",
+        "similarity_score",
+        "matched",
+        "claim_token",
+        "sample_storage_keys",
+        "quality_issue",
+        "quality_sample_index",
+    } <= voiceprint_job_columns
+    assert "sample_count" in voiceprint_columns
+    assert migration_revision(database_url) == "0022_voiceprint_multi_sample"
 
 
 def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_path):
@@ -58,4 +70,4 @@ def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_pat
     message = prepare_database(database_url)
 
     assert "登録しました" in message
-    assert migration_revision(database_url) == "0021_teacher_voiceprints"
+    assert migration_revision(database_url) == "0022_voiceprint_multi_sample"

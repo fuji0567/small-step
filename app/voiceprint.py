@@ -8,6 +8,9 @@ from collections.abc import Sequence
 from typing import Protocol
 
 
+VOICEPRINT_ENROLLMENT_SAMPLE_COUNT = 3
+
+
 class VoiceprintError(RuntimeError):
     """Raised when a voiceprint cannot be safely produced or decoded."""
 
@@ -34,6 +37,34 @@ def cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
     normalized_left = normalize_embedding(left)
     normalized_right = normalize_embedding(right)
     return max(-1.0, min(1.0, sum(a * b for a, b in zip(normalized_left, normalized_right))))
+
+
+def average_embeddings(embeddings: Sequence[Sequence[float]]) -> list[float]:
+    if not embeddings:
+        raise VoiceprintError("At least one speaker embedding is required")
+    averaged: list[float] | None = None
+    for embedding in embeddings:
+        normalized = normalize_embedding(embedding)
+        try:
+            if averaged is None:
+                averaged = [0.0] * len(normalized)
+            elif len(normalized) != len(averaged):
+                raise VoiceprintError("Speaker embeddings have incompatible dimensions")
+            for index, value in enumerate(normalized):
+                averaged[index] += value
+        finally:
+            normalized.clear()
+    assert averaged is not None
+    return normalize_embedding([value / len(embeddings) for value in averaged])
+
+
+def voiceprint_storage_keys(
+    primary_key: str,
+    sample_keys: Sequence[str] | None,
+) -> tuple[str, ...]:
+    """Return every random short-lived key once, including legacy single-file jobs."""
+
+    return tuple(dict.fromkeys(sample_keys or [primary_key]))
 
 
 def encrypt_embedding(values: Sequence[float], encryption_key: str) -> str:

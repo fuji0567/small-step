@@ -43,8 +43,8 @@ describe('voice recorder', () => {
     expect(file.size).toBeGreaterThan(0);
   });
 
-  it('録音時間を5秒以上15秒以内に制限する', () => {
-    expect(MIN_VOICE_RECORDING_SECONDS).toBe(5);
+  it('録音時間を10秒以上15秒以内に制限する', () => {
+    expect(MIN_VOICE_RECORDING_SECONDS).toBe(10);
     expect(MAX_VOICE_RECORDING_SECONDS).toBe(15);
   });
 });

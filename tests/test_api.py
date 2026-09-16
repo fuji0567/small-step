@@ -3495,10 +3495,20 @@ def test_teacher_voiceprint_api_requires_enrollment_and_deletes_jobs_on_revoke(t
         )
         assert rejected.status_code == 409
 
-        created = client.post(
+        incomplete = client.post(
             "/api/v1/voiceprint/me/enroll",
             headers=headers,
             files={"audio": ("voice.wav", b"RIFF-test", "audio/wav")},
+        )
+        assert incomplete.status_code == 422
+
+        created = client.post(
+            "/api/v1/voiceprint/me/enroll",
+            headers=headers,
+            files=[
+                ("audio", (f"voice-{index}.wav", b"RIFF-test", "audio/wav"))
+                for index in range(1, 4)
+            ],
         )
         assert created.status_code == 201
         assert created.json()["kind"] == VoiceprintJobKind.enrollment.value
@@ -3509,14 +3519,16 @@ def test_teacher_voiceprint_api_requires_enrollment_and_deletes_jobs_on_revoke(t
         with app.state.session_factory() as db:
             job = db.get(VoiceprintJob, job_id)
             assert job is not None
-            raw_path = job_dir / job.storage_key
-            assert raw_path.is_file()
+            assert job.sample_storage_keys is not None
+            assert len(job.sample_storage_keys) == 3
+            raw_paths = [job_dir / storage_key for storage_key in job.sample_storage_keys]
+            assert all(raw_path.is_file() for raw_path in raw_paths)
 
         revoked = client.post("/api/v1/voice-consent/me/revoke", headers=headers)
         assert revoked.status_code == 200
         assert revoked.json()["is_active"] is False
 
-    assert not raw_path.exists()
+    assert all(not raw_path.exists() for raw_path in raw_paths)
     with app.state.session_factory() as db:
         assert db.scalar(select(VoiceprintJob).where(VoiceprintJob.teacher_id == teacher_id)) is None
         assert db.scalar(select(TeacherVoiceprint).where(TeacherVoiceprint.teacher_id == teacher_id)) is None

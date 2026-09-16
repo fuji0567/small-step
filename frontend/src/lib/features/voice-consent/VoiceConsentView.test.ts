@@ -136,6 +136,10 @@ describe('VoiceConsentView', () => {
     });
 
     const start = await screen.findByRole('button', { name: '録音を開始' });
+    expect(screen.getByText('0/3回完了')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: '3回の音声で声紋を登録' })
+    ).toBeDisabled();
     await fireEvent.click(start);
 
     expect(getUserMedia).toHaveBeenCalledWith({

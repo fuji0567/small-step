@@ -15,13 +15,15 @@
     VoiceConsent,
     Voiceprint,
     VoiceprintJob,
-    VoiceprintJobKind
+    VoiceprintJobKind,
+    VoiceprintQualityIssue
   } from './types';
   import {
     createVoiceRecordingFile,
     MAX_VOICE_RECORDING_SECONDS,
     MIN_VOICE_RECORDING_SECONDS,
     selectVoiceRecordingFormat,
+    VOICEPRINT_ENROLLMENT_SAMPLE_COUNT,
     type VoiceRecordingFormat
   } from './voice-recorder';
   import './voice-consent.css';
@@ -33,17 +35,26 @@
     controller: AppController;
   };
 
+  type CapturedSample = {
+    file: File;
+    previewUrl: string;
+    durationSeconds: number | null;
+  };
+
   let { api, enabled, voiceprintEnabled, controller }: Props = $props();
   const service = $derived(new VoiceConsentService(api));
   let consent = $state<VoiceConsent | null>(null);
   let voiceprint = $state<Voiceprint | null>(null);
   let activeJob = $state<VoiceprintJob | null>(null);
-  let audioFile = $state<File | null>(null);
+  let captureKind = $state<VoiceprintJobKind>('enrollment');
+  let capturedSamples = $state<CapturedSample[]>([]);
+  const requiredSampleCount = $derived(
+    captureKind === 'enrollment' ? VOICEPRINT_ENROLLMENT_SAMPLE_COUNT : 1
+  );
   let recordingSupported = $state(false);
   let recordingStarting = $state(false);
   let recording = $state(false);
   let recordingSeconds = $state(0);
-  let recordedAudioUrl = $state<string | null>(null);
   let retentionDays = $state(30);
   let accepted = $state(false);
   let loading = $state(false);
@@ -128,7 +139,7 @@
       voiceprint = null;
       activeJob = null;
       cleanupActiveRecording();
-      clearRecordingSelection();
+      clearCapturedSamples();
       noticeMessage =
         '同意を取り消し、登録済みの声紋と処理中の音声を削除しました。';
       await controller.refresh(['voiceConsent']);
@@ -151,11 +162,35 @@
     mediaStream = null;
   }
 
-  function clearRecordingSelection(): void {
-    if (recordedAudioUrl) URL.revokeObjectURL(recordedAudioUrl);
-    recordedAudioUrl = null;
-    audioFile = null;
+  function clearCapturedSamples(): void {
+    for (const sample of capturedSamples) {
+      URL.revokeObjectURL(sample.previewUrl);
+    }
+    capturedSamples = [];
     recordingSeconds = 0;
+  }
+
+  function removeCapturedSample(index: number, announce = true): void {
+    const sample = capturedSamples[index];
+    if (!sample) return;
+    URL.revokeObjectURL(sample.previewUrl);
+    capturedSamples = capturedSamples.filter(
+      (_capturedSample, sampleIndex) => sampleIndex !== index
+    );
+    activeJob = null;
+    if (announce) {
+      noticeMessage = `${index + 1}回目の音声を外しました。もう一度録音してください。`;
+    }
+  }
+
+  function selectCaptureKind(kind: VoiceprintJobKind): void {
+    if (captureKind === kind) return;
+    cleanupActiveRecording();
+    clearCapturedSamples();
+    captureKind = kind;
+    activeJob = null;
+    errorMessage = null;
+    noticeMessage = null;
   }
 
   function cleanupActiveRecording(): void {
@@ -199,14 +234,25 @@
 
     try {
       const file = createVoiceRecordingFile(chunks, format.mimeType);
-      clearRecordingSelection();
-      audioFile = file;
-      recordedAudioUrl = URL.createObjectURL(file);
+      capturedSamples = [
+        ...capturedSamples,
+        {
+          file,
+          previewUrl: URL.createObjectURL(file),
+          durationSeconds: Math.min(
+            MAX_VOICE_RECORDING_SECONDS,
+            Math.round(durationSeconds)
+          )
+        }
+      ];
       recordingSeconds = Math.min(
         MAX_VOICE_RECORDING_SECONDS,
         Math.round(durationSeconds)
       );
-      noticeMessage = '録音が完了しました。内容を確認して登録してください。';
+      noticeMessage =
+        capturedSamples.length === requiredSampleCount
+          ? `${capturedSamples.length}/${requiredSampleCount}回の録音が完了しました。内容を確認して送信してください。`
+          : `${capturedSamples.length}/${requiredSampleCount}回完了しました。次の音声を録音してください。`;
     } catch (error) {
       errorMessage =
         error instanceof Error ? error.message : '録音を保存できませんでした。';
@@ -215,6 +261,10 @@
 
   async function startRecording(): Promise<void> {
     if (recordingStarting || recording) return;
+    if (capturedSamples.length >= requiredSampleCount) {
+      errorMessage = '必要な回数の録音が完了しています。録り直す音声を外してください。';
+      return;
+    }
     errorMessage = null;
     noticeMessage = null;
     const format = selectVoiceRecordingFormat((mimeType) =>
@@ -227,7 +277,6 @@
     }
 
     cleanupActiveRecording();
-    clearRecordingSelection();
     const requestId = ++recordingRequestId;
     recordingStarting = true;
     try {
@@ -302,9 +351,41 @@
   function chooseAudio(event: Event): void {
     const input = event.currentTarget as HTMLInputElement;
     cleanupActiveRecording();
-    clearRecordingSelection();
-    audioFile = input.files?.[0] ?? null;
-    if (audioFile) noticeMessage = '音声ファイルを選択しました。';
+    const files = Array.from(input.files ?? []);
+    if (files.length !== requiredSampleCount) {
+      errorMessage = `${requiredSampleCount}件の音声ファイルを選択してください。`;
+      input.value = '';
+      return;
+    }
+    clearCapturedSamples();
+    capturedSamples = files.map((file) => ({
+      file,
+      previewUrl: URL.createObjectURL(file),
+      durationSeconds: null
+    }));
+    errorMessage = null;
+    noticeMessage = `${files.length}/${requiredSampleCount}件の音声ファイルを選択しました。`;
+    input.value = '';
+  }
+
+  const qualityIssueMessages: Record<VoiceprintQualityIssue, string> = {
+    too_short: '話している時間が短すぎます。10秒以上、間を空けずに話してください。',
+    too_long: '録音が長すぎます。10〜15秒に収めてください。',
+    too_quiet: '声が小さすぎます。マイクに少し近づいて話してください。',
+    too_noisy: '周囲の雑音が多すぎます。静かな場所で録音してください。',
+    clipping: '音が割れています。マイクから少し離れて話してください。',
+    multiple_speakers: '複数人の声が入っています。先生本人だけで録音してください。',
+    invalid_audio: '音声を読み取れませんでした。もう一度録音してください。'
+  };
+
+  function qualityFailureMessage(job: VoiceprintJob): string {
+    if (!job.quality_issue) {
+      return '音声を処理できませんでした。雑音の少ない音声でやり直してください。';
+    }
+    const sampleLabel = job.quality_sample_index
+      ? `${job.quality_sample_index}回目の音声: `
+      : '';
+    return `${sampleLabel}${qualityIssueMessages[job.quality_issue]}`;
   }
 
   async function waitForJob(job: VoiceprintJob): Promise<void> {
@@ -322,24 +403,33 @@
   }
 
   async function submitVoiceprint(kind: VoiceprintJobKind): Promise<void> {
-    if (!audioFile) {
-      errorMessage = '先生本人が話している短い音声ファイルを選択してください。';
+    if (kind !== captureKind || capturedSamples.length !== requiredSampleCount) {
+      errorMessage = `${requiredSampleCount}回分の先生本人の音声を用意してください。`;
       return;
     }
     busy = true;
     errorMessage = null;
     noticeMessage = null;
     try {
-      const job =
-        kind === 'enrollment'
-          ? await service.enroll(audioFile)
-          : await service.verify(audioFile);
+      let job: VoiceprintJob | null;
+      if (kind === 'enrollment') {
+        job = await service.enroll(
+          capturedSamples.map((sample) => sample.file)
+        );
+      } else {
+        const sample = capturedSamples[0];
+        if (!sample) throw new Error('本人確認用の音声を用意してください。');
+        job = await service.verify(sample.file);
+      }
       if (!job) throw new Error('声紋処理を開始できませんでした。');
       await waitForJob(job);
       if (activeJob?.status === 'failed' || activeJob?.status === 'expired') {
-        throw new Error(
-          '音声を処理できませんでした。雑音の少ない音声でやり直してください。'
-        );
+        const failedJob = activeJob;
+        const message = qualityFailureMessage(failedJob);
+        if (failedJob.quality_sample_index) {
+          removeCapturedSample(failedJob.quality_sample_index - 1, false);
+        }
+        throw new Error(message);
       }
       if (kind === 'enrollment') {
         voiceprint = await service.getVoiceprint();
@@ -350,7 +440,7 @@
           ? '本人の声と一致しました。'
           : '本人の声と一致しませんでした。別の音声で再確認してください。';
       }
-      clearRecordingSelection();
+      clearCapturedSamples();
     } catch (error) {
       errorMessage =
         error instanceof Error
@@ -368,7 +458,7 @@
       await service.deleteVoiceprint();
       voiceprint = null;
       activeJob = null;
-      clearRecordingSelection();
+      clearCapturedSamples();
       noticeMessage = '登録済みの声紋を削除しました。';
     } catch (error) {
       errorMessage =
@@ -386,7 +476,7 @@
     return () => {
       unregister();
       cleanupActiveRecording();
-      clearRecordingSelection();
+      clearCapturedSamples();
     };
   });
 
@@ -487,7 +577,7 @@
             <div>
               <h3 id="voice-enrollment-heading">声紋の登録・本人確認</h3>
               <p>
-                雑音が少なく、先生本人だけが5〜15秒ほど話している音声を使います。
+                雑音が少なく、先生本人だけが10〜15秒話している音声を使います。
               </p>
             </div>
             {#if voiceprint}
@@ -500,16 +590,55 @@
           {#if voiceprint}
             <p>登録日時: {formatDateTime(voiceprint.enrolled_at)}</p>
             <p>保存期限: {formatDateTime(voiceprint.expires_at)}</p>
+            <p>代表声紋: {voiceprint.sample_count}回の音声から作成</p>
           {/if}
 
           {#if voiceprintEnabled}
-            <div class="voice-recorder">
-              <div>
-                <strong>この端末で先生本人の声を録音</strong>
-                <p>
-                  録音開始後、静かな場所で5〜15秒話してください。15秒で自動停止します。
-                </p>
+            {#if voiceprint}
+              <div class="voice-mode" role="group" aria-label="声紋処理の種類">
+                <Button
+                  variant={captureKind === 'enrollment'
+                    ? 'primary'
+                    : 'secondary'}
+                  aria-pressed={captureKind === 'enrollment'}
+                  onclick={() => selectCaptureKind('enrollment')}
+                  disabled={busy || recordingStarting || recording}
+                  >3回録音して再登録</Button
+                >
+                <Button
+                  variant={captureKind === 'verification'
+                    ? 'primary'
+                    : 'secondary'}
+                  aria-pressed={captureKind === 'verification'}
+                  onclick={() => selectCaptureKind('verification')}
+                  disabled={busy || recordingStarting || recording}
+                  >1回録音して本人確認</Button
+                >
               </div>
+            {/if}
+
+            <div class="voice-recorder">
+              <div class="voice-recorder__intro">
+                <div>
+                  <strong
+                    >{captureKind === 'enrollment'
+                      ? '代表声紋を作るための録音'
+                      : '本人確認のための録音'}</strong
+                  >
+                  <p>
+                    静かな場所で、普段の声量で10〜15秒話してください。15秒で自動停止します。
+                  </p>
+                </div>
+                <strong class="voice-recorder__progress" aria-live="polite">
+                  {capturedSamples.length}/{requiredSampleCount}回完了
+                </strong>
+              </div>
+
+              {#if captureKind === 'enrollment'}
+                <p>
+                  3回の特徴を平均して代表声紋だけを暗号化保存します。元音声と各回の特徴は処理後すぐ削除します。
+                </p>
+              {/if}
 
               {#if recordingSupported}
                 <div class="voice-recorder__actions">
@@ -522,7 +651,9 @@
                       variant="secondary"
                       onclick={startRecording}
                       loading={recordingStarting}
-                      disabled={busy}>録音を開始</Button
+                      disabled={busy ||
+                        capturedSamples.length >= requiredSampleCount}
+                      >録音を開始</Button
                     >
                   {/if}
                   <span
@@ -534,34 +665,58 @@
                       ? `録音中 ${recordingSeconds}秒 / ${MAX_VOICE_RECORDING_SECONDS}秒`
                       : recordingStarting
                         ? 'マイクを準備中'
-                        : recordedAudioUrl
-                          ? `録音済み ${recordingSeconds}秒`
-                          : '録音待ち'}
+                        : capturedSamples.length >= requiredSampleCount
+                          ? '必要な回数の録音が完了'
+                          : `${capturedSamples.length + 1}回目の録音待ち`}
                   </span>
                 </div>
-
-                {#if recordedAudioUrl}
-                  <audio
-                    class="voice-recorder__preview"
-                    controls
-                    src={recordedAudioUrl}
-                  ></audio>
-                  <small>問題があれば「録音を開始」から録音し直せます。</small>
-                {/if}
               {:else}
                 <p>
                   このブラウザではマイク録音を利用できません。下のファイル選択を使ってください。
                 </p>
               {/if}
+
+              {#if capturedSamples.length > 0}
+                <ol class="voice-sample-list" aria-label="録音済みの音声">
+                  {#each capturedSamples as sample, index (sample.previewUrl)}
+                    <li class="voice-sample-card">
+                      <div>
+                        <strong>{index + 1}回目</strong>
+                        <small>
+                          {sample.durationSeconds === null
+                            ? sample.file.name
+                            : `${sample.durationSeconds}秒`}
+                        </small>
+                      </div>
+                      <audio
+                        class="voice-recorder__preview"
+                        controls
+                        src={sample.previewUrl}
+                        aria-label={`${index + 1}回目の音声を再生`}
+                      ></audio>
+                      <Button
+                        variant="tertiary"
+                        size="compact"
+                        onclick={() => removeCapturedSample(index)}
+                        disabled={busy || recordingStarting || recording}
+                        >録り直す</Button
+                      >
+                    </li>
+                  {/each}
+                </ol>
+              {/if}
             </div>
 
             <details class="voice-file-fallback">
-              <summary>音声ファイルを選んで登録する</summary>
+              <summary>録音済みの音声ファイルを選ぶ</summary>
               <label class="voice-file">
-                <span>先生本人の音声ファイル</span>
+                <span
+                  >先生本人の音声ファイル（{requiredSampleCount}件）</span
+                >
                 <input
                   type="file"
                   accept="audio/*"
+                  multiple={requiredSampleCount > 1}
                   onchange={chooseAudio}
                   disabled={busy || recordingStarting || recording}
                 />
@@ -571,31 +726,17 @@
               </label>
             </details>
 
-            {#if audioFile}
-              <p class="voice-recorder__selected">
-                使用する音声: {recordedAudioUrl
-                  ? 'この端末で録音した音声'
-                  : audioFile.name}
-              </p>
-            {/if}
-
             <div class="voice-actions">
               <Button
-                onclick={() => submitVoiceprint('enrollment')}
+                onclick={() => submitVoiceprint(captureKind)}
                 loading={busy}
-                disabled={recordingStarting || recording || !audioFile}
-                >この音声で声紋を{voiceprint ? '再登録' : '登録'}</Button
+                disabled={recordingStarting ||
+                  recording ||
+                  capturedSamples.length !== requiredSampleCount}
+                >{captureKind === 'enrollment'
+                  ? `3回の音声で声紋を${voiceprint ? '再登録' : '登録'}`
+                  : 'この音声で本人確認'}</Button
               >
-              {#if voiceprint}
-                <Button
-                  variant="secondary"
-                  onclick={() => submitVoiceprint('verification')}
-                  disabled={busy ||
-                    recordingStarting ||
-                    recording ||
-                    !audioFile}>この音声で本人確認</Button
-                >
-              {/if}
             </div>
           {/if}
 

@@ -27,12 +27,12 @@ export class VoiceConsentService {
     return this.api.requestJson<Voiceprint>('/voiceprint/me', { signal });
   }
 
-  enroll(audio: File): Promise<VoiceprintJob | null> {
-    return this.submitAudio('/voiceprint/me/enroll', audio);
+  enroll(audios: readonly File[]): Promise<VoiceprintJob | null> {
+    return this.submitAudio('/voiceprint/me/enroll', audios);
   }
 
   verify(audio: File): Promise<VoiceprintJob | null> {
-    return this.submitAudio('/voiceprint/me/verify', audio);
+    return this.submitAudio('/voiceprint/me/verify', [audio]);
   }
 
   getJob(jobId: string): Promise<VoiceprintJob | null> {
@@ -45,10 +45,10 @@ export class VoiceConsentService {
 
   private submitAudio(
     path: string,
-    audio: File
+    audios: readonly File[]
   ): Promise<VoiceprintJob | null> {
     const body = new FormData();
-    body.append('audio', audio);
+    for (const audio of audios) body.append('audio', audio);
     return this.api.requestJson<VoiceprintJob>(path, { method: 'POST', body });
   }
 }
