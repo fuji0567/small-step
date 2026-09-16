@@ -13,19 +13,40 @@ from app.models import (
     VoiceEnrollmentConsent,
     VoiceprintJob,
     VoiceprintJobKind,
+    VoiceprintQualityIssue,
     VoiceprintJobStatus,
     utc_now,
 )
 from app.voiceprint import (
     VoiceprintError,
+    VOICEPRINT_ENROLLMENT_SAMPLE_COUNT,
     VoiceprintExtractor,
+    average_embeddings,
     cosine_similarity,
     decrypt_embedding,
     encrypt_embedding,
+    voiceprint_storage_keys,
 )
+from app.voiceprint_quality import VoiceprintQualityAnalyzer
 
 
 DEFAULT_PROCESSING_TIMEOUT = timedelta(minutes=10)
+
+
+class VoiceprintSampleRejected(VoiceprintError):
+    def __init__(self, issue: VoiceprintQualityIssue, sample_index: int) -> None:
+        super().__init__(f"Voiceprint sample {sample_index} failed quality checks: {issue.value}")
+        self.issue = issue
+        self.sample_index = sample_index
+
+
+def _job_storage_keys(job: VoiceprintJob) -> tuple[str, ...]:
+    return voiceprint_storage_keys(job.storage_key, job.sample_storage_keys)
+
+
+def _delete_job_audio(storage: CloudAudioJobStorage, job: VoiceprintJob) -> None:
+    for storage_key in _job_storage_keys(job):
+        storage.delete(storage_key)
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -60,7 +81,7 @@ def expire_voiceprint_jobs(
         )
     )
     for job in terminal_jobs:
-        storage.delete(job.storage_key)
+        _delete_job_audio(storage, job)
         db.delete(job)
 
     jobs = list(
@@ -74,7 +95,7 @@ def expire_voiceprint_jobs(
     for job in jobs:
         job.status = VoiceprintJobStatus.expired
         job.completed_at = current_time
-        storage.delete(job.storage_key)
+        _delete_job_audio(storage, job)
     if jobs or terminal_jobs:
         db.commit()
     return len(jobs)
@@ -103,7 +124,7 @@ def delete_expired_voiceprints(
             )
         )
         for job in jobs:
-            storage.delete(job.storage_key)
+            _delete_job_audio(storage, job)
         db.execute(
             delete(VoiceprintJob).where(
                 VoiceprintJob.teacher_id == voiceprint.teacher_id,
@@ -158,7 +179,7 @@ def claim_next_voiceprint_job(
         db.rollback()
         return None
     db.commit()
-    return db.get(VoiceprintJob, job_id)
+    return db.get(VoiceprintJob, job_id, populate_existing=True)
 
 
 def process_next_voiceprint_job(
@@ -166,6 +187,7 @@ def process_next_voiceprint_job(
     db: Session,
     storage: CloudAudioJobStorage,
     extractor: VoiceprintExtractor,
+    quality_analyzer: VoiceprintQualityAnalyzer,
     encryption_key: str,
     match_threshold: float,
     now: datetime | None = None,
@@ -186,12 +208,38 @@ def process_next_voiceprint_job(
         raise RuntimeError("A claimed voiceprint job must have a claim token")
 
     owns_finalization = False
+    embeddings: list[list[float]] = []
     try:
         teacher = db.get(Teacher, job.teacher_id)
         if teacher is None or not teacher.is_active or teacher.school_id != job.school_id:
             raise VoiceprintError("Teacher is unavailable")
         consent = _active_consent(db, job.teacher_id, current_time)
-        embedding = extractor.extract(str(storage.path_for(job.storage_key)))
+        storage_keys = _job_storage_keys(job)
+        expected_sample_count = (
+            VOICEPRINT_ENROLLMENT_SAMPLE_COUNT
+            if job.kind == VoiceprintJobKind.enrollment
+            else 1
+        )
+        if len(storage_keys) != expected_sample_count:
+            raise VoiceprintError("Voiceprint job has an invalid sample count")
+
+        for sample_index, storage_key in enumerate(storage_keys, start=1):
+            audio_path = storage.path_for(storage_key)
+            quality = quality_analyzer.analyze(audio_path)
+            if quality.issue is not None:
+                raise VoiceprintSampleRejected(quality.issue, sample_index)
+
+        for storage_key in storage_keys:
+            audio_path = storage.path_for(storage_key)
+            embeddings.append(extractor.extract(str(audio_path)))
+        processed_sample_count = len(embeddings)
+        if job.kind == VoiceprintJobKind.enrollment:
+            embedding = average_embeddings(embeddings)
+            for sample_embedding in embeddings:
+                sample_embedding.clear()
+            embeddings.clear()
+        else:
+            embedding = embeddings.pop()
 
         similarity_score = None
         matched = None
@@ -205,12 +253,14 @@ def process_next_voiceprint_job(
                     teacher_id=job.teacher_id,
                     encrypted_embedding="",
                     embedding_dimension=len(embedding),
+                    sample_count=processed_sample_count,
                     model_name=extractor.model_name,
                     expires_at=consent.expires_at,
                 )
                 db.add(voiceprint)
             voiceprint.encrypted_embedding = encrypt_embedding(embedding, encryption_key)
             voiceprint.embedding_dimension = len(embedding)
+            voiceprint.sample_count = processed_sample_count
             voiceprint.model_name = extractor.model_name
             voiceprint.enrolled_at = current_time
             voiceprint.expires_at = consent.expires_at
@@ -239,6 +289,8 @@ def process_next_voiceprint_job(
                 status=VoiceprintJobStatus.completed,
                 similarity_score=similarity_score,
                 matched=matched,
+                quality_issue=None,
+                quality_sample_index=None,
                 claim_token=None,
                 completed_at=utc_now(),
             )
@@ -249,8 +301,13 @@ def process_next_voiceprint_job(
         db.commit()
         owns_finalization = True
         return db.get(VoiceprintJob, job.id)
-    except Exception:
+    except Exception as error:
         db.rollback()
+        quality_issue = None
+        quality_sample_index = None
+        if isinstance(error, VoiceprintSampleRejected):
+            quality_issue = error.issue.value
+            quality_sample_index = error.sample_index
         failed = db.execute(
             update(VoiceprintJob)
             .where(
@@ -260,6 +317,8 @@ def process_next_voiceprint_job(
             )
             .values(
                 status=VoiceprintJobStatus.failed,
+                quality_issue=quality_issue,
+                quality_sample_index=quality_sample_index,
                 claim_token=None,
                 completed_at=utc_now(),
             )
@@ -271,5 +330,8 @@ def process_next_voiceprint_job(
         db.rollback()
         return None
     finally:
+        for sample_embedding in embeddings:
+            sample_embedding.clear()
+        embeddings.clear()
         if owns_finalization:
-            storage.delete(job.storage_key)
+            _delete_job_audio(storage, job)

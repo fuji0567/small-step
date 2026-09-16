@@ -1,4 +1,5 @@
-export const MIN_VOICE_RECORDING_SECONDS = 5;
+export const VOICEPRINT_ENROLLMENT_SAMPLE_COUNT = 3;
+export const MIN_VOICE_RECORDING_SECONDS = 10;
 export const MAX_VOICE_RECORDING_SECONDS = 15;
 
 export type VoiceRecordingFormat = {

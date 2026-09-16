@@ -77,6 +77,8 @@ create_app(settings)
 | `audit` | 2 | `GET /audit-events`, `GET /audit-events/export.csv` |
 | `notion` | 1 | `POST /records/{id}/notion-sync` |
 
+`POST /voiceprint/me/enroll` は同名の `audio` フィールドを3件受け取り、`POST /voiceprint/me/verify` は1件だけ受け取ります。声紋ジョブの応答は品質不合格時に理由と1始まりの録音番号を返しますが、保存先、元音声、特徴量は返しません。
+
 利用者別の入口:
 
 - **先生用アプリ** … `auth` / `records` / `notifications` / `children` / `teachers` / `schools` / `edge devices` / `audit` / `voice consent` / `voiceprint` / `recorder`

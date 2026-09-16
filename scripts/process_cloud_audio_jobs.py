@@ -9,8 +9,10 @@ from app.cloud_audio_worker import process_next_cloud_audio_job
 from app.config import Settings
 from app.database import create_database_engine, create_session_factory, initialise_database
 from app.edge_audio import EdgeAudioProcessor
+from app.speaker_diarization import PyannoteCommunityDiarizer
 from app.worker_heartbeat import GPU_AUDIO_WORKER_NAME, WorkerHeartbeatMonitor
 from app.voiceprint import PyannoteVoiceprintExtractor
+from app.voiceprint_quality import LocalVoiceprintQualityAnalyzer
 from app.voiceprint_worker import process_next_voiceprint_job
 
 
@@ -58,6 +60,7 @@ def process_available_voiceprint_jobs(
     session_factory,
     storage: CloudAudioJobStorage,
     extractor: PyannoteVoiceprintExtractor,
+    quality_analyzer: LocalVoiceprintQualityAnalyzer,
     encryption_key: str,
     match_threshold: float,
     limit: int,
@@ -70,6 +73,7 @@ def process_available_voiceprint_jobs(
                 db=db,
                 storage=storage,
                 extractor=extractor,
+                quality_analyzer=quality_analyzer,
                 encryption_key=encryption_key,
                 match_threshold=match_threshold,
                 processing_timeout=processing_timeout,
@@ -105,6 +109,7 @@ def main() -> None:
     storage.ensure_directory()
     voiceprint_storage = None
     voiceprint_extractor = None
+    voiceprint_quality_analyzer = None
     voiceprint_encryption_key = settings.voiceprint_encryption_key
     if settings.voiceprint_enabled:
         assert settings.speaker_diarization_token is not None
@@ -118,6 +123,14 @@ def main() -> None:
             model_name=settings.voiceprint_model,
             token=settings.speaker_diarization_token,
             device=settings.speaker_diarization_device,
+        )
+        voiceprint_quality_analyzer = LocalVoiceprintQualityAnalyzer(
+            diarizer=PyannoteCommunityDiarizer(
+                model=settings.speaker_diarization_model,
+                token=settings.speaker_diarization_token,
+                device=settings.speaker_diarization_device,
+                low_volume_retry=False,
+            )
         )
 
     engine = create_database_engine(settings.database_url)
@@ -136,11 +149,16 @@ def main() -> None:
                 limit=args.limit,
                 processing_timeout=processing_timeout,
             )
-            if voiceprint_storage is not None and voiceprint_extractor is not None:
+            if (
+                voiceprint_storage is not None
+                and voiceprint_extractor is not None
+                and voiceprint_quality_analyzer is not None
+            ):
                 count += process_available_voiceprint_jobs(
                     session_factory=session_factory,
                     storage=voiceprint_storage,
                     extractor=voiceprint_extractor,
+                    quality_analyzer=voiceprint_quality_analyzer,
                     encryption_key=voiceprint_encryption_key,
                     match_threshold=settings.voiceprint_match_threshold,
                     limit=args.limit,
@@ -162,11 +180,16 @@ def main() -> None:
                     limit=args.limit,
                     processing_timeout=processing_timeout,
                 )
-                if voiceprint_storage is not None and voiceprint_extractor is not None:
+                if (
+                    voiceprint_storage is not None
+                    and voiceprint_extractor is not None
+                    and voiceprint_quality_analyzer is not None
+                ):
                     process_available_voiceprint_jobs(
                         session_factory=session_factory,
                         storage=voiceprint_storage,
                         extractor=voiceprint_extractor,
+                        quality_analyzer=voiceprint_quality_analyzer,
                         encryption_key=voiceprint_encryption_key,
                         match_threshold=settings.voiceprint_match_threshold,
                         limit=args.limit,

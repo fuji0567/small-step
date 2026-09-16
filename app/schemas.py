@@ -13,6 +13,7 @@ from app.models import (
     RecordingSessionStatus,
     TeacherRole,
     VoiceprintJobKind,
+    VoiceprintQualityIssue,
     VoiceprintJobStatus,
 )
 
@@ -201,6 +202,7 @@ class VoiceprintRead(APIModel):
     school_id: UUID
     teacher_id: UUID
     model_name: str
+    sample_count: int
     enrolled_at: datetime
     expires_at: datetime
     created_at: datetime
@@ -218,6 +220,8 @@ class VoiceprintJobRead(APIModel):
     attempts: int
     similarity_score: float | None
     matched: bool | None
+    quality_issue: VoiceprintQualityIssue | None
+    quality_sample_index: int | None
     queued_at: datetime
     processing_started_at: datetime | None
     completed_at: datetime | None

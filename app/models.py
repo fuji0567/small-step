@@ -2,7 +2,7 @@ import enum
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -74,6 +74,16 @@ class RecordingSessionStatus(str, enum.Enum):
     failed = "failed"
     discarded = "discarded"
     expired = "expired"
+
+
+class VoiceprintQualityIssue(str, enum.Enum):
+    too_short = "too_short"
+    too_long = "too_long"
+    too_quiet = "too_quiet"
+    too_noisy = "too_noisy"
+    clipping = "clipping"
+    multiple_speakers = "multiple_speakers"
+    invalid_audio = "invalid_audio"
 
 
 class WorkerHeartbeat(Base):
@@ -191,6 +201,7 @@ class TeacherVoiceprint(Base):
     teacher_id: Mapped[str] = mapped_column(ForeignKey("teachers.id"), index=True)
     encrypted_embedding: Mapped[str] = mapped_column(Text)
     embedding_dimension: Mapped[int] = mapped_column(Integer)
+    sample_count: Mapped[int] = mapped_column(Integer, default=1)
     model_name: Mapped[str] = mapped_column(String(255))
     enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
@@ -208,6 +219,7 @@ class VoiceprintJob(Base):
     teacher_id: Mapped[str] = mapped_column(ForeignKey("teachers.id"), index=True)
     kind: Mapped[VoiceprintJobKind] = mapped_column(Enum(VoiceprintJobKind), index=True)
     storage_key: Mapped[str] = mapped_column(String(80), unique=True)
+    sample_storage_keys: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[VoiceprintJobStatus] = mapped_column(
         Enum(VoiceprintJobStatus), default=VoiceprintJobStatus.queued, index=True
     )
@@ -215,6 +227,8 @@ class VoiceprintJob(Base):
     claim_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
     similarity_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     matched: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    quality_issue: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    quality_sample_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     queued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

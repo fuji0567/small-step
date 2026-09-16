@@ -105,6 +105,7 @@ from app.schemas import (
     VoiceprintJobRead,
     VoiceprintRead,
 )
+from app.voiceprint import VOICEPRINT_ENROLLMENT_SAMPLE_COUNT, voiceprint_storage_keys
 from app.worker_heartbeat import (
     GPU_AUDIO_WORKER_NAME,
     LINE_DELIVERY_WORKER_NAME,
@@ -542,7 +543,8 @@ def delete_teacher_voiceprint_data(
         db.scalars(select(VoiceprintJob).where(VoiceprintJob.teacher_id == teacher_id))
     )
     for job in jobs:
-        storage.delete(job.storage_key)
+        for storage_key in voiceprint_storage_keys(job.storage_key, job.sample_storage_keys):
+            storage.delete(storage_key)
     db.execute(delete(VoiceprintJob).where(VoiceprintJob.teacher_id == teacher_id))
     db.execute(delete(TeacherVoiceprint).where(TeacherVoiceprint.teacher_id == teacher_id))
 
@@ -1402,13 +1404,29 @@ async def create_my_voiceprint_job(
     *,
     kind: VoiceprintJobKind,
     request: Request,
-    audio: UploadFile,
+    audios: list[UploadFile],
     current_teacher: CurrentTeacher,
     db: Session,
 ) -> VoiceprintJob:
+    async def close_uploads() -> None:
+        for upload in audios:
+            await upload.close()
+
+    expected_sample_count = (
+        VOICEPRINT_ENROLLMENT_SAMPLE_COUNT
+        if kind == VoiceprintJobKind.enrollment
+        else 1
+    )
+    if len(audios) != expected_sample_count:
+        await close_uploads()
+        raise HTTPException(
+            status_code=422,
+            detail=f"Voiceprint {kind.value} requires exactly {expected_sample_count} audio sample(s)",
+        )
+
     settings = request.app.state.settings
     if not settings.voiceprint_enabled:
-        await audio.close()
+        await close_uploads()
         raise HTTPException(status_code=403, detail="Voiceprint processing is disabled")
 
     teacher = require_real_teacher(current_teacher)
@@ -1416,7 +1434,7 @@ async def create_my_voiceprint_job(
         select(VoiceEnrollmentConsent).where(VoiceEnrollmentConsent.teacher_id == teacher.id)
     )
     if consent is None or not voice_consent_is_active(consent):
-        await audio.close()
+        await close_uploads()
         raise HTTPException(status_code=409, detail="Active voiceprint consent is required")
 
     active_job = db.scalar(
@@ -1428,7 +1446,7 @@ async def create_my_voiceprint_job(
         )
     )
     if active_job is not None:
-        await audio.close()
+        await close_uploads()
         raise HTTPException(status_code=409, detail="A voiceprint job is already processing")
 
     if kind == VoiceprintJobKind.verification:
@@ -1436,7 +1454,7 @@ async def create_my_voiceprint_job(
             select(TeacherVoiceprint).where(TeacherVoiceprint.teacher_id == teacher.id)
         )
         if voiceprint is None or as_utc_datetime(voiceprint.expires_at) <= utc_now():
-            await audio.close()
+            await close_uploads()
             raise HTTPException(status_code=409, detail="An active enrolled voiceprint is required")
 
     now = utc_now()
@@ -1449,25 +1467,27 @@ async def create_my_voiceprint_job(
         expires_at=now + timedelta(minutes=settings.voiceprint_job_retention_minutes),
     )
     storage = voiceprint_storage(request)
-    storage_key: str | None = None
+    storage_keys: list[str] = []
     try:
         db.add(job)
         db.flush()
-        storage_key = await storage.store_upload(upload=audio, job_id=job.id)
-        job.storage_key = storage_key
+        for upload in audios:
+            storage_keys.append(await storage.store_upload(upload=upload, job_id=str(uuid4())))
+        job.storage_key = storage_keys[0]
+        job.sample_storage_keys = storage_keys
         db.commit()
     except CloudAudioStorageError as error:
         db.rollback()
-        if storage_key:
+        for storage_key in storage_keys:
             storage.delete(storage_key)
         raise HTTPException(status_code=422, detail=str(error)) from error
     except (IntegrityError, OSError) as error:
         db.rollback()
-        if storage_key:
+        for storage_key in storage_keys:
             storage.delete(storage_key)
         raise HTTPException(status_code=503, detail="Voiceprint job could not be stored") from error
     finally:
-        await audio.close()
+        await close_uploads()
     db.refresh(job)
     return job
 
@@ -1480,14 +1500,14 @@ async def create_my_voiceprint_job(
 )
 async def enroll_my_voiceprint(
     request: Request,
-    audio: UploadFile = File(...),
+    audio: list[UploadFile] = File(...),
     current_teacher: CurrentTeacher = Depends(get_current_teacher),
     db: Session = Depends(get_db),
 ) -> VoiceprintJob:
     return await create_my_voiceprint_job(
         kind=VoiceprintJobKind.enrollment,
         request=request,
-        audio=audio,
+        audios=audio,
         current_teacher=current_teacher,
         db=db,
     )
@@ -1508,7 +1528,7 @@ async def verify_my_voiceprint(
     return await create_my_voiceprint_job(
         kind=VoiceprintJobKind.verification,
         request=request,
-        audio=audio,
+        audios=[audio],
         current_teacher=current_teacher,
         db=db,
     )

@@ -42,11 +42,14 @@ describe('VoiceConsentService', () => {
     const service = new VoiceConsentService(
       new ApiClient({ fetch: fetchMock })
     );
-    const audio = new File(['audio'], 'teacher.wav', { type: 'audio/wav' });
+    const audios = [1, 2, 3].map(
+      (index) =>
+        new File(['audio'], `teacher-${index}.wav`, { type: 'audio/wav' })
+    );
 
     await service.getVoiceprint();
-    await service.enroll(audio);
-    await service.verify(audio);
+    await service.enroll(audios);
+    await service.verify(audios[0]);
     await service.getJob('job/id');
     await service.deleteVoiceprint();
 
@@ -59,6 +62,12 @@ describe('VoiceConsentService', () => {
     ]);
     expect(fetchMock.mock.calls[1]?.[1]?.body).toBeInstanceOf(FormData);
     expect(fetchMock.mock.calls[2]?.[1]?.body).toBeInstanceOf(FormData);
+    expect(
+      (fetchMock.mock.calls[1]?.[1]?.body as FormData).getAll('audio')
+    ).toHaveLength(3);
+    expect(
+      (fetchMock.mock.calls[2]?.[1]?.body as FormData).getAll('audio')
+    ).toHaveLength(1);
     expect(fetchMock.mock.calls[4]?.[1]?.method).toBe('DELETE');
   });
 });
