@@ -49,9 +49,10 @@ describe("UploadCoordinator", () => {
       finalize: vi.fn(async () => null),
     } as unknown as RecorderApi;
     const store = repository();
-    await new UploadCoordinator({ api, repository: store }).upload(
-      localSession(),
-    );
+    const serverId = await new UploadCoordinator({
+      api,
+      repository: store,
+    }).upload(localSession());
 
     const calls = uploadSegment.mock.calls as unknown as [
       string,
@@ -63,6 +64,7 @@ describe("UploadCoordinator", () => {
     expect(form.get("sha256")).toBe(await sha256(new Blob(["hello"])));
     expect(form.get("file")).toBeInstanceOf(Blob);
     expect(store.delete).toHaveBeenCalledWith("client-1");
+    expect(serverId).toBe("server-1");
   });
 
   it("サーバー受信済みの同一セグメントを再送しない", async () => {
@@ -109,12 +111,14 @@ describe("UploadCoordinator", () => {
       finalize: vi.fn(),
     } as unknown as RecorderApi;
 
-    await new UploadCoordinator({ api, repository: store }).upload(
-      localSession(),
-    );
+    const serverId = await new UploadCoordinator({
+      api,
+      repository: store,
+    }).upload(localSession());
 
     expect(api.uploadSegment).not.toHaveBeenCalled();
     expect(api.finalize).not.toHaveBeenCalled();
+    expect(serverId).toBe("server-1");
     expect(store.delete).toHaveBeenCalledWith("client-1");
   });
 

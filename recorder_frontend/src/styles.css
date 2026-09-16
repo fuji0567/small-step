@@ -104,6 +104,7 @@ button {
 }
 
 button:focus-visible,
+a:focus-visible,
 input:focus-visible {
   outline: 4px solid #ffd43d;
   outline-offset: 4px;

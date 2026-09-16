@@ -32,8 +32,14 @@ export class RecorderApi {
     });
   }
 
-  getSession(id: string): Promise<ServerRecordingSession> {
-    return this.#json(`/api/v1/recorder/sessions/${encodeURIComponent(id)}`);
+  getSession(
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<ServerRecordingSession> {
+    return this.#json(`/api/v1/recorder/sessions/${encodeURIComponent(id)}`, {
+      signal,
+      cache: "no-store",
+    });
   }
 
   uploadSegment(
@@ -77,7 +83,7 @@ export class RecorderApi {
   ): Promise<ServerRecordingSession | null> {
     const headers = new Headers(init.headers);
     const token = this.#accessToken();
-    if (!token) throw new Error("ログインが必要です。");
+    if (!token) throw new RecorderApiError(401, "ログインが必要です。");
     headers.set("Authorization", `Bearer ${token}`);
     headers.set("Accept", "application/json");
     const response = await this.#fetch(path, { ...init, headers });

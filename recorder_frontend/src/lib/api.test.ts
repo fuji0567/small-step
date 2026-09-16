@@ -3,6 +3,32 @@ import { describe, expect, it, vi } from "vitest";
 import { RecorderApi, RecorderApiError } from "./api";
 
 describe("RecorderApi", () => {
+  it("状態確認を中断でき、API応答をキャッシュしない", async () => {
+    const fetchFn = vi.fn(async () => new Response("{}"));
+    const api = new RecorderApi({
+      fetch: fetchFn as typeof fetch,
+      accessToken: () => "token",
+    });
+    const abort = new AbortController();
+    await api.getSession("server/1", abort.signal);
+    expect(fetchFn).toHaveBeenCalledWith(
+      "/api/v1/recorder/sessions/server%2F1",
+      expect.objectContaining({ signal: abort.signal, cache: "no-store" }),
+    );
+  });
+
+  it("資格情報がないと通信せずログインが必要だと識別できる", async () => {
+    const fetchFn = vi.fn();
+    const api = new RecorderApi({
+      fetch: fetchFn as typeof fetch,
+      accessToken: () => null,
+    });
+    await expect(api.getSession("server-1")).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
   it("全録音APIへBearer認証を付与し、固定パスを使う", async () => {
     const fetchFn = vi.fn(
       async () =>

@@ -42,6 +42,10 @@ export interface ServerRecordingSession {
   total_duration_ms: number;
   created_at?: string;
   updated_at?: string;
+  processed_segment_count?: number;
+  failed_segment_count?: number;
+  record_id?: string | null;
+  audio_processing_incomplete?: boolean | null;
   [key: string]: unknown;
 }
 

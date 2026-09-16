@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { LocalRecordingSession, RecorderView } from "./types";
+  import ProcessingStatus from "./ProcessingStatus.svelte";
+  import type { ProcessingProgress, StatusIssue } from "./session-status";
 
   interface Props {
     view: RecorderView;
@@ -11,6 +13,11 @@
     cautionConfirmed?: boolean;
     ownedSessions?: LocalRecordingSession[];
     foreignSessionExists?: boolean;
+    processing?: ProcessingProgress | null;
+    statusIssue?: StatusIssue | null;
+    statusLoading?: boolean;
+    statusPaused?: boolean;
+    onRefreshStatus?: () => void;
     onConfirmCaution?: () => void;
     onStart?: () => void;
     onPause?: () => void;
@@ -34,6 +41,11 @@
     cautionConfirmed = false,
     ownedSessions = [],
     foreignSessionExists = false,
+    processing = null,
+    statusIssue = null,
+    statusLoading = false,
+    statusPaused = false,
+    onRefreshStatus = () => undefined,
     onConfirmCaution = () => undefined,
     onStart = () => undefined,
     onPause = () => undefined,
@@ -185,7 +197,17 @@
       <span aria-hidden="true">✓</span> 受付が完了しました
     </p>
     <p>
-      録音は端末から削除されました。処理結果は先生用画面で確認してください。
+      録音は端末から削除されました。画面を開いたまま処理結果を確認できます。
+    </p>
+    <ProcessingStatus
+      progress={processing}
+      issue={statusIssue}
+      loading={statusLoading}
+      paused={statusPaused}
+      onRefresh={onRefreshStatus}
+    />
+    <p>
+      待機画面へ戻ってもサーバーの処理は続きます。結果は先生用の音声処理状況で確認できます。
     </p>
     <button class="primary" onclick={onBack}>録音待機へ戻る</button>
   </section>

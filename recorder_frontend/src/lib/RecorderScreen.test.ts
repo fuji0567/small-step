@@ -4,6 +4,28 @@ import { describe, expect, it, vi } from "vitest";
 import RecorderScreen from "./RecorderScreen.svelte";
 
 describe("RecorderScreen", () => {
+  it("受付後に進捗・結果リンクと待機へ戻る操作を表示する", () => {
+    const recordId = "11111111-1111-4111-8111-111111111111";
+    render(RecorderScreen, {
+      view: "accepted",
+      processing: {
+        status: "completed",
+        totalSegments: 2,
+        processedSegments: 2,
+        failedSegments: 0,
+        recordId,
+        incomplete: false,
+      },
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("2/2区間完了");
+    expect(
+      screen.getByRole("link", { name: "作成された記録を確認する" }),
+    ).toHaveAttribute("href", `/teacher/review/${recordId}/`);
+    expect(
+      screen.getByRole("button", { name: "録音待機へ戻る" }),
+    ).toBeInTheDocument();
+  });
+
   it("初回確認後に録音開始操作を表示する", async () => {
     const onConfirmCaution = vi.fn();
     const { rerender } = render(RecorderScreen, {

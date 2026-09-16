@@ -18,6 +18,12 @@
     selectSupportedMimeType,
   } from "./lib/recorder";
   import { IndexedDbSessionRepository, SESSION_TTL_MS } from "./lib/storage";
+  import {
+    readSessionStatus,
+    SessionStatusMonitor,
+    type ProcessingProgress,
+    type StatusIssue,
+  } from "./lib/session-status";
   import type {
     AuthConfig,
     AuthenticatedTeacher,
@@ -47,11 +53,18 @@
   let finalizing = $state(false);
   let ownedSessions = $state<LocalRecordingSession[]>([]);
   let foreignSessionExists = $state(false);
+  let processing = $state<ProcessingProgress | null>(null);
+  let statusIssue = $state<StatusIssue | null>(null);
+  let statusLoading = $state(false);
+  let statusPaused = $state(false);
 
   let credentials: CredentialStore;
   let repository: IndexedDbSessionRepository;
   let api: RecorderApi;
   let uploader: UploadCoordinator;
+  let statusMonitor: SessionStatusMonitor;
+  let monitoringOwner: string | null = null;
+  let mounted = false;
   let recorder: RecorderController | null = null;
   let currentSession: LocalRecordingSession | null = null;
   let wakeLock: WakeLockSentinel | null = null;
@@ -64,25 +77,53 @@
   let sessionStatePersistence: Promise<void> = Promise.resolve();
 
   onMount(() => {
+    mounted = true;
     credentials = createCredentialStore(sessionStorage);
     repository = new IndexedDbSessionRepository();
     api = new RecorderApi({ accessToken: () => credentials.accessToken() });
     uploader = new UploadCoordinator({ api, repository });
+    statusMonitor = new SessionStatusMonitor({
+      load: loadProcessingStatus,
+      onProgress: (progress) => (processing = progress),
+      onLoading: (loading) => (statusLoading = loading),
+      onIssue: (issue) => {
+        statusIssue = issue;
+        if (issue === "unavailable") processing = null;
+        if (issue === "authentication") {
+          stopMonitoring();
+          credentials.clear();
+          teacher = null;
+          stopAuthRefresh();
+          view = "login";
+          message =
+            "ログインの有効期限が切れています。再度ログインしてください。";
+        }
+      },
+    });
+    updateStatusAvailability();
     cautionConfirmed = localStorage.getItem(CAUTION_KEY) === "yes";
     void initialize();
 
-    const online = () => teacher && void retryOwned(false);
+    const online = () => {
+      updateStatusAvailability();
+      if (teacher) void retryOwned(false);
+    };
     const visibility = () => {
       if (document.visibilityState === "hidden") recorder?.visibilityHidden();
+      updateStatusAvailability();
     };
     window.addEventListener("online", online);
+    window.addEventListener("offline", updateStatusAvailability);
     document.addEventListener("visibilitychange", visibility);
     return () => {
       window.removeEventListener("online", online);
+      window.removeEventListener("offline", updateStatusAvailability);
       document.removeEventListener("visibilitychange", visibility);
       if (displayTimer) clearInterval(displayTimer);
       if (cleanupTimer) clearTimeout(cleanupTimer);
       stopAuthRefresh();
+      stopMonitoring();
+      mounted = false;
       recorder?.stop();
     };
   });
@@ -114,6 +155,7 @@
   async function login(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     if (!authConfig) return;
+    stopMonitoring();
     busy = true;
     message = null;
     try {
@@ -144,6 +186,7 @@
 
   async function startRecording(): Promise<void> {
     if (!teacher) return;
+    stopMonitoring();
     busy = true;
     message = null;
     try {
@@ -348,10 +391,9 @@
         );
       }
       await refreshCredentials();
-      await uploader.upload(currentSession);
+      const serverId = await uploader.upload(currentSession);
       currentSession = null;
-      view = "accepted";
-      message = null;
+      showAccepted(serverId);
       await refreshSessions();
     } catch (error) {
       handleOperationError(error, "送信に失敗しました。");
@@ -405,8 +447,8 @@
     message = "録音を再送しています。";
     try {
       await refreshCredentials();
-      await uploader.upload(session);
-      message = "受付が完了しました。";
+      const serverId = await uploader.upload(session);
+      showAccepted(serverId);
       await refreshSessions();
     } catch (error) {
       handleOperationError(error, "再送に失敗しました。");
@@ -440,8 +482,45 @@
   }
 
   async function showUnsent(): Promise<void> {
+    stopMonitoring();
     await refreshSessions();
     view = "unsent";
+  }
+
+  function stopMonitoring(): void {
+    statusMonitor?.stop();
+    monitoringOwner = null;
+    processing = null;
+    statusIssue = null;
+  }
+
+  function updateStatusAvailability(): void {
+    statusPaused = document.visibilityState !== "visible" || !navigator.onLine;
+    statusMonitor?.setPaused(statusPaused);
+  }
+
+  function showAccepted(serverId: string): void {
+    if (!mounted || !teacher) return;
+    stopMonitoring();
+    monitoringOwner = teacher.id;
+    view = "accepted";
+    message = null;
+    updateStatusAvailability();
+    statusMonitor.start(serverId);
+  }
+
+  function loadProcessingStatus(id: string, signal: AbortSignal) {
+    const owner = monitoringOwner;
+    return readSessionStatus({
+      api,
+      id,
+      signal,
+      isCurrent: () =>
+        !!owner && owner === monitoringOwner && owner === teacher?.id,
+      refreshAuthentication: credentials.refreshToken()
+        ? refreshCredentials
+        : null,
+    });
   }
 
   async function waitForSegmentPersistence(): Promise<void> {
@@ -502,6 +581,7 @@
     ) {
       credentials.clear();
       stopAuthRefresh();
+      stopMonitoring();
       view = "login";
     }
     message = error instanceof Error ? error.message : fallback;
@@ -618,6 +698,11 @@
       {cautionConfirmed}
       {ownedSessions}
       {foreignSessionExists}
+      {processing}
+      {statusIssue}
+      {statusLoading}
+      {statusPaused}
+      onRefreshStatus={() => statusMonitor.refresh()}
       onConfirmCaution={confirmCaution}
       onStart={startRecording}
       onPause={pauseRecording}
@@ -627,6 +712,7 @@
       onDiscard={discardCurrent}
       onShowUnsent={showUnsent}
       onBack={() => {
+        stopMonitoring();
         message = null;
         view = "ready";
       }}

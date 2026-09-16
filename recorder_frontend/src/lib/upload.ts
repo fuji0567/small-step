@@ -30,7 +30,7 @@ export class UploadCoordinator {
     this.#repository = options.repository;
   }
 
-  async upload(session: LocalRecordingSession): Promise<void> {
+  async upload(session: LocalRecordingSession): Promise<string> {
     let serverId = session.serverSessionId;
     if (!serverId) {
       const created = await this.#api.createSession(session.clientSessionId);
@@ -47,7 +47,7 @@ export class UploadCoordinator {
     const server = await this.#api.getSession(serverId);
     if (["queued", "processing", "completed"].includes(server.status)) {
       await this.#repository.delete(session.clientSessionId);
-      return;
+      return serverId;
     }
     if (server.status !== "draft") {
       throw new Error("この録音セッションは再送できない状態です。");
@@ -76,6 +76,7 @@ export class UploadCoordinator {
     }
     await this.#api.finalize(serverId);
     await this.#repository.delete(session.clientSessionId);
+    return serverId;
   }
 
   async retryOwned(
