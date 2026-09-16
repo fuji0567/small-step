@@ -27,6 +27,16 @@ def test_gpu_worker_waits_for_healthy_vllm():
     assert "condition: service_healthy" in gpu_worker
 
 
+def test_recorder_audio_is_shared_privately_between_api_and_existing_gpu_worker():
+    compose = VRT_COMPOSE.read_text(encoding="utf-8")
+    api = compose.split("\n  api:\n", maxsplit=1)[1].split("\n  migrate:\n", maxsplit=1)[0]
+    gpu_worker = compose.split("\n  gpu-worker:\n", maxsplit=1)[1].split("\n  line-worker:\n", maxsplit=1)[0]
+    for service in (api, gpu_worker):
+        assert "RECORDER_SESSION_DIR: /app/data/recorder-sessions" in service
+    assert "api_data:/app/data" in gpu_worker
+    assert "api_data:/app/data" in (ROOT / "compose.yaml").read_text(encoding="utf-8")
+
+
 def test_vllm_healthcheck_has_long_model_startup_grace_period():
     compose = VRT_COMPOSE.read_text(encoding="utf-8")
     vllm = compose.split("  small-step-vllm:", maxsplit=1)[1].split(

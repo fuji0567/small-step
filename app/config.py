@@ -55,7 +55,8 @@ class Settings(BaseSettings):
     recorder_max_duration_minutes: int = Field(default=60, ge=1, le=1_440)
     recorder_max_draft_sessions: int = Field(default=3, ge=1, le=100)
     recorder_max_segment_bytes: int = Field(default=25_000_000, ge=1, le=1_000_000_000)
-    recorder_worker_heartbeat_required: bool = False
+    recorder_worker_heartbeat_required: bool = True
+    recorder_processing_timeout_minutes: int = Field(default=10, ge=1, le=120)
     worker_heartbeat_interval_seconds: float = Field(default=30.0, ge=5.0, le=3_600.0)
     worker_heartbeat_stale_seconds: float = Field(default=90.0, ge=10.0, le=7_200.0)
     speaker_diarization_model: str = "pyannote/speaker-diarization-community-1"
@@ -157,6 +158,12 @@ class Settings(BaseSettings):
                 raise ValueError("VOICEPRINT_ENABLED requires SPEAKER_DIARIZATION_TOKEN")
         if self.app_env != "production":
             return self
+
+        if self.recorder_enabled:
+            if not self.cloud_audio_enabled:
+                raise ValueError("RECORDER_ENABLED requires CLOUD_AUDIO_ENABLED in production")
+            if not self.recorder_worker_heartbeat_required:
+                raise ValueError("Production recorder requires RECORDER_WORKER_HEARTBEAT_REQUIRED=true")
 
         if self.auth_mode != "supabase":
             raise ValueError("Production requires AUTH_MODE=supabase")

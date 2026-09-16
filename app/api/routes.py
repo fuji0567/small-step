@@ -108,6 +108,7 @@ from app.schemas import (
 from app.voiceprint import VOICEPRINT_ENROLLMENT_SAMPLE_COUNT, voiceprint_storage_keys
 from app.worker_heartbeat import (
     GPU_AUDIO_WORKER_NAME,
+    RECORDER_AUDIO_WORKER_NAME,
     LINE_DELIVERY_WORKER_NAME,
     worker_is_alive,
 )
@@ -522,6 +523,8 @@ def recorder_session_response(db: Session, recorder_session: RecordingSession) -
         updated_at=as_utc_datetime(recorder_session.updated_at),
         record_id=recorder_session.record_id,
         audio_processing_incomplete=(record.audio_processing_incomplete if record else None),
+        processed_segment_count=recorder_session.processed_segment_count,
+        failed_segment_count=recorder_session.failed_segment_count,
     )
 
 
@@ -572,7 +575,9 @@ def runtime_readiness_summary(request: Request, db: Session) -> RuntimeReadiness
         try:
             cloud_audio_storage(request).ensure_directory()
             cloud_audio_job_storage_ready = True
-        except (CloudAudioStorageError, OSError):
+            if settings.recorder_enabled:
+                recorder_storage(request).ensure_directory()
+        except (CloudAudioStorageError, RecorderStorageError, OSError):
             cloud_audio_job_storage_ready = False
         if database_ready and database_migration_current:
             try:
@@ -581,6 +586,12 @@ def runtime_readiness_summary(request: Request, db: Session) -> RuntimeReadiness
                     worker_name=GPU_AUDIO_WORKER_NAME,
                     stale_after=timedelta(seconds=settings.worker_heartbeat_stale_seconds),
                 )
+                if settings.recorder_enabled and settings.recorder_worker_heartbeat_required:
+                    cloud_audio_worker_ready = cloud_audio_worker_ready and worker_is_alive(
+                        db=db,
+                        worker_name=RECORDER_AUDIO_WORKER_NAME,
+                        stale_after=timedelta(seconds=settings.worker_heartbeat_stale_seconds),
+                    )
             except SQLAlchemyError:
                 db.rollback()
                 cloud_audio_worker_ready = False
@@ -2344,6 +2355,9 @@ async def upload_recorder_segment(
 
     settings = request.app.state.settings
     max_duration_ms = settings.recorder_max_duration_minutes * 60_000
+    if sequence >= settings.recorder_max_duration_minutes * 60:
+        await file.close()
+        raise HTTPException(status_code=422, detail="Recorder segment sequence exceeds the supported limit")
     if duration_ms < 1 or duration_ms > max_duration_ms:
         await file.close()
         raise HTTPException(status_code=422, detail="duration_ms is outside the supported range")
@@ -2467,7 +2481,7 @@ def finalize_recorder_session(
     current_teacher: CurrentTeacher = Depends(get_current_teacher),
     db: Session = Depends(get_db),
 ) -> RecordingSessionRead:
-    """Validate contiguous segments and queue a draft for the future worker."""
+    """Validate contiguous segments and queue a draft for the audio worker."""
 
     recorder_session = get_owned_recorder_session(
         session_id=session_id,

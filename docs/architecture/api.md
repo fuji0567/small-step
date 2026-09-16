@@ -98,7 +98,13 @@ API を経由せず、API と同じデータベースを直接読み書きしま
 
 分割音声は0始まりの連番、実録音時間、SHA-256を伴うMP4/AACまたはWebM/Opusです。同じ連番・同じ内容の再送は成功し、
 内容が異なる場合は409にします。`finalize` は欠番がなく累計60分以内であることを検証して202を返し、状態を `queued` にします。
+極端な細分化による保管件数の増加を防ぐため、区間数は最大録音分数×60（既定3600区間）に制限します。
 音声本体と元ファイル名はDBへ保存せず、ランダム名で `RECORDER_SESSION_DIR` へ原子的に保存します。
+
+確定後は既存GPUワーカーが処理します。一覧・詳細には `processed_segment_count`（処理を終えた区間数、失敗含む）、
+`failed_segment_count`、`record_id`、`audio_processing_incomplete` を返します。内部のclaim tokenや保存キーは返しません。
+通常の記録APIにも `audio_processing_incomplete` を返し、部分失敗した録音を承認前に確認できるようにします。
+録音有効時のreadinessは通常音声と録音処理の両方の生存確認を要求します。
 
 ---
 

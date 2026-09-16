@@ -50,6 +50,8 @@ export interface RecorderSession {
   updated_at: string;
   record_id: string | null;
   audio_processing_incomplete: boolean | null;
+  processed_segment_count?: number;
+  failed_segment_count?: number;
 }
 
 export type AuditEventAction =

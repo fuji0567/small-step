@@ -1,0 +1,98 @@
+# VRT録音デモ導入手順
+
+`/rec/` はESP録音端末の代わりにスマートフォンで試すデモ用入口です。
+録音を停止して送信した後に処理します。録音中のリアルタイム認識ではありません。
+実機音声による確認は別途必要です。この手順だけで実運用完了とはしません。
+
+## 前提
+
+- GitHubへpush・mainへマージした後、Ubuntuでmainを取得する。
+- 現在のDBバックアップと復旧手順を確認する。`.env` の控えはGitへ追加しない。
+- 公開HTTPSと先生ログインが利用でき、既存GPUワーカー・vLLMが稼働している。
+- 試験音声は同意済みの成人だけで録音する。園児や個人情報を含む音声は使わない。
+- 生音声はVRTへ一時送信される。「音声が園外に出ない」方式ではない。
+
+## ビルドと移行
+
+まず `RECORDER_ENABLED=false` のまま新しいコードを導入します。
+
+```bash
+cd /home/ubuntu/small-step
+sudo docker compose -f compose.yaml -f compose.vrt.yaml config --quiet
+sudo docker compose -f compose.yaml -f compose.vrt.yaml build api migrate gpu-worker
+sudo docker compose -f compose.yaml -f compose.vrt.yaml run --rm --no-deps migrate
+```
+
+各処理の成功を確認してから次へ進みます。移行は `0024_recorder_worker` まで適用します。
+既存テーブルの保護を維持したまま、排他処理と内容を持たない進捗カウンターを追加します。
+障害時は録音無効化を優先します。APIだけ旧版へ戻すと移行番号不一致でreadinessが失敗します。
+
+## 試験用に有効化
+
+Ubuntuの `.env` の既存行を変更します。同じ設定を末尾に重複追加しないでください。
+トークンや秘密鍵をチャットへ貼り付ける必要はありません。
+
+```dotenv
+CLOUD_AUDIO_ENABLED=true
+RECORDER_ENABLED=true
+RECORDER_WORKER_HEARTBEAT_REQUIRED=true
+RECORDER_PROCESSING_TIMEOUT_MINUTES=10
+```
+
+APIとGPUワーカーは同じ `api_data` の `/app/data/recorder-sessions` を共有します。
+既存APIが稼働している状態で、GPUワーカーを先に再作成します。
+Dockerのhealthyと運用開始用readinessは別の判定です。APIがhealthyでも、録音処理の生存確認が
+更新されるまではreadinessが失敗するため、最後に必ず確認してください。
+
+```bash
+sudo docker compose -f compose.yaml -f compose.vrt.yaml up -d --no-deps --force-recreate gpu-worker
+```
+
+ワーカーの起動を確認してからAPIを再作成します。
+
+```bash
+sudo docker compose -f compose.yaml -f compose.vrt.yaml up -d --no-deps --force-recreate --wait api
+sudo docker compose -f compose.yaml -f compose.vrt.yaml exec -T api python scripts/check_runtime_readiness.py
+```
+
+`status: ready` と `cloud_audio_worker_ready: true` を確認します。録音有効時はこの判定に
+通常音声と録音処理の両方の生存確認を含みます。モデル精度や実録音の成功までは保証しません。
+
+## 実機での確認
+
+1. `https://app.otayori-ai.com/rec/` で先生としてログインする。
+2. 前面に表示したまま65〜75秒録音する。最初と最後に異なる架空の出来事を話し、停止して送信する。
+3. 先生用「音声処理状況」を再読み込みし、ワーカー待ち→処理中→完了を確認する。
+4. 「作成された記録を確認する」を開き、両区間の内容と匿名化・園・担当を確認する。園児は未選択で承認待ちになる。
+5. 別の一般先生には記録が見えないこと、承認前にLINE通知が作成されないことを確認する。
+6. 個人情報や音声本体を表示せず、サーバーの残存ファイル数だけを確認する。
+
+```bash
+sudo docker compose -f compose.yaml -f compose.vrt.yaml exec -T gpu-worker python3 -c '
+from pathlib import Path
+from app.config import Settings
+p = Path(Settings().recorder_session_dir)
+print("残存音声ファイル数:", sum(1 for f in p.rglob("*") if f.is_file()) if p.exists() else 0)
+'
+```
+
+他の未処理録音がない試験環境では0になります。無発話・具体的な出来事なしは完了でも記録を作成しません。
+部分失敗は警告付きの承認待ち記録になり、内容と抜け漏れを確認する必要があります。
+既知のけがを含む候補の統合に失敗した場合はセッション全体を失敗にします。
+現在の記録発生日時はサーバーの受付日時です。端末の録音開始時刻ではありません。
+
+## 失敗時と無効化
+
+各区間の解析・統合は最大2回まで試します。中間結果はメモリにしか保持しないため、処理中の
+ワーカー再起動後は途中再開しません。10分間進捗がないセッションは失敗となり、再録音が必要です。
+成功・失敗・破棄・期限切れ音声の削除は定期処理と起動時に再試行します。
+全ワーカー停止中は期限監視も停止するため、停止を放置しないでください。
+
+試験を止める場合は `.env` の `RECORDER_ENABLED=false` に変更し、APIとGPUワーカーを再作成します。
+無効化後もGPUワーカーの期限監視・後片付けは稼働します。録音用生存確認は必須条件から外れます。
+録音PWA・録音APIは非公開になり、新しい録音の受付・処理は止まります。
+
+```bash
+sudo docker compose -f compose.yaml -f compose.vrt.yaml up -d --no-deps --force-recreate --wait api
+sudo docker compose -f compose.yaml -f compose.vrt.yaml up -d --no-deps --force-recreate gpu-worker
+```

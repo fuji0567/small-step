@@ -13,6 +13,7 @@ from app.models import WorkerHeartbeat, utc_now
 
 
 GPU_AUDIO_WORKER_NAME = "gpu_audio"
+RECORDER_AUDIO_WORKER_NAME = "recorder_audio"
 LINE_DELIVERY_WORKER_NAME = "line_delivery"
 
 

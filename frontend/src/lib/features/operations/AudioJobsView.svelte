@@ -172,6 +172,24 @@
               />
             </div>
             <p>{recorderDescription(session.status)}</p>
+            {#if session.processed_segment_count !== undefined}
+              <p>
+                処理進捗: {session.processed_segment_count}/{session.segments
+                  .length}区間完了
+              </p>
+            {/if}
+            {#if session.audio_processing_incomplete}
+              <Notice tone="warning" title="一部の音声を処理できませんでした">
+                <p>
+                  記録には抜けがある可能性があります。内容を確認してください。
+                </p>
+              </Notice>
+            {/if}
+            {#if session.record_id}
+              <a href={`/teacher/review/${session.record_id}/`}
+                >作成された記録を確認する</a
+              >
+            {/if}
           </article>
         </li>
       {/each}

@@ -134,7 +134,9 @@ vLLMは初回起動にモデル読込とGPU最適化で数分かかるため、�
 | `DATABASE_URL` | `sqlite:///./data/otayori.db` | 非 SQLite を強制 |
 | `EDGE_AUDIO_PROCESSING_MODE` | `local` | `local` / `cloud` |
 | `CLOUD_AUDIO_ENABLED` | `false` | 必要なときだけ `true` |
-| `RECORDER_ENABLED` | `false` | CPUワーカー・園内HTTPS・実機試験が揃った後だけ `true` |
+| `RECORDER_ENABLED` | `false` | 既存GPUワーカー・HTTPS・実機試験が揃った後だけ `true` |
+| `RECORDER_WORKER_HEARTBEAT_REQUIRED` | `true` | 録音有効時は `true` を強制 |
+| `RECORDER_PROCESSING_TIMEOUT_MINUTES` | `10` | 区間間の進捗更新が途絶えた処理を失敗にする |
 | `VOICEPRINT_ENABLED` | `false` | 同意済み先生の登録・本人確認を行うときだけ `true` |
 | `GUARDIAN_ARCHIVE_BASE_URL` | `http://127.0.0.1:8000` | アーカイブ有効時は HTTPS を強制 |
 | 移行の適用 | アプリ起動時に自動（SQLite のみ） | `migrate` サービスで明示適用 |
@@ -145,6 +147,12 @@ vLLMは初回起動にモデル読込とGPU最適化で数分かかるため、�
 詳細は [api.md](api.md) の「設定」を参照してください。
 
 設定項目の一覧は `.env.example` にあります。
+
+録音セッションは既存GPUワーカーが通常音声・声紋ジョブと順番に処理します。
+APIとGPUワーカーの両方へ同じ `RECORDER_ENABLED` を渡し、共有ディレクトリは
+`/app/data/recorder-sessions` に固定します。録音有効時のreadinessは `gpu_audio` と `recorder_audio` の
+生存確認を必要とします。全停止中は削除処理も停止するため、期限監視のためにGPUワーカーを稼働させてください。
+有効化の再作成順はGPUワーカー→APIです。詳細は [VRT録音デモ導入手順](../recorder-vrt-runbook.md)を参照します。
 
 声紋機能を有効にする場合は `CLOUD_AUDIO_ENABLED=true`、`SPEAKER_DIARIZATION_TOKEN`、
 Fernet形式の `VOICEPRINT_ENCRYPTION_KEY` が必要です。鍵が欠けている、形式が不正、またはGPU音声処理が

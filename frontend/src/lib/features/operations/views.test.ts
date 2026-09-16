@@ -17,6 +17,45 @@ function responseJson(body: unknown, status = 200): Response {
 afterEach(cleanup);
 
 describe('operations views', () => {
+  it('処理進捗と不完全な記録への警告・確認リンクを表示する', async () => {
+    const api = new ApiClient({
+      fetch: vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(responseJson([]))
+        .mockResolvedValueOnce(
+          responseJson([
+            {
+              id: 'session-1',
+              status: 'completed',
+              created_at: '2026-09-16T05:20:00Z',
+              total_duration_ms: 120_000,
+              segments: [{ size_bytes: 100 }, { size_bytes: 100 }],
+              processed_segment_count: 2,
+              failed_segment_count: 1,
+              record_id: 'record-1',
+              audio_processing_incomplete: true
+            }
+          ])
+        )
+    });
+
+    render(AudioJobsView, {
+      api,
+      schoolId: 'school-1',
+      controller: new AppController()
+    });
+
+    expect(
+      await screen.findByText(/処理進捗: 2\/2区間完了/)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('一部の音声を処理できませんでした')
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: '作成された記録を確認する' })
+    ).toHaveAttribute('href', '/teacher/review/record-1/');
+  });
+
   it('音声jobは安全な状態だけを描画し、保存先や文字起こしを出さない', async () => {
     const secret = 'private/audio.wav';
     const api = new ApiClient({

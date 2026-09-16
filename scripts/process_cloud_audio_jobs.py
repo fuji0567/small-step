@@ -2,6 +2,7 @@
 
 import argparse
 import time
+from contextlib import ExitStack
 from datetime import timedelta
 
 from app.cloud_audio import CloudAudioJobStorage
@@ -9,8 +10,10 @@ from app.cloud_audio_worker import process_next_cloud_audio_job
 from app.config import Settings
 from app.database import create_database_engine, create_session_factory, initialise_database
 from app.edge_audio import EdgeAudioProcessor
+from app.recorder import RecorderStorage
+from app.recorder_worker import RecorderMaintenance, process_next_recorder_session
 from app.speaker_diarization import PyannoteCommunityDiarizer
-from app.worker_heartbeat import GPU_AUDIO_WORKER_NAME, WorkerHeartbeatMonitor
+from app.worker_heartbeat import GPU_AUDIO_WORKER_NAME, RECORDER_AUDIO_WORKER_NAME, WorkerHeartbeatMonitor
 from app.voiceprint import PyannoteVoiceprintExtractor
 from app.voiceprint_quality import LocalVoiceprintQualityAnalyzer
 from app.voiceprint_worker import process_next_voiceprint_job
@@ -85,6 +88,24 @@ def process_available_voiceprint_jobs(
     return completed_count
 
 
+def process_available_recorder_sessions(
+    *, session_factory, storage: RecorderStorage, processor: EdgeAudioProcessor,
+    processing_timeout: timedelta, max_duration_minutes: int, limit: int = 1,
+) -> int:
+    count = 0
+    for _ in range(limit):
+        with session_factory() as db:
+            result = process_next_recorder_session(
+                db=db, storage=storage, processor=processor,
+                processing_timeout=processing_timeout, max_duration_minutes=max_duration_minutes,
+            )
+        if result is None:
+            break
+        count += 1
+        print(f"録音セッションを処理しました ({result.status.value})")
+    return count
+
+
 def main() -> None:
     settings = Settings()
     parser = argparse.ArgumentParser(description="VRT上でクラウド音声ジョブをGPU処理します。")
@@ -140,7 +161,27 @@ def main() -> None:
     voiceprint_processing_timeout = timedelta(
         minutes=settings.voiceprint_processing_timeout_minutes
     )
+    recorder_storage = RecorderStorage(
+        session_dir=settings.recorder_session_dir,
+        max_segment_bytes=settings.recorder_max_segment_bytes,
+    )
+    recorder_processing_timeout = timedelta(minutes=settings.recorder_processing_timeout_minutes)
+    contexts = ExitStack()
     try:
+        if settings.recorder_enabled:
+            recorder_storage.ensure_directory()
+            contexts.enter_context(WorkerHeartbeatMonitor(
+                session_factory=session_factory,
+                worker_name=RECORDER_AUDIO_WORKER_NAME,
+                interval_seconds=settings.worker_heartbeat_interval_seconds,
+            ))
+        # Cleanup keeps running while inference blocks, even after disabling uploads.
+        contexts.enter_context(RecorderMaintenance(
+            session_factory=session_factory, storage=recorder_storage,
+            interval_seconds=settings.worker_heartbeat_interval_seconds,
+            processing_timeout=recorder_processing_timeout,
+            orphan_retention=timedelta(hours=settings.recorder_retention_hours),
+        ))
         if args.once:
             count = process_available_jobs(
                 session_factory=session_factory,
@@ -164,7 +205,13 @@ def main() -> None:
                     limit=args.limit,
                     processing_timeout=voiceprint_processing_timeout,
                 )
-            print(f"処理したクラウド音声ジョブ: {count}件")
+            if settings.recorder_enabled:
+                count += process_available_recorder_sessions(
+                    session_factory=session_factory, storage=recorder_storage,
+                    processor=processor, processing_timeout=recorder_processing_timeout,
+                    max_duration_minutes=settings.recorder_max_duration_minutes, limit=args.limit,
+                )
+            print(f"処理した音声ジョブ・録音セッション: {count}件")
             return
 
         with WorkerHeartbeatMonitor(
@@ -195,8 +242,15 @@ def main() -> None:
                         limit=args.limit,
                         processing_timeout=voiceprint_processing_timeout,
                     )
+                if settings.recorder_enabled:
+                    process_available_recorder_sessions(
+                        session_factory=session_factory, storage=recorder_storage,
+                        processor=processor, processing_timeout=recorder_processing_timeout,
+                        max_duration_minutes=settings.recorder_max_duration_minutes,
+                    )
                 time.sleep(args.poll_seconds)
     finally:
+        contexts.close()
         engine.dispose()
 
 

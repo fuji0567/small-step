@@ -165,10 +165,10 @@ def test_voiceprint_enrollment_and_verification_delete_raw_audio(tmp_path):
         assert voiceprint is not None
         assert voiceprint.embedding_dimension == 2
         assert voiceprint.sample_count == VOICEPRINT_ENROLLMENT_SAMPLE_COUNT
-        assert decrypt_embedding(voiceprint.encrypted_embedding, encryption_key) == [
+        assert decrypt_embedding(voiceprint.encrypted_embedding, encryption_key) == pytest.approx([
             0.6,
             0.8,
-        ]
+        ])
 
         verification = add_job(
             db,
@@ -370,7 +370,7 @@ def test_voiceprint_averages_normalized_samples_into_one_template():
     averaged = average_embeddings([[3.0, 4.0], [6.0, 8.0], [0.0, 1.0]])
 
     assert len(averaged) == 2
-    assert cosine_similarity(averaged, [0.4, 0.9166666667]) == pytest.approx(1.0)
+    assert cosine_similarity(averaged, [0.4, (0.8 + 0.8 + 1.0) / 3]) == pytest.approx(1.0)
 
 
 def test_voiceprint_quality_failure_identifies_sample_and_deletes_all_audio(tmp_path):

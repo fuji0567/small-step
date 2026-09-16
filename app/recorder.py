@@ -61,6 +61,7 @@ class RecorderStorage:
         self.session_dir.mkdir(parents=True, exist_ok=True)
         if not self.session_dir.is_dir():
             raise RecorderStorageError("RECORDER_SESSION_DIR must be a directory")
+        self.session_dir.chmod(0o700)
 
     @staticmethod
     def _validate_session_id(session_id: str) -> str:
@@ -71,6 +72,8 @@ class RecorderStorage:
 
     def session_path(self, session_id: str) -> Path:
         safe_id = self._validate_session_id(session_id)
+        if (self.session_dir / safe_id).is_symlink():
+            raise RecorderStorageError("Recorder session directories must not be symlinks")
         candidate = (self.session_dir / safe_id).resolve()
         try:
             candidate.relative_to(self.session_dir)
@@ -111,6 +114,7 @@ class RecorderStorage:
         self.ensure_directory()
         session_path = self.session_path(safe_session_id)
         session_path.mkdir(parents=True, exist_ok=True)
+        session_path.chmod(0o700)
 
         extension = SUPPORTED_MEDIA_TYPES[safe_media_type]
         random_name = f"{uuid4().hex}{extension}"
@@ -121,6 +125,7 @@ class RecorderStorage:
         digest = hashlib.sha256()
         try:
             with temporary.open("xb") as stream:
+                temporary.chmod(0o600)
                 while chunk := await upload.read(1_048_576):
                     total_size += len(chunk)
                     if total_size > self.max_segment_bytes:

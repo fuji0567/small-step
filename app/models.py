@@ -362,7 +362,7 @@ class RecordingSession(Base):
     """Metadata for one independently uploaded recorder session.
 
     Segment bytes live below the configured recorder directory.  Keeping the
-    random storage key here lets a future CPU worker consume the files without
+    random storage key here lets the audio worker consume the files without
     ever putting raw audio, an original filename, or a transcript in SQLite or
     PostgreSQL.
     """
@@ -382,6 +382,9 @@ class RecordingSession(Base):
         Enum(RecordingSessionStatus), default=RecordingSessionStatus.draft, index=True
     )
     record_id: Mapped[str | None] = mapped_column(ForeignKey("records.id"), nullable=True, index=True)
+    claim_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    processed_segment_count: Mapped[int] = mapped_column(Integer, default=0)
+    failed_segment_count: Mapped[int] = mapped_column(Integer, default=0)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)

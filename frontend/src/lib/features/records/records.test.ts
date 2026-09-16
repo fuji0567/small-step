@@ -79,6 +79,27 @@ describe('ReviewQueueView', () => {
 });
 
 describe('RecordDetailView', () => {
+  it('音声の一部が処理失敗した記録は承認前の確認を促す', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).includes('/records/record-1')) {
+        return json({ ...pendingRecord, audio_processing_incomplete: true });
+      }
+      return json([child]);
+    });
+
+    render(RecordDetailView, {
+      api: new ApiClient({ fetch: fetchMock }),
+      schoolId: 'school-1',
+      recordId: 'record-1',
+      onNavigate: vi.fn()
+    });
+
+    expect(
+      await screen.findByText('一部の音声を処理できませんでした')
+    ).toBeInTheDocument();
+    expect(screen.getByText(/抜け漏れを確認してから承認/)).toBeInTheDocument();
+  });
+
   it.each([
     [403, 'この日誌を確認する権限がありません。'],
     [404, '指定された日誌は見つかりませんでした。']

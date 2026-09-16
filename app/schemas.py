@@ -129,6 +129,8 @@ class RecordingSessionRead(APIModel):
     updated_at: datetime
     record_id: UUID | None = None
     audio_processing_incomplete: bool | None = None
+    processed_segment_count: int = Field(default=0, ge=0)
+    failed_segment_count: int = Field(default=0, ge=0)
 
     @field_validator("expires_at", "created_at", "updated_at")
     @classmethod
@@ -410,6 +412,7 @@ class RecordRead(APIModel):
     status: RecordStatus
     source_event_id: str | None
     confidence: float
+    audio_processing_incomplete: bool = False
     occurred_at: datetime
     summary: str
     conversation_prompt: str | None

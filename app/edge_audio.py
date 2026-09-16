@@ -662,6 +662,38 @@ class EdgeAudioProcessor:
             if self.settings.edge_audio_delete_after_processing:
                 resolved_path.unlink(missing_ok=True)
 
+    def analyze_trusted_recorder_audio_file(self, audio_path: str) -> EdgeAudioCandidate:
+        """Analyze one private segment; the recorder worker owns retry and deletion."""
+
+        resolved_path = self._validate_audio_path(audio_path, require_inbox=False)
+        return self._analyze_resolved_audio(resolved_path)
+
+    def merge_recorder_candidates(
+        self, previous: EdgeAudioCandidate, following: EdgeAudioCandidate
+    ) -> EdgeAudioCandidate:
+        """Bound the running summary using only already-anonymized candidates."""
+
+        merged = self.summarizer.summarize(
+            "以下は同じ録音から順番に抽出した匿名化済み記録候補です。"
+            "重複を除き、材料にない出来事を追加せず、一つの記録に統合してください。"
+            "けがの情報を省略せず、元の候補の内容を否定・削除しないでください。\n"
+            f"前の候補: {previous.model_dump_json()}\n"
+            f"次の候補: {following.model_dump_json()}"
+        )
+        if not merged.recordable:
+            raise EdgeAudioError("Concrete recorder events cannot be discarded during merging")
+        category = (
+            RecordCategory.injury
+            if RecordCategory.injury in (previous.category, following.category)
+            else merged.category
+        )
+        return merged.model_copy(
+            update={
+                "category": category,
+                "confidence": min(previous.confidence, following.confidence, merged.confidence),
+            }
+        )
+
     def submit_analyzed_audio_file(self, *, audio_path: str, child_id: str | None = None) -> SubmittedRecord:
         """Create a pending-review record only when the audio contains a concrete event."""
 

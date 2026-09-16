@@ -11,6 +11,7 @@ export interface RecordRead {
   status: RecordStatus;
   source_event_id: string | null;
   confidence: number;
+  audio_processing_incomplete?: boolean;
   occurred_at: string;
   summary: string;
   conversation_prompt: string | null;

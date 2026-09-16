@@ -231,6 +231,7 @@ def test_record_detail_returns_each_status_without_secrets_and_keeps_export_rout
         "status",
         "source_event_id",
         "confidence",
+        "audio_processing_incomplete",
         "occurred_at",
         "summary",
         "conversation_prompt",

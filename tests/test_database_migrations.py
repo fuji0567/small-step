@@ -1,6 +1,6 @@
 from alembic import command
 from alembic.script import ScriptDirectory
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 
 from app.database import create_database_engine, initialise_database
 from app.database_migrations import (
@@ -76,6 +76,9 @@ def test_initial_migration_creates_the_current_schema(tmp_path):
         "expires_at",
         "created_at",
         "updated_at",
+        "claim_token",
+        "processed_segment_count",
+        "failed_segment_count",
     } <= recording_session_columns
     assert {
         "id",
@@ -88,7 +91,7 @@ def test_initial_migration_creates_the_current_schema(tmp_path):
         "storage_key",
     } <= recording_segment_columns
     assert "audio_processing_incomplete" in record_columns
-    assert migration_revision(database_url) == "0023_recording_voiceprint_merge"
+    assert migration_revision(database_url) == "0024_recorder_worker"
 
 
 def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_path):
@@ -102,7 +105,7 @@ def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_pat
     message = prepare_database(database_url)
 
     assert "登録しました" in message
-    assert migration_revision(database_url) == "0023_recording_voiceprint_merge"
+    assert migration_revision(database_url) == "0024_recorder_worker"
 
 
 def test_both_0022_branches_upgrade_to_the_merged_head(tmp_path):
@@ -124,4 +127,40 @@ def test_both_0022_branches_upgrade_to_the_merged_head(tmp_path):
             }
         finally:
             engine.dispose()
-        assert migration_revision(database_url) == "0023_recording_voiceprint_merge"
+        assert migration_revision(database_url) == "0024_recorder_worker"
+
+
+def test_recorder_worker_migration_preserves_existing_session_metadata(tmp_path):
+    database_url = f"sqlite:///{tmp_path}/recorder-upgrade.db"
+    command.upgrade(build_alembic_config(database_url), "0023_recording_voiceprint_merge")
+    engine = create_database_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("""
+                INSERT INTO recording_sessions
+                (id, school_id, teacher_id, client_session_id, status, expires_at, created_at, updated_at)
+                VALUES ('session', 'school', 'teacher', 'client', 'queued',
+                        '2026-09-17', '2026-09-16', '2026-09-16')
+            """))
+        upgrade_database(database_url)
+        with engine.connect() as connection:
+            row = connection.execute(text("""
+                SELECT status, claim_token, processed_segment_count, failed_segment_count
+                FROM recording_sessions WHERE id = 'session'
+            """)).one()
+        assert tuple(row) == ("queued", None, 0, 0)
+    finally:
+        engine.dispose()
+
+
+def test_recorder_worker_migration_generates_postgresql_safe_additive_sql():
+    output = io.StringIO()
+    config = build_alembic_config("postgresql://example:unused@localhost/example")
+    config.output_buffer = output
+    command.upgrade(config, "0023_recording_voiceprint_merge:0024_recorder_worker", sql=True)
+    sql = output.getvalue()
+    assert "ALTER TABLE recording_sessions ADD COLUMN claim_token VARCHAR(36)" in sql
+    assert "processed_segment_count INTEGER DEFAULT '0' NOT NULL" in sql
+    assert "failed_segment_count INTEGER DEFAULT '0' NOT NULL" in sql
+    assert "GRANT" not in sql and "DISABLE ROW LEVEL SECURITY" not in sql
+import io

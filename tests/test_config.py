@@ -128,3 +128,19 @@ def test_voiceprint_requires_cloud_audio_encryption_key_and_model_token():
             voiceprint_enabled=True,
             voiceprint_encryption_key=encryption_key,
         )
+
+
+def test_production_recorder_requires_audio_worker_and_heartbeat():
+    with pytest.raises(ValidationError, match="CLOUD_AUDIO_ENABLED"):
+        Settings(**production_settings(recorder_enabled=True))
+
+    with pytest.raises(ValidationError, match="RECORDER_WORKER_HEARTBEAT_REQUIRED"):
+        Settings(**production_settings(
+            recorder_enabled=True, cloud_audio_enabled=True,
+            recorder_worker_heartbeat_required=False,
+        ))
+
+    settings = Settings(**production_settings(recorder_enabled=True, cloud_audio_enabled=True))
+    assert settings.recorder_worker_heartbeat_required is True
+    with pytest.raises(ValidationError):
+        Settings(recorder_processing_timeout_minutes=0)

@@ -12,6 +12,10 @@ from app.api.dependencies import AuthenticatedUser, CurrentTeacher, get_current_
 from app.config import Settings
 from app.main import create_app
 from app.models import RecordingSession, RecordingSessionStatus, School, Teacher, TeacherRole, utc_now
+from app.edge_audio import EdgeAudioCandidate
+from app.recorder import RecorderStorage
+from app.recorder_worker import process_next_recorder_session
+from app.worker_heartbeat import GPU_AUDIO_WORKER_NAME, RECORDER_AUDIO_WORKER_NAME, record_worker_heartbeat
 
 
 def _upload(client: TestClient, session_id: str, sequence: int, content: bytes, *, duration_ms: int = 1_000):
@@ -106,6 +110,60 @@ def test_create_upload_idempotency_and_hash_conflict(recorder_client):
     assert duration_conflict.status_code == 409
 
 
+def test_finalize_worker_and_record_response_include_progress_and_incomplete_warning(recorder_client):
+    client, app, _school_id, _teacher_id, other_id = recorder_client
+    created = client.post("/api/v1/recorder/sessions", json={"client_session_id": str(uuid4())}).json()
+    session_id = created["id"]
+    assert _upload(client, session_id, 0, b"good").status_code == 200
+    assert _upload(client, session_id, 1, b"bad").status_code == 200
+    queued = client.post(f"/api/v1/recorder/sessions/{session_id}/finalize")
+    assert queued.status_code == 202
+    assert queued.json()["status"] == "queued"
+    assert queued.json()["processed_segment_count"] == 0
+    class Processor:
+        def analyze_trusted_recorder_audio_file(self, path):
+            if Path(path).read_bytes() == b"bad":
+                raise RuntimeError("private exception")
+            return EdgeAudioCandidate(recordable=True, category="growth", confidence=0.9, summary="匿名の記録")
+    with app.state.session_factory() as db:
+        process_next_recorder_session(
+            db=db, processor=Processor(),
+            storage=RecorderStorage(session_dir=app.state.settings.recorder_session_dir, max_segment_bytes=1024),
+        )
+    response = client.get(f"/api/v1/recorder/sessions/{session_id}").json()
+    assert response["status"] == "completed"
+    assert response["processed_segment_count"] == 2
+    assert response["failed_segment_count"] == 1
+    assert response["audio_processing_incomplete"] is True
+    assert "claim_token" not in response and "storage_key" not in str(response)
+    record = client.get(f"/api/v1/records/{response['record_id']}")
+    assert record.status_code == 200
+    assert record.json()["audio_processing_incomplete"] is True
+    assert record.json()["status"] == "pending_review"
+    _authenticate_as(app, other_id)
+    assert client.get(f"/api/v1/records/{response['record_id']}").status_code == 403
+
+
+def test_enabled_recorder_readiness_requires_its_own_fresh_worker_heartbeat(tmp_path):
+    app = create_app(Settings(
+        database_url=f"sqlite:///{tmp_path}/readiness.db", auth_mode="development",
+        cloud_audio_enabled=True, recorder_enabled=True,
+        cloud_audio_job_dir=str(tmp_path / "cloud"), recorder_session_dir=str(tmp_path / "recorder"),
+        llm_base_url="http://127.0.0.1:8001/v1", llm_model="test",
+        line_channel_secret="", line_channel_access_token="",
+    ))
+    with TestClient(app) as client:
+        with app.state.session_factory() as db:
+            record_worker_heartbeat(db=db, worker_name=GPU_AUDIO_WORKER_NAME)
+        assert client.get("/api/v1/readiness").status_code == 503
+        with app.state.session_factory() as db:
+            record_worker_heartbeat(db=db, worker_name=RECORDER_AUDIO_WORKER_NAME)
+        assert client.get("/api/v1/readiness").status_code == 200
+        with app.state.session_factory() as db:
+            record_worker_heartbeat(db=db, worker_name=RECORDER_AUDIO_WORKER_NAME, now=utc_now() - timedelta(minutes=5))
+        assert client.get("/api/v1/readiness").status_code == 503
+
+
 def test_finalize_requires_contiguous_segments_and_enforces_duration(recorder_client):
     client, _app, _school_id, _teacher_id, _other_id = recorder_client
     session = client.post("/api/v1/recorder/sessions", json={"client_session_id": str(uuid4())}).json()
@@ -118,6 +176,15 @@ def test_finalize_requires_contiguous_segments_and_enforces_duration(recorder_cl
         data={"duration_ms": "3600001", "sha256": hashlib.sha256(b"first").hexdigest()},
     )
     assert first.status_code == 422
+
+
+def test_segment_sequence_is_bounded_before_audio_storage(recorder_client):
+    client, app, _school_id, _teacher_id, _other_id = recorder_client
+    session = client.post("/api/v1/recorder/sessions", json={"client_session_id": str(uuid4())}).json()
+    limit = app.state.settings.recorder_max_duration_minutes * 60
+    response = _upload(client, session["id"], limit, b"must not be stored")
+    assert response.status_code == 422
+    assert not (Path(app.state.settings.recorder_session_dir) / session["id"]).exists()
 
 
 def test_owner_scope_delete_and_audio_cleanup(recorder_client):

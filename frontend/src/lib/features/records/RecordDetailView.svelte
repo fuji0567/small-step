@@ -311,6 +311,13 @@
           record.confidence * 100
         )}%
       </p>
+      {#if record.audio_processing_incomplete}
+        <Notice tone="warning" title="一部の音声を処理できませんでした">
+          <p>
+            この記録は処理できた区間だけで作成されています。内容と抜け漏れを確認してから承認してください。
+          </p>
+        </Notice>
+      {/if}
 
       {#if isSchoolAdmin}
         <section
