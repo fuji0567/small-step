@@ -124,7 +124,7 @@
         <p>一覧を表示できませんでした。</p>
       {/if}
       <ul>
-        {#each errorMessages as message}<li>{message}</li>{/each}
+        {#each errorMessages as message (message)}<li>{message}</li>{/each}
       </ul>
     </Notice>
   {/if}

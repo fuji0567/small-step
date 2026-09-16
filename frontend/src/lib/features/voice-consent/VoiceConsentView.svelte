@@ -262,7 +262,8 @@
   async function startRecording(): Promise<void> {
     if (recordingStarting || recording) return;
     if (capturedSamples.length >= requiredSampleCount) {
-      errorMessage = '必要な回数の録音が完了しています。録り直す音声を外してください。';
+      errorMessage =
+        '必要な回数の録音が完了しています。録り直す音声を外してください。';
       return;
     }
     errorMessage = null;
@@ -369,12 +370,14 @@
   }
 
   const qualityIssueMessages: Record<VoiceprintQualityIssue, string> = {
-    too_short: '話している時間が短すぎます。10秒以上、間を空けずに話してください。',
+    too_short:
+      '話している時間が短すぎます。10秒以上、間を空けずに話してください。',
     too_long: '録音が長すぎます。10〜15秒に収めてください。',
     too_quiet: '声が小さすぎます。マイクに少し近づいて話してください。',
     too_noisy: '周囲の雑音が多すぎます。静かな場所で録音してください。',
     clipping: '音が割れています。マイクから少し離れて話してください。',
-    multiple_speakers: '複数人の声が入っています。先生本人だけで録音してください。',
+    multiple_speakers:
+      '複数人の声が入っています。先生本人だけで録音してください。',
     invalid_audio: '音声を読み取れませんでした。もう一度録音してください。'
   };
 
@@ -403,7 +406,10 @@
   }
 
   async function submitVoiceprint(kind: VoiceprintJobKind): Promise<void> {
-    if (kind !== captureKind || capturedSamples.length !== requiredSampleCount) {
+    if (
+      kind !== captureKind ||
+      capturedSamples.length !== requiredSampleCount
+    ) {
       errorMessage = `${requiredSampleCount}回分の先生本人の音声を用意してください。`;
       return;
     }
@@ -710,9 +716,7 @@
             <details class="voice-file-fallback">
               <summary>録音済みの音声ファイルを選ぶ</summary>
               <label class="voice-file">
-                <span
-                  >先生本人の音声ファイル（{requiredSampleCount}件）</span
-                >
+                <span>先生本人の音声ファイル（{requiredSampleCount}件）</span>
                 <input
                   type="file"
                   accept="audio/*"
