@@ -136,6 +136,7 @@ describe("App continuous recording", () => {
     vi.stubGlobal("fetch", fetchFn);
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
@@ -149,14 +150,23 @@ describe("App continuous recording", () => {
     );
     await settle();
     await vi.advanceTimersByTimeAsync(60_000);
-    await settle();
-    expect(servers.size).toBe(1);
+    await vi.waitFor(() => {
+      expect(servers.size).toBe(1);
+      expect(fixtures.sessions.size).toBe(0);
+      expect(
+        screen.getByText("サーバー受付: 1区間 / 未送信: 0区間"),
+      ).toBeInTheDocument();
+    });
     expect(screen.getByText("録音中")).toBeInTheDocument();
-    expect(fixtures.sessions.size).toBe(0);
     await vi.advanceTimersByTimeAsync(5_000);
     await fireEvent.click(screen.getByRole("button", { name: "録音を停止" }));
-    await settle();
-    expect(servers.size).toBe(2);
+    await vi.waitFor(() => {
+      expect(servers.size).toBe(2);
+      expect(fixtures.sessions.size).toBe(0);
+      expect(
+        screen.getByText("サーバー受付: 2区間 / 未送信: 0区間"),
+      ).toBeInTheDocument();
+    });
     expect(stopTrack).toHaveBeenCalled();
     expect(screen.getByText("録音を停止しました")).toBeInTheDocument();
     unmount();
@@ -182,7 +192,12 @@ describe("App continuous recording", () => {
       configurable: true,
     });
     window.dispatchEvent(new Event("online"));
-    await settle();
+    await vi.waitFor(() => {
+      expect(fixtures.sessions.size).toBe(2);
+      expect(
+        screen.getByText("サーバー受付: 1区間 / 未送信: 2区間"),
+      ).toBeInTheDocument();
+    });
     expect(screen.getByText("一時停止中")).toBeInTheDocument();
     unmount();
   });
@@ -249,6 +264,13 @@ describe("App continuous recording", () => {
   });
 
   it("手動モードは停止まで自動送信せず送信操作後に受付する", async () => {
+    const digest = crypto.subtle.digest.bind(crypto.subtle);
+    vi.spyOn(crypto.subtle, "digest").mockImplementation(
+      async (algorithm, data) => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        return digest(algorithm, data);
+      },
+    );
     const { unmount } = render(App);
     await settle();
     await fireEvent.click(screen.getByRole("checkbox", { name: /連続録音/ }));
@@ -260,10 +282,11 @@ describe("App continuous recording", () => {
     expect(servers.size).toBe(0);
     expect(fixtures.sessions.size).toBe(1);
     await fireEvent.click(screen.getByRole("button", { name: "送信する" }));
-    await settle();
-    expect(servers.size).toBe(1);
-    expect(fixtures.sessions.size).toBe(0);
-    expect(screen.getByText("受付が完了しました")).toBeInTheDocument();
+    await vi.waitFor(() => {
+      expect(screen.getByText("受付が完了しました")).toBeInTheDocument();
+      expect(servers.size).toBe(1);
+      expect(fixtures.sessions.size).toBe(0);
+    });
     unmount();
   });
 });
