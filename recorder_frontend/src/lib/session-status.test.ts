@@ -42,7 +42,7 @@ function deferred<T>() {
 describe("readSessionStatus", () => {
   function setup() {
     const getSession = vi.fn().mockResolvedValue(session());
-    const refreshAuthentication = vi.fn(async () => undefined);
+    const refreshAuthentication = vi.fn(async (): Promise<void> => undefined);
     const abort = new AbortController();
     const options = {
       api: { getSession } as unknown as RecorderApi,

@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import type { ApiClient } from '$lib/api';
   import { Button, Loading, Notice, StatusBadge } from '$lib/components';
+  import { recordDetailPath } from '$lib/features/records/format';
   import type { AppController } from '$lib/state';
   import { onMount } from 'svelte';
 
@@ -186,7 +188,7 @@
               </Notice>
             {/if}
             {#if session.record_id}
-              <a href={`/teacher/review/${session.record_id}/`}
+              <a href={resolve(recordDetailPath(session.record_id))}
                 >作成された記録を確認する</a
               >
             {/if}

@@ -3,12 +3,7 @@ import { AuthRefreshError } from "./auth";
 import type { ServerRecordingSession } from "./types";
 
 export type ProcessingStatus =
-  | "queued"
-  | "processing"
-  | "completed"
-  | "failed"
-  | "expired"
-  | "discarded";
+  "queued" | "processing" | "completed" | "failed" | "expired" | "discarded";
 
 export interface ProcessingProgress {
   status: ProcessingStatus;
