@@ -190,11 +190,20 @@ class PyannoteCommunityDiarizer:
                 ) from error
         return pipeline
 
+    def _load_waveform(self, audio_path: Path) -> tuple[object, int]:
+        from pyannote.audio.core.io import Audio
+
+        return Audio(sample_rate=16000, mono="downmix")(str(audio_path))
+
     def _diarize_once(self, audio_path: Path) -> SpeakerDiarizationResult:
+        waveform = None
         try:
             if self._pipeline is None:
                 self._pipeline = self._load_pipeline()
-            output = self._pipeline(str(audio_path))
+            # Decode once: compressed-file range seeks can return a different
+            # sample count than pyannote's crop expects. Crop the waveform instead.
+            waveform, sample_rate = self._load_waveform(audio_path)
+            output = self._pipeline({"waveform": waveform, "sample_rate": sample_rate})
             diarization = getattr(output, "exclusive_speaker_diarization", None)
             if diarization is None:
                 diarization = getattr(output, "speaker_diarization", output)
@@ -213,6 +222,8 @@ class PyannoteCommunityDiarizer:
             raise
         except Exception as error:
             raise SpeakerDiarizationError("Local speaker diarization failed") from error
+        finally:
+            waveform = None
 
     def _preprocess_quiet_speech(self, audio_path: Path, output_path: Path) -> None:
         if self.preprocessor is not None:
