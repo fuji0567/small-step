@@ -104,8 +104,10 @@ from app.schemas import (
     VoiceConsentRead,
     VoiceprintJobRead,
     VoiceprintRead,
+    VoiceprintSuggestionRead,
 )
 from app.voiceprint import VOICEPRINT_ENROLLMENT_SAMPLE_COUNT, voiceprint_storage_keys
+from app.recorder_voiceprint import eligible_teacher_ids
 from app.worker_heartbeat import (
     GPU_AUDIO_WORKER_NAME,
     RECORDER_AUDIO_WORKER_NAME,
@@ -116,7 +118,7 @@ from app.worker_heartbeat import (
 router = APIRouter(prefix="/api/v1")
 
 VOICE_ENROLLMENT_PURPOSE = "teacher_voiceprint_enrollment"
-VOICE_ENROLLMENT_POLICY_VERSION = "2026-08-28"
+VOICE_ENROLLMENT_POLICY_VERSION = "2026-09-17"
 GUARDIAN_NOT_LINKED_FAILURE_KIND = "guardian_not_linked"
 
 AUDIT_EVENT_LABELS = {
@@ -541,6 +543,9 @@ def delete_teacher_voiceprint_data(
 ) -> None:
     """Remove all biometric data and any short-lived source audio for one teacher."""
 
+    db.execute(update(Record).where(
+        Record.voiceprint_candidate_teacher_id == teacher_id,
+    ).values(voiceprint_candidate_teacher_id=None))
     storage = voiceprint_storage(request)
     jobs = list(
         db.scalars(select(VoiceprintJob).where(VoiceprintJob.teacher_id == teacher_id))
@@ -649,6 +654,7 @@ def voice_consent_read(consent: VoiceEnrollmentConsent) -> VoiceConsentRead:
         school_id=consent.school_id,
         teacher_id=consent.teacher_id,
         purpose=consent.purpose,
+        allows_recorder_identification=consent.allows_recorder_identification,
         policy_version=consent.policy_version,
         retention_days=consent.retention_days,
         consented_at=consent.consented_at,
@@ -1356,12 +1362,17 @@ def grant_my_voice_consent(
     fields = {
         "school_id": teacher.school_id,
         "purpose": VOICE_ENROLLMENT_PURPOSE,
+        "allows_recorder_identification": payload.allows_recorder_identification,
         "policy_version": VOICE_ENROLLMENT_POLICY_VERSION,
         "retention_days": payload.retention_days,
         "consented_at": now,
         "expires_at": now + timedelta(days=payload.retention_days),
         "revoked_at": None,
     }
+    if not payload.allows_recorder_identification:
+        db.execute(update(Record).where(
+            Record.voiceprint_candidate_teacher_id == teacher.id,
+        ).values(voiceprint_candidate_teacher_id=None))
     if consent is None:
         consent = VoiceEnrollmentConsent(teacher_id=teacher.id, **fields)
         db.add(consent)
@@ -2820,6 +2831,28 @@ def get_record(
     record = require_entity(db, Record, record_id, "Record")
     assert_record_access(current_teacher, record)
     return record
+
+
+@router.get("/records/{record_id}/voiceprint-suggestion", response_model=VoiceprintSuggestionRead, tags=["records"])
+def get_record_voiceprint_suggestion(
+    record_id: str, request: Request,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> VoiceprintSuggestionRead:
+    record = require_entity(db, Record, record_id, "Record")
+    assert_record_access(current_teacher, record)
+    settings = request.app.state.settings
+    if not settings.voiceprint_enabled or not settings.recorder_voiceprint_matching_enabled:
+        return VoiceprintSuggestionRead(status="disabled")
+    if not record.voiceprint_matching_checked:
+        return VoiceprintSuggestionRead(status="disabled")
+    candidate_id = record.voiceprint_candidate_teacher_id
+    if candidate_id is not None:
+        eligible = eligible_teacher_ids(db, record.school_id, settings.voiceprint_model)
+        if candidate_id in eligible:
+            teacher = db.get(Teacher, candidate_id)
+            return VoiceprintSuggestionRead(status="candidate", teacher_id=teacher.id, teacher_name=teacher.name)
+    return VoiceprintSuggestionRead(status="unidentified")
 
 
 @router.patch("/records/{record_id}/assignee", response_model=RecordRead, tags=["records"])

@@ -79,6 +79,85 @@ describe('ReviewQueueView', () => {
 });
 
 describe('RecordDetailView', () => {
+  it('声紋の候補取得が遅れても日誌の確認を妨げない', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/voiceprint-suggestion'))
+        return new Promise<Response>(() => {});
+      if (url.includes('/children?')) return json([child]);
+      return json(pendingRecord);
+    });
+    render(RecordDetailView, {
+      api: new ApiClient({ fetch: fetchMock }),
+      schoolId: 'school-1',
+      recordId: 'record-1',
+      onNavigate: vi.fn()
+    });
+    expect(await screen.findByLabelText('保護者へ伝える内容')).toHaveValue(
+      pendingRecord.summary
+    );
+    expect(screen.getByRole('button', { name: '承認する' })).not.toBeDisabled();
+  });
+
+  it('声紋の候補は担当を自動変更せず、管理者が引き継ぎ先へ選択する', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/voiceprint-suggestion'))
+        return json({
+          status: 'candidate',
+          teacher_id: 'teacher-2',
+          teacher_name: '引き継ぎ先生'
+        });
+      if (url.includes('/teachers?')) return json(teachers);
+      if (url.includes('/children?')) return json([child]);
+      return json(pendingRecord);
+    });
+    render(RecordDetailView, {
+      api: new ApiClient({ fetch: fetchMock }),
+      schoolId: 'school-1',
+      recordId: 'record-1',
+      isSchoolAdmin: true,
+      onNavigate: vi.fn()
+    });
+    expect(
+      await screen.findByText('担当候補: 引き継ぎ先生さん')
+    ).toBeInTheDocument();
+    const select = screen.getByLabelText('引き継ぎ先の先生');
+    expect(select).toHaveValue('teacher-1');
+    await fireEvent.click(
+      screen.getByRole('button', { name: '候補を引き継ぎ先に選択' })
+    );
+    expect(select).toHaveValue('teacher-2');
+    expect(
+      fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')
+    ).toBe(false);
+  });
+
+  it('一般の先生には候補を表示しても担当変更操作を出さない', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).endsWith('/voiceprint-suggestion'))
+        return json({
+          status: 'candidate',
+          teacher_id: 'teacher-2',
+          teacher_name: '引き継ぎ先生'
+        });
+      if (String(input).includes('/children?')) return json([child]);
+      return json(pendingRecord);
+    });
+    render(RecordDetailView, {
+      api: new ApiClient({ fetch: fetchMock }),
+      schoolId: 'school-1',
+      recordId: 'record-1',
+      onNavigate: vi.fn()
+    });
+    expect(
+      await screen.findByText('担当候補: 引き継ぎ先生さん')
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: '候補を引き継ぎ先に選択' })
+    ).toBeNull();
+  });
+
   it('音声の一部が処理失敗した記録は承認前の確認を促す', async () => {
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       if (String(input).includes('/records/record-1')) {

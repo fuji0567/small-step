@@ -91,7 +91,8 @@ def test_initial_migration_creates_the_current_schema(tmp_path):
         "storage_key",
     } <= recording_segment_columns
     assert "audio_processing_incomplete" in record_columns
-    assert migration_revision(database_url) == "0024_recorder_worker"
+    assert {"voiceprint_candidate_teacher_id", "voiceprint_matching_checked"} <= record_columns
+    assert migration_revision(database_url) == "0025_recorder_voiceprint"
 
 
 def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_path):
@@ -105,7 +106,7 @@ def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_pat
     message = prepare_database(database_url)
 
     assert "登録しました" in message
-    assert migration_revision(database_url) == "0024_recorder_worker"
+    assert migration_revision(database_url) == "0025_recorder_voiceprint"
 
 
 def test_both_0022_branches_upgrade_to_the_merged_head(tmp_path):
@@ -127,7 +128,7 @@ def test_both_0022_branches_upgrade_to_the_merged_head(tmp_path):
             }
         finally:
             engine.dispose()
-        assert migration_revision(database_url) == "0024_recorder_worker"
+        assert migration_revision(database_url) == "0025_recorder_voiceprint"
 
 
 def test_recorder_worker_migration_preserves_existing_session_metadata(tmp_path):
@@ -164,3 +165,37 @@ def test_recorder_worker_migration_generates_postgresql_safe_additive_sql():
     assert "failed_segment_count INTEGER DEFAULT '0' NOT NULL" in sql
     assert "GRANT" not in sql and "DISABLE ROW LEVEL SECURITY" not in sql
 import io
+
+
+def test_recorder_voiceprint_migration_is_opt_in_for_existing_consent(tmp_path):
+    database_url = f"sqlite:///{tmp_path}/consent-upgrade.db"
+    command.upgrade(build_alembic_config(database_url), "0024_recorder_worker")
+    engine = create_database_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("""
+                INSERT INTO voice_enrollment_consents
+                (id, school_id, teacher_id, purpose, policy_version, retention_days,
+                 consented_at, expires_at, created_at, updated_at)
+                VALUES ('consent', 'school', 'teacher', 'teacher_voiceprint_enrollment',
+                        'old', 30, '2026-09-17', '2026-10-17', '2026-09-17', '2026-09-17')
+            """))
+        upgrade_database(database_url)
+        with engine.connect() as connection:
+            assert connection.scalar(text(
+                "SELECT allows_recorder_identification FROM voice_enrollment_consents WHERE id = 'consent'"
+            )) == 0
+    finally:
+        engine.dispose()
+
+
+def test_recorder_voiceprint_migration_preserves_postgresql_permissions():
+    output = io.StringIO()
+    config = build_alembic_config("postgresql://example:unused@localhost/example")
+    config.output_buffer = output
+    command.upgrade(config, "0024_recorder_worker:0025_recorder_voiceprint", sql=True)
+    sql = output.getvalue()
+    assert "allows_recorder_identification BOOLEAN DEFAULT false NOT NULL" in sql
+    assert "voiceprint_candidate_teacher_id VARCHAR(36)" in sql
+    assert "voiceprint_matching_checked BOOLEAN DEFAULT false NOT NULL" in sql
+    assert "GRANT" not in sql and "DISABLE ROW LEVEL SECURITY" not in sql

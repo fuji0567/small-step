@@ -79,6 +79,12 @@ create_app(settings)
 
 `POST /voiceprint/me/enroll` は同名の `audio` フィールドを3件受け取り、`POST /voiceprint/me/verify` は1件だけ受け取ります。声紋ジョブの応答は品質不合格時に理由と1始まりの録音番号を返しますが、保存先、元音声、特徴量は返しません。
 
+`POST /voice-consent/me` の `allows_recorder_identification` は既定falseの追加同意です。
+falseでの更新は既存の担当候補も削除します。`GET /records/{record_id}/voiceprint-suggestion` は
+通常の記録と同じ閲覧権限を検証し、機能停止・未実施は `disabled`、不明は `unidentified`、
+現在も同意・声紋・先生が有効な同じ園の一致だけを `candidate` と先生ID・表示名で返します。
+特徴量・類似度は返しません。変更操作は従来の管理者限定 `PATCH /records/{record_id}/assignee` のままです。
+
 利用者別の入口:
 
 - **先生用アプリ** … `auth` / `records` / `notifications` / `children` / `teachers` / `schools` / `edge devices` / `audit` / `voice consent` / `voiceprint` / `recorder`

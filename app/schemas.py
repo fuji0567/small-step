@@ -179,10 +179,12 @@ class VoiceConsentCreate(BaseModel):
     """An explicit acknowledgement before local voiceprint enrollment is enabled."""
 
     accepts_voiceprint_enrollment: Literal[True]
+    allows_recorder_identification: bool = False
     retention_days: int = Field(default=30, ge=1, le=365)
 
 
 class VoiceConsentRead(APIModel):
+    allows_recorder_identification: bool = False
     id: UUID
     school_id: UUID
     teacher_id: UUID
@@ -401,6 +403,12 @@ class RecordAssigneeUpdate(BaseModel):
     """Assign a pending record to another active teacher in the same school."""
 
     teacher_id: UUID
+
+
+class VoiceprintSuggestionRead(BaseModel):
+    status: Literal["disabled", "unidentified", "candidate"]
+    teacher_id: UUID | None = None
+    teacher_name: str | None = None
 
 
 class RecordRead(APIModel):

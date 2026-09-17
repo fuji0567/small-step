@@ -1,4 +1,5 @@
 export interface VoiceConsent {
+  allows_recorder_identification?: boolean;
   id: string;
   school_id: string;
   teacher_id: string;

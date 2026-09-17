@@ -160,6 +160,60 @@ class Processor:
         return event(f"{previous.summary}; {following.summary}")
 
 
+def test_voiceprint_candidate_does_not_reassign_or_approve_record(runtime, monkeypatch):
+    from types import SimpleNamespace
+    from cryptography.fernet import Fernet
+    from app.models import TeacherVoiceprint, VoiceEnrollmentConsent
+    from app.recorder_voiceprint import RecorderVoiceprintMatcher
+    from app.voiceprint import encrypt_embedding
+
+    factory, storage, (school_id, owner_id) = runtime
+    session_id = enqueue(runtime, count=1)
+    with factory() as db:
+        identified = Teacher(school_id=school_id, name="Candidate", email="candidate@test")
+        db.add(identified)
+        db.flush()
+        candidate_id = identified.id
+        key = Fernet.generate_key().decode()
+        db.add_all([
+            VoiceEnrollmentConsent(
+                school_id=school_id, teacher_id=candidate_id, purpose="teacher_voiceprint_enrollment",
+                policy_version="test", retention_days=30, allows_recorder_identification=True,
+                expires_at=utc_now() + timedelta(days=30),
+            ),
+            TeacherVoiceprint(
+                school_id=school_id, teacher_id=candidate_id, model_name="test",
+                encrypted_embedding=encrypt_embedding([1, 0], key), embedding_dimension=2,
+                expires_at=utc_now() + timedelta(days=30),
+            ),
+        ])
+        db.commit()
+        monkeypatch.setattr(RecorderVoiceprintMatcher, "observe", lambda self, *args: self.matches.add(candidate_id))
+
+        class MatchingProcessor(Processor):
+            settings = SimpleNamespace(
+                voiceprint_enabled=True, recorder_voiceprint_matching_enabled=True,
+                voiceprint_encryption_key=key, recorder_voiceprint_match_threshold=.85,
+                recorder_voiceprint_match_margin=.1,
+            )
+
+            def analyze_trusted_recorder_audio_file(self, path, *, speaker_observer):
+                result = super().analyze_trusted_recorder_audio_file(path)
+                speaker_observer(Path(path), None)
+                return result
+
+        result = process_next_recorder_session(
+            db=db, storage=storage, processor=MatchingProcessor(db),
+            voiceprint_extractor=SimpleNamespace(model_name="test"),
+        )
+        record = db.get(Record, result.record_id)
+        assert record.voiceprint_matching_checked
+        assert record.voiceprint_candidate_teacher_id == candidate_id
+        assert record.teacher_id == owner_id and record.status == RecordStatus.pending_review
+        assert db.scalars(select(Notification)).all() == []
+        assert not storage.session_path(session_id).exists()
+
+
 def test_ordered_processing_creates_only_one_pending_record_and_removes_audio(runtime):
     factory, storage, (school_id, teacher_id) = runtime
     session_id = enqueue(runtime)

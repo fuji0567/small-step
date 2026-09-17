@@ -91,6 +91,7 @@ def process_available_voiceprint_jobs(
 def process_available_recorder_sessions(
     *, session_factory, storage: RecorderStorage, processor: EdgeAudioProcessor,
     processing_timeout: timedelta, max_duration_minutes: int, limit: int = 1,
+    voiceprint_extractor=None,
 ) -> int:
     count = 0
     for _ in range(limit):
@@ -98,6 +99,7 @@ def process_available_recorder_sessions(
             result = process_next_recorder_session(
                 db=db, storage=storage, processor=processor,
                 processing_timeout=processing_timeout, max_duration_minutes=max_duration_minutes,
+                voiceprint_extractor=voiceprint_extractor,
             )
         if result is None:
             break
@@ -211,6 +213,7 @@ def main() -> None:
                     session_factory=session_factory, storage=recorder_storage,
                     processor=processor, processing_timeout=recorder_processing_timeout,
                     max_duration_minutes=settings.recorder_max_duration_minutes, limit=args.limit,
+                    voiceprint_extractor=voiceprint_extractor,
                 )
             print(f"処理した音声ジョブ・録音セッション: {count}件")
             return
@@ -248,6 +251,7 @@ def main() -> None:
                         session_factory=session_factory, storage=recorder_storage,
                         processor=processor, processing_timeout=recorder_processing_timeout,
                         max_duration_minutes=settings.recorder_max_duration_minutes,
+                        voiceprint_extractor=voiceprint_extractor,
                     )
                 time.sleep(args.poll_seconds)
     finally:

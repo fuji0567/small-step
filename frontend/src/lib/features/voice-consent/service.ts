@@ -9,11 +9,15 @@ export class VoiceConsentService {
     return this.api.requestJson<VoiceConsent>('/voice-consent/me', { signal });
   }
 
-  grant(retentionDays: number): Promise<VoiceConsent | null> {
+  grant(
+    retentionDays: number,
+    allowsRecorderIdentification = false
+  ): Promise<VoiceConsent | null> {
     return this.api.requestJson('/voice-consent/me', {
       method: 'POST',
       json: {
         accepts_voiceprint_enrollment: true,
+        allows_recorder_identification: allowsRecorderIdentification,
         retention_days: retentionDays
       }
     });

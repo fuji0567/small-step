@@ -47,6 +47,11 @@
   }: Props = $props();
   const service = $derived(new RecordsService(api));
   let record = $state<RecordRead | null>(null);
+  let voiceprintSuggestion = $state<{
+    status: 'disabled' | 'unidentified' | 'candidate';
+    teacher_id: string | null;
+    teacher_name: string | null;
+  } | null>(null);
   let children = $state.raw<RecordChild[]>([]);
   let teachers = $state.raw<RecordTeacher[]>([]);
   let summary = $state('');
@@ -114,6 +119,7 @@
     const selectedSchoolId = schoolId;
     const version = ++requestVersion;
     record = null;
+    voiceprintSuggestion = null;
     errorMessage = null;
     successMessage = null;
     errorStatus = null;
@@ -131,6 +137,16 @@
       children = nextChildren;
       teachers = nextTeachers;
       applyRecord(nextRecord);
+      loading = false;
+      try {
+        const suggestion = await api.requestJson<typeof voiceprintSuggestion>(
+          `/records/${selectedRecordId}/voiceprint-suggestion`,
+          { signal }
+        );
+        if (version === requestVersion) voiceprintSuggestion = suggestion;
+      } catch {
+        // Optional identity advice must never block the human review screen.
+      }
     } catch (error) {
       if (signal?.aborted || version !== requestVersion) return;
       loadError(error);
@@ -316,6 +332,31 @@
           <p>
             この記録は処理できた区間だけで作成されています。内容と抜け漏れを確認してから承認してください。
           </p>
+        </Notice>
+      {/if}
+
+      {#if voiceprintSuggestion && voiceprintSuggestion.status !== 'disabled'}
+        <Notice tone="info" title="録音の声紋照合">
+          {#if voiceprintSuggestion.status === 'candidate'}
+            <p>担当候補: {voiceprintSuggestion.teacher_name}さん</p>
+            <p>
+              録音内の声から得た候補です。本人や記録の担当を確定するものではありません。現在の担当は変更されていません。
+            </p>
+            {#if isSchoolAdmin && isPending && teachers.some((teacher) => teacher.id === voiceprintSuggestion?.teacher_id && teacher.is_active)}
+              <Button
+                variant="secondary"
+                disabled={saving || assigning}
+                onclick={() => {
+                  assigneeId = voiceprintSuggestion?.teacher_id ?? assigneeId;
+                }}>候補を引き継ぎ先に選択</Button
+              >
+              <p>下の「担当を変更」で内容を確認してから引き継いでください。</p>
+            {/if}
+          {:else}
+            <p>
+              先生未特定。未登録、同意対象外、短い発話、照合の不一致・曖昧さなどでは候補を表示しません。
+            </p>
+          {/if}
         </Notice>
       {/if}
 

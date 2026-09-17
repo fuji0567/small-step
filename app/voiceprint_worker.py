@@ -3,11 +3,12 @@
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.cloud_audio import CloudAudioJobStorage
 from app.models import (
+    Record,
     Teacher,
     TeacherVoiceprint,
     VoiceEnrollmentConsent,
@@ -107,14 +108,26 @@ def delete_expired_voiceprints(
     """Delete expired biometric templates and every related short-lived job."""
 
     current_time = now or utc_now()
+    inactive_consent_teachers = select(VoiceEnrollmentConsent.teacher_id).where(or_(
+        VoiceEnrollmentConsent.expires_at <= current_time,
+        VoiceEnrollmentConsent.revoked_at.is_not(None),
+        VoiceEnrollmentConsent.allows_recorder_identification.is_(False),
+    ))
+    db.execute(update(Record).where(
+        Record.voiceprint_candidate_teacher_id.in_(inactive_consent_teachers),
+    ).values(voiceprint_candidate_teacher_id=None))
     voiceprints = list(
         db.scalars(
             select(TeacherVoiceprint).where(TeacherVoiceprint.expires_at <= current_time)
         )
     )
     if not voiceprints:
+        db.commit()
         return 0
     for voiceprint in voiceprints:
+        db.execute(update(Record).where(
+            Record.voiceprint_candidate_teacher_id == voiceprint.teacher_id,
+        ).values(voiceprint_candidate_teacher_id=None))
         jobs = list(
             db.scalars(
                 select(VoiceprintJob).where(
@@ -244,6 +257,9 @@ def process_next_voiceprint_job(
         similarity_score = None
         matched = None
         if job.kind == VoiceprintJobKind.enrollment:
+            db.execute(update(Record).where(
+                Record.voiceprint_candidate_teacher_id == job.teacher_id,
+            ).values(voiceprint_candidate_teacher_id=None))
             voiceprint = db.scalar(
                 select(TeacherVoiceprint).where(TeacherVoiceprint.teacher_id == job.teacher_id)
             )

@@ -48,11 +48,16 @@ erDiagram
 | `cloud_audio_jobs` | クラウド GPU 処理ジョブ | メタデータのみ。音声本体はファイルシステム上の短命保管 |
 | `recording_sessions` | `/rec/` の録音セッション | 所有者、状態、期限、結果記録ID、claim token、処理済み・失敗区間数。音声と文字起こしは保存しない |
 | `recording_segments` | 約1分ごとの分割音声メタデータ | 連番、時間、サイズ、SHA-256、MIME、ランダム保存キー。音声本体は短命ファイル |
-| `voice_enrollment_consents` | 声紋登録の同意 | 目的・ポリシー版・保持日数・失効を記録 |
+| `voice_enrollment_consents` | 声紋登録の同意 | 目的・ポリシー版・保持日数・失効、録音照合への追加同意（既定false）を記録 |
 | `teacher_voiceprints` | 先生の声紋 | 暗号化した特徴量だけを先生ごとに1件保存。元音声は保存しない |
 | `voiceprint_jobs` | 声紋登録・本人確認ジョブ | 一時音声のランダムキーと処理結果。本人以外には返さない |
 | `notion_syncs` | Notion 同期の結果 | `record_id` に一意制約。ページ ID と URL |
 | `audit_events` | 操作履歴 | 音声・文字起こし・秘密情報を含めない |
+
+`records.voiceprint_candidate_teacher_id` は照合による提案であり、実際の担当 `teacher_id` と別です。
+`voiceprint_matching_checked` は照合実施有無です。候補はIDだけで、声紋・類似度・話者区間は保持しません。
+候補IDはAPIの通常のRecordReadには含めず、別の園スコープ付きAPIで同意・期限・有効先生を確認して返します。
+これらの列と追加同意は `0025_recorder_voiceprint` で追加し、既存の同意・記録はfalse/NULLで移行します。
 
 ---
 

@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 import re
 import time
-from typing import Literal, Protocol
+from typing import Callable, Literal, Protocol
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
@@ -570,6 +570,7 @@ class EdgeAudioProcessor:
         audio_path: Path,
         *,
         prior_context: str | None = None,
+        speaker_observer: Callable[[Path, SpeakerDiarizationResult | None], None] | None = None,
     ) -> EdgeAudioAnalysis:
         diarization = None
         try:
@@ -596,6 +597,8 @@ class EdgeAudioProcessor:
             )
         else:
             candidate = self.summarizer.summarize(transcript, prior_context=prior_context)
+            if speaker_observer is not None and candidate.recordable:
+                speaker_observer(audio_path, diarization)
         return EdgeAudioAnalysis(
             candidate=candidate,
             detected_speaker_count=diarization.speaker_count if diarization else None,
@@ -663,11 +666,16 @@ class EdgeAudioProcessor:
             if self.settings.edge_audio_delete_after_processing:
                 resolved_path.unlink(missing_ok=True)
 
-    def analyze_trusted_recorder_audio_file(self, audio_path: str) -> EdgeAudioCandidate:
+    def analyze_trusted_recorder_audio_file(
+        self, audio_path: str, *,
+        speaker_observer: Callable[[Path, SpeakerDiarizationResult | None], None] | None = None,
+    ) -> EdgeAudioCandidate:
         """Analyze one private segment; the recorder worker owns retry and deletion."""
 
         resolved_path = self._validate_audio_path(audio_path, require_inbox=False)
-        return self._analyze_resolved_audio(resolved_path)
+        return self._analyze_resolved_audio_with_metrics(
+            resolved_path, speaker_observer=speaker_observer,
+        ).candidate
 
     def merge_recorder_candidates(
         self, previous: EdgeAudioCandidate, following: EdgeAudioCandidate

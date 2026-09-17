@@ -48,6 +48,7 @@ class SpeakerDiarizationResult(BaseModel):
 
     speaker_count: int = Field(ge=0)
     segments: list[SpeakerSegment]
+    overlap_intervals: list[tuple[float, float]] = Field(default_factory=list)
     used_low_volume_retry: bool = False
     low_volume_retry_speaker_count: int | None = Field(default=None, ge=0)
 
@@ -211,6 +212,17 @@ class PyannoteCommunityDiarizer:
             # sample count than pyannote's crop expects. Crop the waveform instead.
             waveform, sample_rate = self._load_waveform(audio_path)
             output = self._pipeline({"waveform": waveform, "sample_rate": sample_rate})
+            overlaps = []
+            standard = getattr(output, "speaker_diarization", None)
+            if standard is not None and hasattr(standard, "itertracks"):
+                tracks = sorted(standard.itertracks(yield_label=True), key=lambda item: item[0].start)
+                for index, (left, _, left_label) in enumerate(tracks):
+                    for right, _, right_label in tracks[index + 1:]:
+                        if right.start >= left.end:
+                            break
+                        start, end = max(left.start, right.start), min(left.end, right.end)
+                        if left_label != right_label and start < end:
+                            overlaps.append((float(start), float(end)))
             diarization = getattr(output, "exclusive_speaker_diarization", None)
             if diarization is None:
                 diarization = getattr(output, "speaker_diarization", output)
@@ -224,7 +236,7 @@ class PyannoteCommunityDiarizer:
                     (float(turn.start), float(turn.end), str(label))
                     for turn, label in diarization
                 )
-            return build_anonymous_diarization_result(turns)
+            return build_anonymous_diarization_result(turns).model_copy(update={"overlap_intervals": overlaps})
         except SpeakerDiarizationError:
             raise
         except Exception as error:

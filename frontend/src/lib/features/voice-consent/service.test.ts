@@ -30,9 +30,25 @@ describe('VoiceConsentService', () => {
     expect(fetchMock.mock.calls[1]?.[1]?.body).toBe(
       JSON.stringify({
         accepts_voiceprint_enrollment: true,
+        allows_recorder_identification: false,
         retention_days: 30
       })
     );
+  });
+
+  it('録音からの照合は明示的に選んだ場合だけ許可する', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse(null));
+    const service = new VoiceConsentService(
+      new ApiClient({ fetch: fetchMock })
+    );
+    await service.grant(30, true);
+    expect(
+      JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+    ).toMatchObject({
+      allows_recorder_identification: true
+    });
   });
 
   it('声紋音声をFormDataで送信し、本人のジョブだけを確認する', async () => {

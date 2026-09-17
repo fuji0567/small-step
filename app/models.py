@@ -181,6 +181,7 @@ class VoiceEnrollmentConsent(Base):
     school_id: Mapped[str] = mapped_column(ForeignKey("schools.id"), index=True)
     teacher_id: Mapped[str] = mapped_column(ForeignKey("teachers.id"), index=True)
     purpose: Mapped[str] = mapped_column(String(120))
+    allows_recorder_identification: Mapped[bool] = mapped_column(Boolean, default=False)
     policy_version: Mapped[str] = mapped_column(String(32))
     retention_days: Mapped[int] = mapped_column(Integer)
     consented_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -353,6 +354,8 @@ class Record(Base):
     # analysed after the permitted retry.  The source audio itself is never a
     # database field.
     audio_processing_incomplete: Mapped[bool] = mapped_column(Boolean, default=False)
+    voiceprint_candidate_teacher_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    voiceprint_matching_checked: Mapped[bool] = mapped_column(Boolean, default=False)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.edge_audio import EdgeAudioCandidate, EdgeAudioError, EdgeAudioProcessor, NoSpeechDetectedError
 from app.models import Record, RecordCategory, RecordingSegment, RecordingSession, RecordingSessionStatus, Teacher, utc_now
 from app.recorder import RecorderStorage, RecorderStorageError
+from app.recorder_voiceprint import RecorderVoiceprintMatcher, SpeakerEmbeddingExtractor
 
 
 DEFAULT_PROCESSING_TIMEOUT = timedelta(minutes=10)
@@ -175,6 +176,7 @@ def _verified_path(storage: RecorderStorage, session_id: str, segment: SegmentIn
 def _finish_session(
     *, db: Session, session: RecordingSession, claim_token: str,
     candidate: EdgeAudioCandidate | None, processed: int, failed: int,
+    voiceprint_matcher: RecorderVoiceprintMatcher | None = None,
 ) -> RecordingSession | None:
     _validate_owner(db, session)
     record_id = None
@@ -184,6 +186,8 @@ def _finish_session(
             source_event_id=f"recorder-session-{session.id}",
             occurred_at=_as_utc(session.created_at),
             audio_processing_incomplete=failed > 0,
+            voiceprint_matching_checked=voiceprint_matcher is not None,
+            voiceprint_candidate_teacher_id=voiceprint_matcher.candidate() if voiceprint_matcher and not failed else None,
             **candidate.record_payload(),
         )
         db.add(record)
@@ -261,6 +265,7 @@ def process_next_recorder_session(
     *, db: Session, storage: RecorderStorage, processor: EdgeAudioProcessor,
     now: datetime | None = None, processing_timeout: timedelta = DEFAULT_PROCESSING_TIMEOUT,
     max_duration_minutes: int = 60,
+    voiceprint_extractor: SpeakerEmbeddingExtractor | None = None,
 ) -> RecordingSession | None:
     """Analyze ordered files, keep one bounded anonymous accumulator, then erase audio."""
 
@@ -272,6 +277,16 @@ def process_next_recorder_session(
     assert claim_token is not None
     processed = failed = 0
     candidate = None
+    voiceprint_matcher = None
+    settings = getattr(processor, "settings", None)
+    if (settings is not None and settings.recorder_voiceprint_matching_enabled
+            and settings.voiceprint_enabled and voiceprint_extractor is not None):
+        voiceprint_matcher = RecorderVoiceprintMatcher(
+            db=db, school_id=session.school_id, extractor=voiceprint_extractor,
+            encryption_key=settings.voiceprint_encryption_key,
+            threshold=settings.recorder_voiceprint_match_threshold,
+            margin=settings.recorder_voiceprint_match_margin,
+        )
     stage = "validation"
     try:
         _validate_owner(db, session)
@@ -301,7 +316,12 @@ def process_next_recorder_session(
                     stage = "storage_verification"
                     path = _verified_path(storage, session_id, segment)
                     stage = "audio_analysis"
-                    following = processor.analyze_trusted_recorder_audio_file(str(path))
+                    if voiceprint_matcher is not None:
+                        following = processor.analyze_trusted_recorder_audio_file(
+                            str(path), speaker_observer=voiceprint_matcher.observe,
+                        )
+                    else:
+                        following = processor.analyze_trusted_recorder_audio_file(str(path))
                     if not isinstance(following, EdgeAudioCandidate):
                         raise EdgeAudioError("Invalid recorder analysis")
                     break
@@ -346,6 +366,7 @@ def process_next_recorder_session(
         return _finish_session(
             db=db, session=session, claim_token=claim_token,
             candidate=candidate, processed=processed, failed=failed,
+            voiceprint_matcher=voiceprint_matcher,
         )
     except LostRecorderClaim:
         db.rollback()

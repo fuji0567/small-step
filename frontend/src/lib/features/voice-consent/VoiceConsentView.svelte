@@ -57,6 +57,7 @@
   let recordingSeconds = $state(0);
   let retentionDays = $state(30);
   let accepted = $state(false);
+  let allowsRecorderIdentification = $state(false);
   let loading = $state(false);
   let busy = $state(false);
   let errorMessage = $state<string | null>(null);
@@ -89,6 +90,8 @@
         service.getVoiceprint(signal)
       ]);
       if (consent) retentionDays = consent.retention_days;
+      allowsRecorderIdentification =
+        consent?.allows_recorder_identification ?? false;
     } catch (error) {
       if (signal?.aborted) return;
       errorMessage =
@@ -117,10 +120,13 @@
     busy = true;
     errorMessage = null;
     try {
-      consent = await service.grant(retentionDays);
+      consent = await service.grant(
+        retentionDays,
+        allowsRecorderIdentification
+      );
       accepted = false;
       noticeMessage =
-        '声紋登録への同意を保存しました。声紋や音声はまだ登録されていません。';
+        '同意を保存しました。登録済み声紋がある場合は引き続き利用できます。';
       await controller.refresh(['voiceConsent']);
     } catch (error) {
       errorMessage =
@@ -553,10 +559,20 @@
         </div>
         <label class="voice-confirmation">
           <input type="checkbox" bind:checked={accepted} />
-          <span>園内での話者識別のため、声紋を登録することに同意します。</span>
+          <span>声紋の登録・本人確認に同意します。</span>
           <span></span>
           <small
             >この操作だけでは声紋や音声は登録されません。同意はいつでも取り消せます。</small
+          >
+        </label>
+        <label class="voice-confirmation">
+          <input type="checkbox" bind:checked={allowsRecorderIdentification} />
+          <span
+            >同じ園の録音から私の声を照合し、担当候補を表示することにも同意します（任意）。</span
+          >
+          <span></span>
+          <small
+            >本人の確定や担当の自動変更はしません。照合した先生の名前は、その記録を閲覧できる先生・管理者に表示されます。音声と一時的な特徴量は処理後に削除します。チェックを外して同意を更新すると、既存の担当候補も消えます。</small
           >
         </label>
         <div class="voice-actions">

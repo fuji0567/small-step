@@ -107,7 +107,42 @@ print("残存音声ファイル数:", sum(1 for f in p.rglob("*") if f.is_file()
 別画面へ切り替えた場合も自動確認を中断し、前面へ戻ると再開します。待機へ戻ってもサーバーの処理は継続します。
 処理失敗・期限切れは再録音や手入力を案内し、同じ音声の再送を行いません。候補なしの完了は正常な結果として案内します。
 
-## 失敗時と無効化
+## 任意の先生声紋照合
+
+本機能は `/rec/` の録音だけの担当候補表示です。ESPの音声ジョブ、先生ログインの認証方式、
+記録の実担当・承認・LINE配信は自動変更しません。機能ブランチをmainへ反映後、新コードを取得し、
+録音を一時停止して処理中セッションが完了したことを確認します。既存の暗号鍵やトークンは再生成しません。
+
+```bash
+sudo docker compose -f compose.yaml -f compose.vrt.yaml build api migrate gpu-worker
+sudo docker compose -f compose.yaml -f compose.vrt.yaml run --rm --no-deps migrate
+```
+
+`.env` に以下を追加します（既存 `RECORDER_ENABLED=true` と `VOICEPRINT_ENABLED=true` が必要）。
+
+```dotenv
+RECORDER_VOICEPRINT_MATCHING_ENABLED=true
+RECORDER_VOICEPRINT_MATCH_THRESHOLD=0.85
+RECORDER_VOICEPRINT_MATCH_MARGIN=0.1
+```
+
+```bash
+sudo docker compose -f compose.yaml -f compose.vrt.yaml up -d --no-deps --force-recreate --wait gpu-worker
+sudo docker compose -f compose.yaml -f compose.vrt.yaml up -d --no-deps --force-recreate --wait api
+sudo docker compose -f compose.yaml -f compose.vrt.yaml exec -T api python scripts/check_runtime_readiness.py
+```
+
+先生本人が「声紋設定」の追加同意を選んで更新します。登録済み声紋が有効であれば再登録は不要です。
+先生が単独で3秒以上話す新しい録音を送り、記録が生成された場合に詳細へ担当候補が出ること、
+実担当が元の録音者のままであることを確認します。一般の先生の画面に担当変更操作がないことも確認します。
+同じ園で同意済みの別の先生も試し、未登録・同意対象外・別の園の声、複数先生の一致・曖昧な一致では
+誤った単一候補を出さないことを検査します。短い・重なる・雑音の多い声では未特定になり得ます。
+類似度は確率ではありません。初期閾値のまま本番精度が保証されるわけではなく、誤一致・見逃し、
+推論時間、共有GPUの空きメモリを実音声で評価してください。
+追加同意を外して更新し、同じ記録を再読み込みすると候補が消えることも確認します。
+照合だけを停止する場合は `RECORDER_VOICEPRINT_MATCHING_ENABLED=false` にしてAPI・GPUワーカーを再作成します。
+
+## 録音の失敗時と無効化
 
 各区間の解析・統合は最大2回まで試します。中間結果はメモリにしか保持しないため、処理中の
 ワーカー再起動後は途中再開しません。10分間進捗がないセッションは失敗となり、再録音が必要です。

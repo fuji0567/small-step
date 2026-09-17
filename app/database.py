@@ -32,6 +32,14 @@ def initialise_database(engine: Engine) -> None:
         return
 
     Base.metadata.create_all(bind=engine)
+    with engine.begin() as connection:
+        for table, name, definition in (
+            ("voice_enrollment_consents", "allows_recorder_identification", "BOOLEAN NOT NULL DEFAULT 0"),
+            ("records", "voiceprint_candidate_teacher_id", "VARCHAR(36)"),
+            ("records", "voiceprint_matching_checked", "BOOLEAN NOT NULL DEFAULT 0"),
+        ):
+            if name not in {column["name"] for column in inspect(engine).get_columns(table)}:
+                connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {definition}"))
     # This project started with a SQLite prototype before Auth was introduced.
     # Keep local developer databases usable without forcing a destructive reset.
     columns = {column["name"] for column in inspect(engine).get_columns("teachers")}

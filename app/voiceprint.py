@@ -131,9 +131,15 @@ class PyannoteVoiceprintExtractor:
         self._inference = inference
         return inference
 
+    def extract_waveform(self, waveform: object, sample_rate: int) -> list[float]:
+        return self._extract({"waveform": waveform, "sample_rate": sample_rate})
+
     def extract(self, audio_path: str) -> list[float]:
+        return self._extract(audio_path)
+
+    def _extract(self, audio: object) -> list[float]:
         try:
-            raw = self._load_inference()(audio_path)
+            raw = self._load_inference()(audio)
             values = raw.tolist() if hasattr(raw, "tolist") else list(raw)
             while len(values) == 1 and isinstance(values[0], list):
                 values = values[0]

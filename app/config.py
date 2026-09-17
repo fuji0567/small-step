@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     speaker_diarization_batch_size: int = Field(default=4, ge=1, le=128)
     speaker_diarization_low_volume_retry: bool = True
     voiceprint_enabled: bool = False
+    recorder_voiceprint_matching_enabled: bool = False
+    recorder_voiceprint_match_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+    recorder_voiceprint_match_margin: float = Field(default=0.1, gt=0.0, le=1.0)
     voiceprint_model: str = "pyannote/embedding"
     voiceprint_encryption_key: str | None = None
     voiceprint_match_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
@@ -138,6 +141,8 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "aws:kms backup encryption requires DATABASE_BACKUP_S3_KMS_KEY_ID"
                 )
+        if self.recorder_voiceprint_matching_enabled and not (self.recorder_enabled and self.voiceprint_enabled):
+            raise ValueError("RECORDER_VOICEPRINT_MATCHING_ENABLED requires RECORDER_ENABLED and VOICEPRINT_ENABLED")
         if self.voiceprint_enabled:
             if not self.cloud_audio_enabled:
                 raise ValueError("VOICEPRINT_ENABLED requires CLOUD_AUDIO_ENABLED")
