@@ -159,6 +159,13 @@ sudo docker compose -f compose.yaml -f compose.vrt.yaml up -d --no-deps --force-
 ```
 # 録音処理の失敗ログ
 
+正常完了した録音区間にも、`録音解析の判定: reason=...` を出力します。
+`no_transcript` は文字起こし結果がない、`llm_no_event` は文字起こしはあるがLLMが記録対象外と判定、
+`candidate_created` はその区間の候補生成です（DBへの記録作成完了を意味しません）。
+本文・音声・ファイルパス・人物やセッションの識別子は出力せず、この判定はDBに保存しません。
+`no_transcript` は実際に無発話だったことの証明ではなく、聞き取り側の確認が必要な場合もあります。
+削除済み音声は再解析できないため、更新後に架空の出来事を新しく録音して確認します。
+
 GPUワーカーは失敗した工程 (`stage`) と許可された例外の種類 (`types`) だけを出力します。
 追加診断 (`codes`) は固定の分類コードと既知のライブラリ内の行番号だけを表示します。
 `invalid_numeric_values` は不正数値、`insufficient_or_invalid_shape` はデータ不足または形状不正の手がかりです。

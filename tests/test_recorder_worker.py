@@ -485,7 +485,7 @@ def test_private_storage_permissions_and_symlink_guard(runtime, tmp_path):
     assert secret.read_bytes() == b"private"
 
 
-def test_recorder_analysis_retains_file_for_worker_retry(tmp_path):
+def test_recorder_analysis_retains_file_for_worker_retry(tmp_path, capsys):
     audio = tmp_path / "input.webm"
     audio.write_bytes(b"private")
     class Transcriber:
@@ -501,6 +501,41 @@ def test_recorder_analysis_retains_file_for_worker_retry(tmp_path):
     )
     assert processor.analyze_trusted_recorder_audio_file(str(audio)).recordable
     assert audio.exists()
+    assert capsys.readouterr().out == "録音解析の判定: reason=candidate_created\n"
+
+
+@pytest.mark.parametrize("no_transcript", [True, False])
+def test_recorder_no_record_diagnostics_exclude_private_content(tmp_path, capsys, no_transcript):
+    from app.edge_audio import NoSpeechDetectedError, TranscriptionResult
+
+    audio = tmp_path / "private-input.webm"
+    audio.write_bytes(b"private audio")
+    class Transcriber:
+        def transcribe_with_metadata(self, path, **_kwargs):
+            return TranscriptionResult(transcript="" if no_transcript else "private transcript")
+    class Summarizer:
+        def summarize(self, text, **_kwargs):
+            assert not no_transcript
+            assert text == "private transcript"
+            return EdgeAudioCandidate(recordable=False, category=None, confidence=1, summary=None)
+
+    processor = EdgeAudioProcessor(
+        settings=Settings(_env_file=None),
+        transcriber=Transcriber(), summarizer=Summarizer(),
+    )
+    result = processor.analyze_trusted_recorder_audio_file(str(audio))
+    assert not result.recordable
+    reason = "no_transcript" if no_transcript else "llm_no_event"
+    assert capsys.readouterr().out == f"録音解析の判定: reason={reason}\n"
+    assert audio.exists()
+
+    if no_transcript:
+        class LegacyTranscriber:
+            def transcribe(self, path, **_kwargs):
+                raise NoSpeechDetectedError("private diagnostic message")
+        processor.transcriber = LegacyTranscriber()
+        assert not processor.analyze_trusted_recorder_audio_file(str(audio)).recordable
+        assert capsys.readouterr().out == "録音解析の判定: reason=no_transcript\n"
 
 
 def test_merge_uses_only_anonymous_candidates_preserves_injury_and_lowest_confidence():

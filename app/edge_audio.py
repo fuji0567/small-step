@@ -114,6 +114,7 @@ class EdgeAudioAnalysis:
     candidate: EdgeAudioCandidate
     detected_speaker_count: int | None = None
     used_low_volume_retry: bool | None = None
+    outcome: Literal["no_transcript", "llm_no_event", "candidate_created"] = "candidate_created"
 
 
 @dataclass(frozen=True)
@@ -595,14 +596,17 @@ class EdgeAudioProcessor:
             candidate = EdgeAudioCandidate(
                 recordable=False, category=None, confidence=1.0, summary=None
             )
+            outcome = "no_transcript"
         else:
             candidate = self.summarizer.summarize(transcript, prior_context=prior_context)
+            outcome = "candidate_created" if candidate.recordable else "llm_no_event"
             if speaker_observer is not None and candidate.recordable:
                 speaker_observer(audio_path, diarization)
         return EdgeAudioAnalysis(
             candidate=candidate,
             detected_speaker_count=diarization.speaker_count if diarization else None,
             used_low_volume_retry=diarization.used_low_volume_retry if diarization else None,
+            outcome=outcome,
         )
 
     def _analyze_resolved_audio(
@@ -673,9 +677,12 @@ class EdgeAudioProcessor:
         """Analyze one private segment; the recorder worker owns retry and deletion."""
 
         resolved_path = self._validate_audio_path(audio_path, require_inbox=False)
-        return self._analyze_resolved_audio_with_metrics(
+        analysis = self._analyze_resolved_audio_with_metrics(
             resolved_path, speaker_observer=speaker_observer,
-        ).candidate
+        )
+        # Fixed outcomes only: never include transcripts, paths, or identities.
+        print(f"録音解析の判定: reason={analysis.outcome}", flush=True)
+        return analysis.candidate
 
     def merge_recorder_candidates(
         self, previous: EdgeAudioCandidate, following: EdgeAudioCandidate
