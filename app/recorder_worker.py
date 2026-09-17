@@ -221,14 +221,40 @@ def _log_processing_failure(stage: str, error: Exception) -> None:
         "EdgeAudioError", "SpeakerDiarizationError", "RecorderStorageError",
     }
     causes = []
+    diagnostics = []
+    known_modules = {
+        "sklearn.utils.validation": "numeric_validation",
+        "sklearn.decomposition._pca": "pca",
+        "pyannote.audio.pipelines.clustering": "speaker_clustering",
+        "pyannote.audio.pipelines.speaker_diarization": "speaker_pipeline",
+        "pyannote.audio.core.inference": "speaker_inference",
+        "pyannote.audio.core.io": "audio_decoder",
+        "scipy.cluster.hierarchy": "hierarchical_clustering",
+    }
     current = error
     seen = set()
     while current is not None and id(current) not in seen and len(causes) < 5:
         seen.add(id(current))
         name = type(current).__name__
         causes.append(name if name in allowed_types else "OtherError")
+        if isinstance(current, ValueError):
+            message = str(current).lower()
+            if "nan" in message or "infinity" in message or "infinite" in message:
+                diagnostics.append("invalid_numeric_values")
+            elif "sample" in message or "empty" in message or "minimum" in message:
+                diagnostics.append("insufficient_or_invalid_shape")
+            else:
+                diagnostics.append("value_error_unclassified")
+        trace = current.__traceback__
+        while trace is not None:
+            label = known_modules.get(trace.tb_frame.f_globals.get("__name__", ""))
+            if label is not None:
+                diagnostics.append(f"{label}:{trace.tb_lineno}")
+            trace = trace.tb_next
         current = current.__cause__
     print(f"録音処理の失敗: stage={stage}; types={'/'.join(causes)}", flush=True)
+    if diagnostics:
+        print(f"録音処理の診断: codes={','.join(diagnostics[-8:])}", flush=True)
 
 
 def process_next_recorder_session(

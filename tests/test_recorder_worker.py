@@ -65,6 +65,25 @@ def test_failure_diagnostics_hide_unknown_exception_names(capsys):
     assert "types=OtherError" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("message,code", [
+    ("Input contains NaN. private-name secret-token", "invalid_numeric_values"),
+    ("Found array with 1 sample private-name", "insufficient_or_invalid_shape"),
+    ("private-name /private/audio.mp4", "value_error_unclassified"),
+])
+def test_value_error_diagnostics_only_emit_fixed_codes(capsys, message, code):
+    from app.recorder_worker import _log_processing_failure
+
+    try:
+        raise ValueError(message)
+    except ValueError as error:
+        _log_processing_failure("audio_analysis", error)
+    output = capsys.readouterr().out
+    assert code in output
+    assert "private-name" not in output
+    assert "secret-token" not in output
+    assert "/private/" not in output
+
+
 @pytest.fixture()
 def runtime(tmp_path):
     engine = create_database_engine(f"sqlite:///{tmp_path}/worker.db")
