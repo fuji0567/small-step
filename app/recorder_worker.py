@@ -211,6 +211,26 @@ def _finish_session(
     return db.get(RecordingSession, session.id)
 
 
+def _log_processing_failure(stage: str, error: Exception) -> None:
+    # Never log exception messages, paths, session IDs, or model inputs.
+    allowed_types = {
+        "ImportError", "ModuleNotFoundError", "MemoryError", "OutOfMemoryError",
+        "RuntimeError", "ValueError", "TypeError", "FileNotFoundError",
+        "PermissionError", "OSError", "TimeoutError", "ReadTimeout",
+        "ConnectTimeout", "ConnectError", "HTTPStatusError",
+        "EdgeAudioError", "SpeakerDiarizationError", "RecorderStorageError",
+    }
+    causes = []
+    current = error
+    seen = set()
+    while current is not None and id(current) not in seen and len(causes) < 5:
+        seen.add(id(current))
+        name = type(current).__name__
+        causes.append(name if name in allowed_types else "OtherError")
+        current = current.__cause__
+    print(f"録音処理の失敗: stage={stage}; types={'/'.join(causes)}", flush=True)
+
+
 def process_next_recorder_session(
     *, db: Session, storage: RecorderStorage, processor: EdgeAudioProcessor,
     now: datetime | None = None, processing_timeout: timedelta = DEFAULT_PROCESSING_TIMEOUT,
@@ -226,6 +246,7 @@ def process_next_recorder_session(
     assert claim_token is not None
     processed = failed = 0
     candidate = None
+    stage = "validation"
     try:
         _validate_owner(db, session)
         segments = tuple(
@@ -251,7 +272,9 @@ def process_next_recorder_session(
             for _attempt in range(2):
                 _renew_claim(db=db, session_id=session_id, claim_token=claim_token, processed=processed, failed=failed)
                 try:
+                    stage = "storage_verification"
                     path = _verified_path(storage, session_id, segment)
+                    stage = "audio_analysis"
                     following = processor.analyze_trusted_recorder_audio_file(str(path))
                     if not isinstance(following, EdgeAudioCandidate):
                         raise EdgeAudioError("Invalid recorder analysis")
@@ -259,7 +282,8 @@ def process_next_recorder_session(
                 except NoSpeechDetectedError:
                     following = EdgeAudioCandidate(recordable=False, category=None, confidence=0, summary=None)
                     break
-                except Exception:
+                except Exception as error:
+                    _log_processing_failure(stage, error)
                     following = None
             if following is None:
                 failed += 1
@@ -270,12 +294,14 @@ def process_next_recorder_session(
                     for _attempt in range(2):
                         _renew_claim(db=db, session_id=session_id, claim_token=claim_token, processed=processed, failed=failed)
                         try:
+                            stage = "summary_merge"
                             merged = processor.merge_recorder_candidates(candidate, following)
                             if not isinstance(merged, EdgeAudioCandidate) or not merged.recordable:
                                 raise EdgeAudioError("Invalid recorder merge")
                             candidate = merged
                             break
-                        except Exception:
+                        except Exception as error:
+                            _log_processing_failure(stage, error)
                             if _attempt == 1:
                                 if RecordCategory.injury in (candidate.category, following.category):
                                     # Do not publish an injury record that silently
@@ -283,12 +309,14 @@ def process_next_recorder_session(
                                     raise EdgeAudioError("Injury recorder candidates could not be merged")
                                 failed += 1
             processed += 1
+            stage = "audio_cleanup"
             # Retain no successful segment for a session-wide replay.
             path = storage.path_for(segment.storage_key)
             if path.parent == storage.session_path(session_id):
                 storage.delete(segment.storage_key)
             following = None
             _renew_claim(db=db, session_id=session_id, claim_token=claim_token, processed=processed, failed=failed)
+        stage = "record_finalization"
         return _finish_session(
             db=db, session=session, claim_token=claim_token,
             candidate=candidate, processed=processed, failed=failed,
@@ -296,7 +324,8 @@ def process_next_recorder_session(
     except LostRecorderClaim:
         db.rollback()
         return None
-    except Exception:
+    except Exception as error:
+        _log_processing_failure(stage, error)
         db.rollback()
         changed = db.execute(
             update(RecordingSession)

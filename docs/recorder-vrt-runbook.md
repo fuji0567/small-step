@@ -106,3 +106,9 @@ print("残存音声ファイル数:", sum(1 for f in p.rglob("*") if f.is_file()
 sudo docker compose -f compose.yaml -f compose.vrt.yaml up -d --no-deps --force-recreate --wait api
 sudo docker compose -f compose.yaml -f compose.vrt.yaml up -d --no-deps --force-recreate gpu-worker
 ```
+# 録音処理の失敗ログ
+
+GPUワーカーは失敗した工程 (`stage`) と許可された例外の種類 (`types`) だけを出力します。
+例外本文、音声、文字起こし、ファイルパス、セッションID、接続情報は出力しません。
+`audio_analysis` は文字起こし・話者分離・要約を含みます。種類だけで原因が確定しない場合もあります。
+進捗の完了区間数には失敗した区間も含まれます。失敗した音声は削除されるため、修正後の確認には新しい録音が必要です。

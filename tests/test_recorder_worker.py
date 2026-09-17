@@ -30,6 +30,29 @@ def event(summary="Anonymous growth", category=RecordCategory.growth):
     return EdgeAudioCandidate(recordable=True, category=category, confidence=0.9, summary=summary)
 
 
+def test_failure_diagnostics_do_not_include_private_exception_content(capsys):
+    from app.recorder_worker import _log_processing_failure
+
+    inner = ModuleNotFoundError("private-name /private/audio.wav secret-token")
+    outer = EdgeAudioError("private transcript")
+    outer.__cause__ = inner
+    _log_processing_failure("audio_analysis", outer)
+    output = capsys.readouterr().out
+    assert "stage=audio_analysis" in output
+    assert "EdgeAudioError/ModuleNotFoundError" in output
+    assert "private" not in output
+    assert "secret-token" not in output
+
+
+def test_failure_diagnostics_hide_unknown_exception_names(capsys):
+    from app.recorder_worker import _log_processing_failure
+
+    error = type("PrivateTeacherName", (Exception,), {})("secret")
+    error.__cause__ = error
+    _log_processing_failure("audio_analysis", error)
+    assert "types=OtherError" in capsys.readouterr().out
+
+
 @pytest.fixture()
 def runtime(tmp_path):
     engine = create_database_engine(f"sqlite:///{tmp_path}/worker.db")
