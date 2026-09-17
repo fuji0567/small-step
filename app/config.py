@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     speaker_diarization_model: str = "pyannote/speaker-diarization-community-1"
     speaker_diarization_token: str | None = None
     speaker_diarization_device: str = "cpu"
+    speaker_diarization_batch_size: int = Field(default=4, ge=1, le=128)
     speaker_diarization_low_volume_retry: bool = True
     voiceprint_enabled: bool = False
     voiceprint_model: str = "pyannote/embedding"

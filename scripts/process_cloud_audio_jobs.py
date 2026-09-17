@@ -150,6 +150,7 @@ def main() -> None:
                 model=settings.speaker_diarization_model,
                 token=settings.speaker_diarization_token,
                 device=settings.speaker_diarization_device,
+                batch_size=settings.speaker_diarization_batch_size,
                 low_volume_retry=False,
             )
         )

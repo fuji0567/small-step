@@ -152,10 +152,14 @@ class PyannoteCommunityDiarizer:
         model: str,
         token: str | None,
         device: str,
+        batch_size: int = 4,
         low_volume_retry: bool = True,
         ffmpeg_bin: str = "ffmpeg",
         preprocessor: Callable[[Path, Path], None] | None = None,
     ) -> None:
+        if not 1 <= batch_size <= 128:
+            raise ValueError("Speaker diarization batch size must be between 1 and 128")
+        self.batch_size = batch_size
         self.model = model
         self.token = token
         self.device = device
@@ -179,6 +183,9 @@ class PyannoteCommunityDiarizer:
         pipeline = Pipeline.from_pretrained(self.model, token=self.token)
         if pipeline is None:
             raise SpeakerDiarizationError("Could not load the local speaker diarization pipeline")
+        # Cap both workloads without increasing a model's smaller default batch.
+        pipeline.embedding_batch_size = min(pipeline.embedding_batch_size, self.batch_size)
+        pipeline.segmentation_batch_size = min(pipeline.segmentation_batch_size, self.batch_size)
         if self.device != "cpu":
             try:
                 import torch

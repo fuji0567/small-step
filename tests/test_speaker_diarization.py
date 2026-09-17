@@ -1,5 +1,7 @@
 from pathlib import Path
 import pytest
+import sys
+from types import SimpleNamespace
 
 from app.speaker_diarization import (
     PyannoteCommunityDiarizer,
@@ -109,3 +111,34 @@ def test_waveform_decode_failure_is_not_reported_as_success(tmp_path, monkeypatc
     with pytest.raises(SpeakerDiarizationError) as caught:
         diarizer.diarize(source)
     assert isinstance(caught.value.__cause__, ValueError)
+
+
+@pytest.mark.parametrize("initial,cap,expected", [(32, 4, 4), (1, 4, 1), (8, 2, 2)])
+def test_pipeline_caps_both_gpu_batches(monkeypatch, initial, cap, expected):
+    pipeline = SimpleNamespace(embedding_batch_size=initial, segmentation_batch_size=initial)
+    fake_api = SimpleNamespace(
+        Pipeline=SimpleNamespace(from_pretrained=lambda *args, **kwargs: pipeline)
+    )
+    monkeypatch.setitem(sys.modules, "pyannote.audio", fake_api)
+    diarizer = PyannoteCommunityDiarizer(
+        model="test", token="token", device="cpu", batch_size=cap,
+    )
+    assert diarizer._load_pipeline() is pipeline
+    assert pipeline.embedding_batch_size == expected
+    assert pipeline.segmentation_batch_size == expected
+
+
+@pytest.mark.parametrize("batch_size", [0, -1, 129])
+def test_diarizer_rejects_invalid_batch_sizes(batch_size):
+    with pytest.raises(ValueError):
+        PyannoteCommunityDiarizer(model="test", token="token", device="cpu", batch_size=batch_size)
+
+
+def test_audio_processor_uses_configured_batch_cap():
+    from app.config import Settings
+    from app.edge_audio import EdgeAudioProcessor
+
+    processor = EdgeAudioProcessor(settings=Settings(
+        _env_file=None, speaker_diarization_token="test", speaker_diarization_batch_size=2,
+    ))
+    assert processor.transcriber.diarizer.batch_size == 2
