@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from app.models import (
     AuditEventAction,
@@ -234,20 +234,29 @@ class VoiceprintJobRead(APIModel):
     updated_at: datetime
 
 
+RecordingName = Annotated[str, StringConstraints(
+    strip_whitespace=True, min_length=2, max_length=40,
+    pattern=r"^[ぁ-ゖァ-ヺー一-龯々A-Za-z・ 　]+$",
+)]
+
+
 class ChildCreate(BaseModel):
     school_id: UUID
     display_name: str = Field(min_length=1, max_length=120)
     guardian_line_user_id: str | None = Field(default=None, max_length=255)
+    recording_names: list[RecordingName] = Field(default_factory=list, max_length=5)
 
 
 class ChildUpdate(BaseModel):
     display_name: str = Field(min_length=1, max_length=120)
+    recording_names: list[RecordingName] | None = Field(default=None, max_length=5)
 
 
 class ChildRead(APIModel):
     id: UUID
     school_id: UUID
     display_name: str
+    recording_names: list[str] = Field(default_factory=list)
     guardian_line_user_id: str | None
     is_active: bool
     archived_at: datetime | None
@@ -394,6 +403,7 @@ class CloudAudioJobRead(APIModel):
 
 class RecordReview(BaseModel):
     child_id: UUID | None = None
+    child_confirmed: bool = Field(default=False, strict=True)
     summary: str | None = Field(default=None, min_length=1, max_length=4000)
     conversation_prompt: str | None = Field(default=None, min_length=1, max_length=4000)
     scheduled_for: datetime | None = None
@@ -409,6 +419,12 @@ class VoiceprintSuggestionRead(BaseModel):
     status: Literal["disabled", "unidentified", "candidate"]
     teacher_id: UUID | None = None
     teacher_name: str | None = None
+
+
+class ChildSuggestionRead(BaseModel):
+    status: Literal["unidentified", "candidate"]
+    child_id: UUID | None = None
+    child_name: str | None = None
 
 
 class RecordRead(APIModel):

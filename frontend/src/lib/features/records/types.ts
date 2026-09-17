@@ -30,9 +30,16 @@ export interface ManualRecordInput {
 
 export interface RecordReviewInput {
   child_id?: string;
+  child_confirmed?: boolean;
   summary?: string;
   conversation_prompt?: string;
   scheduled_for?: string;
+}
+
+export interface ChildSuggestionRead {
+  status: 'unidentified' | 'candidate';
+  child_id: string | null;
+  child_name: string | null;
 }
 
 export interface RecordAssigneeInput {

@@ -9,6 +9,17 @@ const response = (value: unknown): Response =>
   });
 
 describe('ChildrenService', () => {
+  it('録音で呼ぶ名前を表示名と一緒に更新する', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response({}));
+    const service = new ChildrenService(new ApiClient({ fetch: fetchMock }));
+    await service.rename('child/id', '山田 あおい', ['あおい', '青井']);
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(
+      JSON.stringify({
+        display_name: '山田 あおい',
+        recording_names: ['あおい', '青井']
+      })
+    );
+  });
   it('退園済みを含む園児と有効な招待メタデータを園単位で取得する', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

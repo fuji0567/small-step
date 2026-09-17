@@ -34,6 +34,8 @@ def initialise_database(engine: Engine) -> None:
     Base.metadata.create_all(bind=engine)
     with engine.begin() as connection:
         for table, name, definition in (
+            ("children", "recording_names", "JSON NOT NULL DEFAULT '[]'"),
+            ("records", "candidate_child_id", "VARCHAR(36)"),
             ("voice_enrollment_consents", "allows_recorder_identification", "BOOLEAN NOT NULL DEFAULT 0"),
             ("records", "voiceprint_candidate_teacher_id", "VARCHAR(36)"),
             ("records", "voiceprint_matching_checked", "BOOLEAN NOT NULL DEFAULT 0"),

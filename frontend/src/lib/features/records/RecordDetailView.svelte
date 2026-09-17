@@ -22,6 +22,7 @@
   import './records.css';
   import { RecordsService } from './service';
   import type {
+    ChildSuggestionRead,
     RecordChild,
     RecordRead,
     RecordReviewInput,
@@ -57,6 +58,9 @@
   let summary = $state('');
   let conversationPrompt = $state('');
   let childId = $state('');
+  let childConfirmed = $state(false);
+  let childTouched = false;
+  let childSuggestion = $state<ChildSuggestionRead | null>(null);
   let scheduledEnabled = $state(false);
   let scheduledFor = $state('');
   let loading = $state(false);
@@ -71,6 +75,9 @@
   let requestVersion = 0;
 
   const isPending = $derived(record?.status === 'pending_review');
+  const needsChildConfirmation = $derived(
+    Boolean(record?.source_event_id?.startsWith('recorder-session-'))
+  );
   const dirty = $derived(
     isPending &&
       (summary !== (record?.summary ?? '') ||
@@ -97,6 +104,8 @@
     summary = nextRecord.summary;
     conversationPrompt = nextRecord.conversation_prompt ?? '';
     childId = nextRecord.child_id ?? '';
+    childConfirmed = false;
+    childTouched = false;
     assigneeId = nextRecord.teacher_id;
     scheduledEnabled = false;
     scheduledFor = localDateTimeValue();
@@ -120,6 +129,7 @@
     const version = ++requestVersion;
     record = null;
     voiceprintSuggestion = null;
+    childSuggestion = null;
     errorMessage = null;
     successMessage = null;
     errorStatus = null;
@@ -138,6 +148,35 @@
       teachers = nextTeachers;
       applyRecord(nextRecord);
       loading = false;
+      // Independent of voiceprint advice; late results must not overwrite edits.
+      if (
+        nextRecord.status === 'pending_review' &&
+        nextRecord.child_id === null &&
+        nextRecord.source_event_id?.startsWith('recorder-session-')
+      ) {
+        void api
+          .requestJson<ChildSuggestionRead>(
+            `/records/${selectedRecordId}/child-suggestion`,
+            { signal }
+          )
+          .then((suggestion) => {
+            if (version !== requestVersion || signal?.aborted) return;
+            childSuggestion = suggestion;
+            if (
+              !childTouched &&
+              suggestion?.status === 'candidate' &&
+              nextChildren.some(
+                (child) => child.id === suggestion.child_id && child.is_active
+              )
+            ) {
+              childId = suggestion.child_id ?? '';
+              childConfirmed = false;
+            }
+          })
+          .catch(() => {
+            /* Optional advice must not block manual selection. */
+          });
+      }
       try {
         const suggestion = await api.requestJson<typeof voiceprintSuggestion>(
           `/records/${selectedRecordId}/voiceprint-suggestion`,
@@ -195,6 +234,11 @@
   }
 
   function reviewInput(): RecordReviewInput | null {
+    if (needsChildConfirmation && (!childId || !childConfirmed)) {
+      errorMessage =
+        '選択した園児がこの出来事の対象であることを確認してください。';
+      return null;
+    }
     const normalizedSummary = summary.trim();
     if (!normalizedSummary) {
       errorMessage = '保護者へ伝える内容を入力してください。';
@@ -202,6 +246,7 @@
     }
     const input: RecordReviewInput = { summary: normalizedSummary };
     if (childId) input.child_id = childId;
+    if (needsChildConfirmation) input.child_confirmed = childConfirmed;
     const normalizedPrompt = conversationPrompt.trim();
     if (normalizedPrompt) input.conversation_prompt = normalizedPrompt;
     if (scheduledEnabled) {
@@ -413,10 +458,21 @@
       <form class="records-form" onsubmit={(event) => event.preventDefault()}>
         <div class="records-field">
           <label for="record-child">園児</label>
+          {#if childSuggestion?.status === 'candidate'}
+            <Notice tone="info"
+              ><p>
+                録音からの園児候補: {childSuggestion.child_name}。自動選択は仮の候補です。名前と出来事の対象を確認してください。
+              </p></Notice
+            >
+          {/if}
           <select
             id="record-child"
             class="records-control"
             bind:value={childId}
+            onchange={() => {
+              childTouched = true;
+              childConfirmed = false;
+            }}
             disabled={!isPending || saving || assigning}
           >
             <option value="">未選択</option>
@@ -424,6 +480,15 @@
               <option value={child.id}>{child.display_name}</option>
             {/each}
           </select>
+          {#if isPending && needsChildConfirmation}
+            <label
+              ><input
+                type="checkbox"
+                bind:checked={childConfirmed}
+                disabled={!childId || saving || assigning}
+              /> 選択した園児がこの出来事の対象であることを確認しました</label
+            >
+          {/if}
         </div>
         <div class="records-field">
           <label for="record-summary">保護者へ伝える内容</label>
@@ -467,7 +532,10 @@
             <Button
               onclick={() => (confirmation = 'approve')}
               guide="編集内容を保存し、保護者へのLINE通知を準備します。"
-              disabled={saving || assigning}>承認する</Button
+              disabled={saving ||
+                assigning ||
+                (needsChildConfirmation && (!childId || !childConfirmed))}
+              >承認する</Button
             >
             <Button
               variant="danger"

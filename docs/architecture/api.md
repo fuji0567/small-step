@@ -85,6 +85,14 @@ falseでの更新は既存の担当候補も削除します。`GET /records/{rec
 現在も同意・声紋・先生が有効な同じ園の一致だけを `candidate` と先生ID・表示名で返します。
 特徴量・類似度は返しません。変更操作は従来の管理者限定 `PATCH /records/{record_id}/assignee` のままです。
 
+`POST /children` と `PATCH /children/{id}` は管理者だけが `recording_names`（敬称なし、2〜40文字、
+最大5件の呼び名・読み方）を設定できます。PATCHで省略した場合は保持し、空配列で消去します。
+`GET /records/{id}/child-suggestion` は通常の記録と同じ閲覧権限を確認し、機能有効・未承認・未選択・
+同じ園の在籍園児に限り `candidate` と園児ID・表示名を返し、それ以外は `unidentified` です。
+呼び名や生の文字起こし、参照対応表は応答へ含めません。通常のRecordReadに候補IDは追加しません。
+録音由来の `POST /records/{id}/approve` は `child_confirmed=true` を必須とし、園児は既存の
+在籍・園スコープ検証を通した明示選択だけを使います。候補を配信先へ自動昇格させません。
+
 利用者別の入口:
 
 - **先生用アプリ** … `auth` / `records` / `notifications` / `children` / `teachers` / `schools` / `edge devices` / `audit` / `voice consent` / `voiceprint` / `recorder`

@@ -52,11 +52,18 @@ export class ChildrenService {
     );
   }
 
-  async rename(childId: string, displayName: string): Promise<ChildRead> {
+  async rename(
+    childId: string,
+    displayName: string,
+    recordingNames?: string[]
+  ): Promise<ChildRead> {
     return required(
       await this.client.requestJson<ChildRead>(
         `children/${encodeURIComponent(childId)}`,
-        { method: 'PATCH', json: { display_name: displayName } }
+        {
+          method: 'PATCH',
+          json: { display_name: displayName, recording_names: recordingNames }
+        }
       )
     );
   }

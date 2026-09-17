@@ -160,6 +160,44 @@ class Processor:
         return event(f"{previous.summary}; {following.summary}")
 
 
+@pytest.mark.parametrize("partial_failure", [False, True])
+def test_worker_saves_only_child_advice_without_selecting_or_notifying(runtime, partial_failure):
+    from app.models import Child
+
+    factory, storage, (school_id, _owner_id) = runtime
+    with factory() as db:
+        target = Child(school_id=school_id, display_name="山田 あおい", recording_names=["あおい"])
+        db.add(target)
+        db.commit()
+        child_id = target.id
+    session_id = enqueue(runtime, count=2 if partial_failure else 1)
+    with factory() as db:
+        class Transcriber:
+            def transcribe(self, path, **_kwargs):
+                assert not db.in_transaction()
+                if partial_failure and path.read_bytes().endswith(b"1"):
+                    raise EdgeAudioError("private transcript failure")
+                return "あおいちゃん、五つ積めたね。"
+        class Summarizer:
+            def summarize(self, text, **_kwargs):
+                assert not db.in_transaction()
+                assert "あおい" not in text
+                return event("園児候補_001は五つ積めました。").model_copy(update={"subject_reference": "園児候補_001"})
+        processor = EdgeAudioProcessor(
+            settings=Settings(_env_file=None, recorder_enabled=True, recorder_child_matching_enabled=True),
+            transcriber=Transcriber(), summarizer=Summarizer(),
+        )
+        result = process_next_recorder_session(db=db, storage=storage, processor=processor)
+        assert result.id == session_id and result.status == RecordingSessionStatus.completed
+        record = db.get(Record, result.record_id)
+        assert record.child_id is None
+        assert record.candidate_child_id == (None if partial_failure else child_id)
+        assert record.status == RecordStatus.pending_review
+        assert record.audio_processing_incomplete is partial_failure
+        assert record.summary == "園児は五つ積めました。"
+        assert not list(db.scalars(select(Notification)))
+    assert not storage.session_path(session_id).exists()
+
 def test_voiceprint_candidate_does_not_reassign_or_approve_record(runtime, monkeypatch):
     from types import SimpleNamespace
     from cryptography.fernet import Fernet

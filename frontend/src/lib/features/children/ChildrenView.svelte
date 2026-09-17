@@ -37,6 +37,7 @@
   let displayName = $state('');
   let editingChildId = $state<string | null>(null);
   let editingName = $state('');
+  let editingRecordingNames = $state('');
   let confirmation = $state<ChildConfirmation | null>(null);
   let invitationCredential = $state<LineInvitationCredential | null>(null);
   let archiveCredential = $state<GuardianArchiveCredential | null>(null);
@@ -140,6 +141,7 @@
   function beginRename(child: ChildRead): void {
     editingChildId = child.id;
     editingName = child.display_name;
+    editingRecordingNames = (child.recording_names ?? []).join('、');
   }
 
   async function saveRename(childId: string): Promise<void> {
@@ -148,13 +150,25 @@
     busy = true;
     errorMessage = null;
     try {
-      await service.rename(childId, name);
+      const names = editingRecordingNames
+        .split(/[、,\n]/)
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (
+        names.length > 5 ||
+        names.some((value) => value.length < 2 || value.length > 40)
+      ) {
+        errorMessage = '録音で呼ぶ名前は2〜40文字、最大5件で入力してください。';
+        return;
+      }
+      await service.rename(childId, name, names);
       editingChildId = null;
       successMessage =
         '園児の表示名を更新しました。過去の記録は保持されています。';
       await refresh();
     } catch {
-      errorMessage = '表示名を更新できませんでした。';
+      errorMessage =
+        '表示名や録音で呼ぶ名前を更新できませんでした。入力内容を確認してください。';
     } finally {
       busy = false;
     }
@@ -339,6 +353,18 @@
                       maxlength="120"
                       bind:value={editingName}
                     />
+                    <label for={`child-recording-names-${child.id}`}
+                      >録音で呼ぶ名前（任意）</label
+                    >
+                    <input
+                      id={`child-recording-names-${child.id}`}
+                      maxlength="204"
+                      bind:value={editingRecordingNames}
+                    />
+                    <p>
+                      例:
+                      あおい、青井。読み方や呼び名を「、」で区切り、敬称なしで最大5件入力します。同名は自動選択しません。
+                    </p>
                     <Button
                       size="compact"
                       onclick={() => saveRename(child.id)}
@@ -358,6 +384,9 @@
                   tone={child.is_active ? 'success' : 'neutral'}
                 />
               </div>
+              {#if child.recording_names?.length}
+                <p>録音で呼ぶ名前: {child.recording_names.join('、')}</p>
+              {/if}
               <p>
                 保護者LINE:
                 <strong

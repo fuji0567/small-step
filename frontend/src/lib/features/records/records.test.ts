@@ -79,6 +79,132 @@ describe('ReviewQueueView', () => {
 });
 
 describe('RecordDetailView', () => {
+  it('園児候補は仮選択し、先生が確認するまでは承認も配信先変更もしない', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/child-suggestion'))
+        return json({
+          status: 'candidate',
+          child_id: child.id,
+          child_name: child.display_name
+        });
+      if (url.endsWith('/voiceprint-suggestion'))
+        return new Promise<Response>(() => {});
+      if (url.includes('/children?')) return json([child]);
+      return json({
+        ...pendingRecord,
+        source_event_id: 'recorder-session-test',
+        child_id: null
+      });
+    });
+    render(RecordDetailView, {
+      api: new ApiClient({ fetch: fetchMock }),
+      schoolId: 'school-1',
+      recordId: 'record-1',
+      onNavigate: vi.fn()
+    });
+    await screen.findByText(/録音からの園児候補/);
+    expect(screen.getByLabelText('園児')).toHaveValue(child.id);
+    expect(screen.getByRole('button', { name: '承認する' })).toBeDisabled();
+    const check = screen.getByLabelText(
+      '選択した園児がこの出来事の対象であることを確認しました'
+    );
+    expect(check).not.toBeChecked();
+    await fireEvent.click(check);
+    expect(screen.getByRole('button', { name: '承認する' })).not.toBeDisabled();
+    await fireEvent.change(screen.getByLabelText('園児'), {
+      target: { value: '' }
+    });
+    expect(check).not.toBeChecked();
+    expect(screen.getByRole('button', { name: '承認する' })).toBeDisabled();
+    expect(
+      fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')
+    ).toBe(false);
+  });
+
+  it('遅れて届いた園児候補は手動選択を上書きしない', async () => {
+    let resolveSuggestion!: (value: Response) => void;
+    const other = { ...child, id: 'child-2', display_name: '別の園児' };
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/child-suggestion'))
+        return new Promise<Response>((resolve) => {
+          resolveSuggestion = resolve;
+        });
+      if (url.endsWith('/voiceprint-suggestion'))
+        return json({ status: 'disabled' });
+      if (url.includes('/children?')) return json([child, other]);
+      return json({
+        ...pendingRecord,
+        source_event_id: 'recorder-session-test',
+        child_id: null
+      });
+    });
+    render(RecordDetailView, {
+      api: new ApiClient({ fetch: fetchMock }),
+      schoolId: 'school-1',
+      recordId: 'record-1',
+      onNavigate: vi.fn()
+    });
+    const select = await screen.findByLabelText('園児');
+    await fireEvent.change(select, { target: { value: other.id } });
+    resolveSuggestion(
+      json({
+        status: 'candidate',
+        child_id: child.id,
+        child_name: child.display_name
+      })
+    );
+    await screen.findByText(/録音からの園児候補/);
+    expect(select).toHaveValue(other.id);
+  });
+
+  it('園児候補の取得失敗でも手動確認して承認できる', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/child-suggestion')) return json({}, 503);
+      if (url.endsWith('/voiceprint-suggestion'))
+        return json({ status: 'disabled' });
+      if (url.includes('/children?')) return json([child]);
+      if (url.includes('/records?')) return json([]);
+      if (init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toMatchObject({
+          child_id: child.id,
+          child_confirmed: true
+        });
+        return json({ ...pendingRecord, status: 'approved' });
+      }
+      return json({
+        ...pendingRecord,
+        source_event_id: 'recorder-session-test',
+        child_id: null
+      });
+    });
+    render(RecordDetailView, {
+      api: new ApiClient({ fetch: fetchMock }),
+      schoolId: 'school-1',
+      recordId: 'record-1',
+      onNavigate: vi.fn()
+    });
+    await fireEvent.change(await screen.findByLabelText('園児'), {
+      target: { value: child.id }
+    });
+    await fireEvent.click(
+      screen.getByLabelText(
+        '選択した園児がこの出来事の対象であることを確認しました'
+      )
+    );
+    await fireEvent.click(screen.getByRole('button', { name: '承認する' }));
+    await fireEvent.click(
+      screen.getAllByRole('button', { name: '承認する' }).at(-1)!
+    );
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')
+      ).toBe(true)
+    );
+  });
+
   it('声紋の候補取得が遅れても日誌の確認を妨げない', async () => {
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       const url = String(input);

@@ -50,7 +50,7 @@ function json(route: Route, value: unknown, status = 200): Promise<void> {
 
 export async function mockApi(
   page: Page,
-  options: { guardian?: GuardianResponse } = {}
+  options: { guardian?: GuardianResponse; recorderChild?: boolean } = {}
 ): Promise<void> {
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request();
@@ -71,7 +71,23 @@ export async function mockApi(
         await json(route, [record]);
         return;
       case '/api/v1/records/record-1':
-        await json(route, record);
+        await json(
+          route,
+          options.recorderChild
+            ? {
+                ...record,
+                child_id: null,
+                source_event_id: 'recorder-session-demo'
+              }
+            : record
+        );
+        return;
+      case '/api/v1/records/record-1/child-suggestion':
+        await json(route, {
+          status: 'candidate',
+          child_id: child.id,
+          child_name: child.display_name
+        });
         return;
       case '/api/v1/navigation-badges':
         await json(route, {
@@ -86,6 +102,7 @@ export async function mockApi(
         await json(route, [child]);
         return;
       case '/api/v1/notifications':
+      case '/api/v1/teachers':
       case '/api/v1/audio-jobs':
       case '/api/v1/line/link-invitations/active':
         await json(route, []);

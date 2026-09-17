@@ -17,6 +17,7 @@ from app.edge_audio import EdgeAudioCandidate, EdgeAudioError, EdgeAudioProcesso
 from app.models import Record, RecordCategory, RecordingSegment, RecordingSession, RecordingSessionStatus, Teacher, utc_now
 from app.recorder import RecorderStorage, RecorderStorageError
 from app.recorder_voiceprint import RecorderVoiceprintMatcher, SpeakerEmbeddingExtractor
+from app.recorder_children import RecorderChildMatcher
 
 
 DEFAULT_PROCESSING_TIMEOUT = timedelta(minutes=10)
@@ -177,6 +178,7 @@ def _finish_session(
     *, db: Session, session: RecordingSession, claim_token: str,
     candidate: EdgeAudioCandidate | None, processed: int, failed: int,
     voiceprint_matcher: RecorderVoiceprintMatcher | None = None,
+    child_matcher: RecorderChildMatcher | None = None,
 ) -> RecordingSession | None:
     _validate_owner(db, session)
     record_id = None
@@ -187,6 +189,7 @@ def _finish_session(
             occurred_at=_as_utc(session.created_at),
             audio_processing_incomplete=failed > 0,
             voiceprint_matching_checked=voiceprint_matcher is not None,
+            candidate_child_id=child_matcher.candidate(db) if child_matcher and not failed else None,
             voiceprint_candidate_teacher_id=voiceprint_matcher.candidate() if voiceprint_matcher and not failed else None,
             **candidate.record_payload(),
         )
@@ -279,6 +282,10 @@ def process_next_recorder_session(
     candidate = None
     voiceprint_matcher = None
     settings = getattr(processor, "settings", None)
+    child_matcher = (
+        RecorderChildMatcher(db=db, school_id=session.school_id)
+        if getattr(settings, "recorder_child_matching_enabled", False) else None
+    )
     if (settings is not None and settings.recorder_voiceprint_matching_enabled
             and settings.voiceprint_enabled and voiceprint_extractor is not None):
         voiceprint_matcher = RecorderVoiceprintMatcher(
@@ -316,12 +323,12 @@ def process_next_recorder_session(
                     stage = "storage_verification"
                     path = _verified_path(storage, session_id, segment)
                     stage = "audio_analysis"
+                    options = {}
                     if voiceprint_matcher is not None:
-                        following = processor.analyze_trusted_recorder_audio_file(
-                            str(path), speaker_observer=voiceprint_matcher.observe,
-                        )
-                    else:
-                        following = processor.analyze_trusted_recorder_audio_file(str(path))
+                        options["speaker_observer"] = voiceprint_matcher.observe
+                    if child_matcher is not None:
+                        options["child_matcher"] = child_matcher
+                    following = processor.analyze_trusted_recorder_audio_file(str(path), **options)
                     if not isinstance(following, EdgeAudioCandidate):
                         raise EdgeAudioError("Invalid recorder analysis")
                     break
@@ -367,6 +374,7 @@ def process_next_recorder_session(
             db=db, session=session, claim_token=claim_token,
             candidate=candidate, processed=processed, failed=failed,
             voiceprint_matcher=voiceprint_matcher,
+            child_matcher=child_matcher,
         )
     except LostRecorderClaim:
         db.rollback()
@@ -387,6 +395,8 @@ def process_next_recorder_session(
         return db.get(RecordingSession, session_id) if changed.rowcount == 1 else None
     finally:
         candidate = None
+        if child_matcher is not None:
+            child_matcher.clear()
         # Processing sessions are never reclaimed. A timed-out original worker
         # cannot delete files belonging to a newer claimant of the same session.
         try:

@@ -2,6 +2,7 @@ export interface ChildRead {
   id: string;
   school_id: string;
   display_name: string;
+  recording_names?: string[];
   guardian_line_user_id: string | null;
   is_active: boolean;
   archived_at: string | null;

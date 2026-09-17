@@ -59,6 +59,12 @@ erDiagram
 候補IDはAPIの通常のRecordReadには含めず、別の園スコープ付きAPIで同意・期限・有効先生を確認して返します。
 これらの列と追加同意は `0025_recorder_voiceprint` で追加し、既存の同意・記録はfalse/NULLで移行します。
 
+`children.recording_names` は管理者が登録する敬称なしの呼び名・読み方（最大5件）です。既存園児は空配列です。
+`records.candidate_child_id` は録音の園児提案メタデータで、実際の対象 `child_id` と別です。
+`0026_recorder_child_suggestions` で追加し、既存の記録はNULLです。通常RecordReadには含めず、
+閲覧権限・園・在籍・未承認を確認する専用APIで返します。名前変更・登録・退園・復園は園の未承認候補を消去します。
+提案だけでは通知を作りません。録音由来の承認は明示した園児と確認フラグが必要です。
+
 ---
 
 ## 状態遷移

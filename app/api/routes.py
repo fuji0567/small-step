@@ -105,6 +105,7 @@ from app.schemas import (
     VoiceprintJobRead,
     VoiceprintRead,
     VoiceprintSuggestionRead,
+    ChildSuggestionRead,
 )
 from app.voiceprint import VOICEPRINT_ENROLLMENT_SAMPLE_COUNT, voiceprint_storage_keys
 from app.recorder_voiceprint import eligible_teacher_ids
@@ -187,6 +188,12 @@ def require_record_for_update(db: Session, record_id: str) -> Record:
     if record is None:
         raise HTTPException(status_code=404, detail="Record not found")
     return record
+
+
+def clear_child_suggestions(db: Session, school_id: str) -> None:
+    db.execute(update(Record).where(
+        Record.school_id == school_id, Record.status == RecordStatus.pending_review,
+    ).values(candidate_child_id=None))
 
 
 def require_active_child_for_school(db: Session, child_id: str, school_id: str) -> Child:
@@ -1704,6 +1711,7 @@ def create_child(
     assert_school_admin(current_teacher)
     child = Child(**{**payload.model_dump(), "school_id": as_id(payload.school_id)})
     db.add(child)
+    clear_child_suggestions(db, child.school_id)
     db.commit()
     db.refresh(child)
     return child
@@ -1738,6 +1746,10 @@ def update_child(
     if not child.is_active:
         raise HTTPException(status_code=409, detail="Archived children cannot be edited")
     child.display_name = payload.display_name
+    if payload.recording_names is not None:
+        child.recording_names = payload.recording_names
+    # Name changes can introduce ambiguity with another child's old advice.
+    clear_child_suggestions(db, child.school_id)
     add_audit_event(
         db,
         school_id=child.school_id,
@@ -1768,6 +1780,7 @@ def archive_child(
     now = utc_now()
     child.is_active = False
     child.archived_at = now
+    clear_child_suggestions(db, child.school_id)
     child.guardian_line_user_id = None
     db.execute(
         update(LineLinkInvitation)
@@ -1847,6 +1860,7 @@ def restore_child(
     # invitation, or archive link. The guardian must link again with a new code.
     child.is_active = True
     child.archived_at = None
+    clear_child_suggestions(db, child.school_id)
     child.guardian_line_user_id = None
     add_audit_event(
         db,
@@ -2855,6 +2869,22 @@ def get_record_voiceprint_suggestion(
     return VoiceprintSuggestionRead(status="unidentified")
 
 
+@router.get("/records/{record_id}/child-suggestion", response_model=ChildSuggestionRead, tags=["records"])
+def get_record_child_suggestion(
+    record_id: str, request: Request,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> ChildSuggestionRead:
+    record = require_entity(db, Record, record_id, "Record")
+    assert_record_access(current_teacher, record)
+    if (request.app.state.settings.recorder_child_matching_enabled
+            and record.status == RecordStatus.pending_review and record.child_id is None):
+        child = db.get(Child, record.candidate_child_id) if record.candidate_child_id else None
+        if child is not None and child.is_active and child.school_id == record.school_id:
+            return ChildSuggestionRead(status="candidate", child_id=child.id, child_name=child.display_name)
+    return ChildSuggestionRead(status="unidentified")
+
+
 @router.patch("/records/{record_id}/assignee", response_model=RecordRead, tags=["records"])
 def change_record_assignee(
     record_id: str,
@@ -2909,6 +2939,9 @@ def approve_record(
     if record.status != RecordStatus.pending_review:
         raise HTTPException(status_code=409, detail="Only pending records can be approved")
 
+    if (record.source_event_id or "").startswith("recorder-session-") and (not payload.child_confirmed or not payload.child_id):
+        raise HTTPException(status_code=422, detail="Confirm the selected child before approving a recording")
+
     if payload.child_id:
         child = require_active_child_for_school(db, as_id(payload.child_id), record.school_id)
         record.child_id = as_id(payload.child_id)
@@ -2920,6 +2953,7 @@ def approve_record(
         record.conversation_prompt = payload.conversation_prompt
 
     record.status = RecordStatus.approved
+    record.candidate_child_id = None
     record.reviewed_at = utc_now()
     child = require_entity(db, Child, record.child_id, "Child")
     if not child.is_active:

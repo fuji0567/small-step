@@ -92,7 +92,8 @@ def test_initial_migration_creates_the_current_schema(tmp_path):
     } <= recording_segment_columns
     assert "audio_processing_incomplete" in record_columns
     assert {"voiceprint_candidate_teacher_id", "voiceprint_matching_checked"} <= record_columns
-    assert migration_revision(database_url) == "0025_recorder_voiceprint"
+    assert "candidate_child_id" in record_columns
+    assert migration_revision(database_url) == "0026_recorder_child_suggestions"
 
 
 def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_path):
@@ -106,7 +107,7 @@ def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_pat
     message = prepare_database(database_url)
 
     assert "登録しました" in message
-    assert migration_revision(database_url) == "0025_recorder_voiceprint"
+    assert migration_revision(database_url) == "0026_recorder_child_suggestions"
 
 
 def test_both_0022_branches_upgrade_to_the_merged_head(tmp_path):
@@ -128,7 +129,7 @@ def test_both_0022_branches_upgrade_to_the_merged_head(tmp_path):
             }
         finally:
             engine.dispose()
-        assert migration_revision(database_url) == "0025_recorder_voiceprint"
+        assert migration_revision(database_url) == "0026_recorder_child_suggestions"
 
 
 def test_recorder_worker_migration_preserves_existing_session_metadata(tmp_path):
@@ -198,4 +199,34 @@ def test_recorder_voiceprint_migration_preserves_postgresql_permissions():
     assert "allows_recorder_identification BOOLEAN DEFAULT false NOT NULL" in sql
     assert "voiceprint_candidate_teacher_id VARCHAR(36)" in sql
     assert "voiceprint_matching_checked BOOLEAN DEFAULT false NOT NULL" in sql
+    assert "GRANT" not in sql and "DISABLE ROW LEVEL SECURITY" not in sql
+
+
+def test_child_advice_migration_preserves_existing_children_and_has_no_selection(tmp_path):
+    database_url = f"sqlite:///{tmp_path}/child-advice-upgrade.db"
+    command.upgrade(build_alembic_config(database_url), "0025_recorder_voiceprint")
+    engine = create_database_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("""
+                INSERT INTO children (id, school_id, display_name, is_active, created_at)
+                VALUES ('child', 'school', 'Existing name', 1, '2026-09-18')
+            """))
+        upgrade_database(database_url)
+        with engine.connect() as connection:
+            row = connection.execute(text("SELECT display_name, recording_names FROM children WHERE id = 'child'")).one()
+            assert row == ("Existing name", "[]")
+            assert "candidate_child_id" in {column["name"] for column in inspect(engine).get_columns("records")}
+    finally:
+        engine.dispose()
+
+
+def test_child_advice_migration_preserves_postgresql_permissions():
+    output = io.StringIO()
+    config = build_alembic_config("postgresql://example:unused@localhost/example")
+    config.output_buffer = output
+    command.upgrade(config, "0025_recorder_voiceprint:0026_recorder_child_suggestions", sql=True)
+    sql = output.getvalue()
+    assert "recording_names JSON DEFAULT '[]' NOT NULL" in sql
+    assert "candidate_child_id VARCHAR(36)" in sql
     assert "GRANT" not in sql and "DISABLE ROW LEVEL SECURITY" not in sql

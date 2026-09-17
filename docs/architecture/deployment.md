@@ -1,5 +1,9 @@
 # デプロイ・運用
 
+録音の園児候補は `RECORDER_CHILD_MATCHING_ENABLED=false` が既定です。有効化には録音有効化、
+`0026_recorder_child_suggestions` のDB移行、API・GPUワーカーの更新が必要です。
+移行中は録音を停止し、処理中セッションの完了を確認してください。手順は[録音導入手順](../recorder-vrt-runbook.md#任意の園児候補)を参照します。
+
 - 索引: [../architecture.md](../architecture.md)
 
 ローカル開発は SQLite + 単一プロセス、本番は PostgreSQL + Docker Compose です。
