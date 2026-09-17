@@ -24,13 +24,24 @@ export interface UploadCoordinatorOptions {
 export class UploadCoordinator {
   readonly #api: RecorderApi;
   readonly #repository: SessionRepository;
+  readonly #uploads = new Map<string, Promise<string>>();
 
   constructor(options: UploadCoordinatorOptions) {
     this.#api = options.api;
     this.#repository = options.repository;
   }
 
-  async upload(session: LocalRecordingSession): Promise<string> {
+  upload(session: LocalRecordingSession): Promise<string> {
+    const existing = this.#uploads.get(session.clientSessionId);
+    if (existing) return existing;
+    const pending = this.#upload(session).finally(() =>
+      this.#uploads.delete(session.clientSessionId),
+    );
+    this.#uploads.set(session.clientSessionId, pending);
+    return pending;
+  }
+
+  async #upload(session: LocalRecordingSession): Promise<string> {
     let serverId = session.serverSessionId;
     if (!serverId) {
       const created = await this.#api.createSession(session.clientSessionId);
@@ -45,7 +56,9 @@ export class UploadCoordinator {
     }
 
     const server = await this.#api.getSession(serverId);
-    if (["queued", "processing", "completed"].includes(server.status)) {
+    if (
+      ["queued", "processing", "completed", "failed"].includes(server.status)
+    ) {
       await this.#repository.delete(session.clientSessionId);
       return serverId;
     }

@@ -10,6 +10,11 @@
     message?: string | null;
     busy?: boolean;
     finalizing?: boolean;
+    continuous?: boolean;
+    pendingCount?: number;
+    acceptedCount?: number;
+    onContinuousChange?: (enabled: boolean) => void;
+    onRetryContinuous?: () => void;
     cautionConfirmed?: boolean;
     ownedSessions?: LocalRecordingSession[];
     foreignSessionExists?: boolean;
@@ -38,6 +43,11 @@
     message = null,
     busy = false,
     finalizing = false,
+    continuous = false,
+    pendingCount = 0,
+    acceptedCount = 0,
+    onContinuousChange = () => undefined,
+    onRetryContinuous = () => undefined,
     cautionConfirmed = false,
     ownedSessions = [],
     foreignSessionExists = false,
@@ -84,6 +94,23 @@
   <section aria-labelledby="ready-title">
     <h2 id="ready-title">録音を始める</h2>
     <p>録音中は画面を点灯したまま、ブラウザを前面に表示してください。</p>
+    <label>
+      <input
+        type="checkbox"
+        checked={continuous}
+        disabled={busy}
+        onchange={(event) => onContinuousChange(event.currentTarget.checked)}
+      />
+      連続録音（60秒ごとに自動送信）
+    </label>
+    {#if continuous}
+      <p>
+        開始すると、停止するまで録音と自動送信を続けます（最長12時間）。送信済みの音声は取り消せません。未送信が3区間に達すると一時停止します。
+      </p>
+      <p>
+        記録は先生の確認・承認後に配信します。画面ロック・スリープ中の録音は保証できません。
+      </p>
+    {/if}
     {#if !cautionConfirmed}
       <div class="caution">
         <h3>録音前の確認</h3>
@@ -96,7 +123,8 @@
       </div>
     {:else}
       <button class="record-button" onclick={onStart} disabled={busy}>
-        <span aria-hidden="true">●</span> 録音開始
+        <span aria-hidden="true">●</span>
+        {continuous ? "連続録音・自動送信を開始" : "録音開始"}
       </button>
     {/if}
     <button class="link-button" onclick={onShowUnsent}
@@ -127,7 +155,12 @@
     </p>
     <p>安全を確認してから、明示的に録音を再開してください。</p>
     <div class="actions">
-      <button class="primary" onclick={onResume}>録音を再開</button>
+      <button
+        class="primary"
+        onclick={onResume}
+        disabled={busy || finalizing || (continuous && pendingCount >= 3)}
+        >録音を再開</button
+      >
       <button class="danger" onclick={onStop}>録音を停止</button>
     </div>
   </section>
@@ -144,17 +177,38 @@
         <dd>{segmentCount}件</dd>
       </div>
     </dl>
-    <p>録音内容の再生機能はありません。送信するか破棄してください。</p>
-    <div class="actions">
+    {#if continuous}
+      <p>
+        最後の短い区間も自動送信します。送信できなかった音声は端末に最大24時間保持します。
+      </p>
+      <button
+        class="secondary"
+        onclick={onRetryContinuous}
+        disabled={busy || finalizing}>未送信区間の送信を再試行</button
+      >
       <button
         class="primary"
-        onclick={onSend}
-        disabled={busy || finalizing || segmentCount === 0}>送信する</button
+        onclick={onBack}
+        disabled={busy || finalizing || pendingCount > 0}>録音待機へ戻る</button
       >
-      <button class="danger" onclick={onDiscard} disabled={busy || finalizing}
-        >破棄する</button
+      <button
+        class="link-button"
+        onclick={onShowUnsent}
+        disabled={busy || finalizing}>未送信の録音を確認</button
       >
-    </div>
+    {:else}
+      <p>録音内容の再生機能はありません。送信するか破棄してください。</p>
+      <div class="actions">
+        <button
+          class="primary"
+          onclick={onSend}
+          disabled={busy || finalizing || segmentCount === 0}>送信する</button
+        >
+        <button class="danger" onclick={onDiscard} disabled={busy || finalizing}
+          >破棄する</button
+        >
+      </div>
+    {/if}
   </section>
 {:else if view === "unsent"}
   <section aria-labelledby="unsent-title">
@@ -210,5 +264,25 @@
       待機画面へ戻ってもサーバーの処理は続きます。結果は先生用の音声処理状況で確認できます。
     </p>
     <button class="primary" onclick={onBack}>録音待機へ戻る</button>
+  </section>
+{/if}
+
+{#if continuous && ["recording", "paused", "stopped"].includes(view)}
+  <section aria-labelledby="continuous-status-title">
+    <h2 id="continuous-status-title">連続録音の送信状況</h2>
+    <p>サーバー受付: {acceptedCount}区間 / 未送信: {pendingCount}区間</p>
+    <p>
+      受付済みの音声は端末から削除します。処理は60秒単位のため、結果には録音時間と処理時間の分だけ遅れがあります。
+    </p>
+    {#if processing || statusIssue || statusLoading}
+      <h3>直近の受付区間</h3>
+      <ProcessingStatus
+        progress={processing}
+        issue={statusIssue}
+        loading={statusLoading}
+        paused={statusPaused}
+        onRefresh={onRefreshStatus}
+      />
+    {/if}
   </section>
 {/if}

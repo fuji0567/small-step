@@ -19,6 +19,16 @@ function session(id: string, updatedAt: number): LocalRecordingSession {
 }
 
 describe("IndexedDbSessionRepository", () => {
+  it("同時保存でも3件の上限を越えない", async () => {
+    const repository = new IndexedDbSessionRepository(new IDBFactory());
+    await repository.put(session("a", 1));
+    await repository.put(session("b", 2));
+    const first = repository.put(session("c", 3));
+    const second = repository.put(session("d", 4));
+    await first;
+    await expect(second).rejects.toThrow("3件");
+    expect(await repository.list()).toHaveLength(3);
+  });
   it("ローカル保存を最大3セッションに制限する", async () => {
     const repository = new IndexedDbSessionRepository(new IDBFactory());
     await repository.put(session("a", 1));

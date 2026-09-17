@@ -86,23 +86,37 @@ export class RecorderApi {
     if (!token) throw new RecorderApiError(401, "ログインが必要です。");
     headers.set("Authorization", `Bearer ${token}`);
     headers.set("Accept", "application/json");
-    const response = await this.#fetch(path, { ...init, headers });
-    if (!response.ok) {
-      throw new RecorderApiError(
-        response.status,
-        response.status === 401
-          ? "ログインの有効期限が切れています。再度ログインしてください。"
-          : response.status === 409
-            ? "録音セッションの状態が変わったため、送信を続けられません。"
-            : "通信に失敗しました。",
-      );
+    const timeout = new AbortController();
+    const timer = setTimeout(() => timeout.abort(), 30_000);
+    const abort = () => timeout.abort();
+    init.signal?.addEventListener("abort", abort, { once: true });
+    if (init.signal?.aborted) timeout.abort();
+    try {
+      const response = await this.#fetch(path, {
+        ...init,
+        headers,
+        signal: timeout.signal,
+      });
+      if (!response.ok) {
+        throw new RecorderApiError(
+          response.status,
+          response.status === 401
+            ? "ログインの有効期限が切れています。再度ログインしてください。"
+            : response.status === 409
+              ? "録音セッションの状態が変わったため、送信を続けられません。"
+              : "通信に失敗しました。",
+        );
+      }
+      if (
+        response.status === 204 ||
+        response.headers.get("content-length") === "0"
+      ) {
+        return null;
+      }
+      return (await response.json()) as ServerRecordingSession;
+    } finally {
+      clearTimeout(timer);
+      init.signal?.removeEventListener("abort", abort);
     }
-    if (
-      response.status === 204 ||
-      response.headers.get("content-length") === "0"
-    ) {
-      return null;
-    }
-    return (await response.json()) as ServerRecordingSession;
   }
 }

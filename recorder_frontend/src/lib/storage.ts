@@ -46,16 +46,18 @@ export class IndexedDbSessionRepository implements SessionRepository {
   }
 
   async put(session: LocalRecordingSession): Promise<void> {
-    const sessions = await this.list();
-    const isNew = !sessions.some(
-      (item) => item.clientSessionId === session.clientSessionId,
-    );
-    if (isNew && sessions.length >= MAX_LOCAL_SESSIONS) {
-      throw new Error(
-        "未送信の録音が3件あります。送信または破棄してください。",
-      );
-    }
     await this.#withStore("readwrite", async (store) => {
+      const sessions = await requestResult<LocalRecordingSession[]>(
+        store.getAll(),
+      );
+      const isNew = !sessions.some(
+        (item) => item.clientSessionId === session.clientSessionId,
+      );
+      if (isNew && sessions.length >= MAX_LOCAL_SESSIONS) {
+        throw new Error(
+          "未送信の録音が3件あります。送信または破棄してください。",
+        );
+      }
       await requestResult(store.put(session));
     });
   }

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   MAX_RECORDING_DURATION_MS,
+  MAX_CONTINUOUS_RECORDING_DURATION_MS,
   RecorderController,
   SEGMENT_DURATION_MS,
   selectSupportedMimeType,
@@ -51,13 +52,14 @@ describe("RecorderController", () => {
     vi.useRealTimers();
   });
 
-  function setup() {
+  function setup(maxDurationMs?: number) {
     const recorders: FakeRecorder[] = [];
     const segments: RecorderSegment[] = [];
     const interruptions: string[] = [];
     const controller = new RecorderController({
       stream: { getTracks: () => [] } as unknown as MediaStream,
       mimeType: "audio/mp4",
+      maxDurationMs,
       createRecorder: () => {
         const recorder = new FakeRecorder();
         recorders.push(recorder);
@@ -131,6 +133,20 @@ describe("RecorderController", () => {
     expect(controller.phase).toBe("stopped");
     expect(controller.totalDurationMs).toBe(MAX_RECORDING_DURATION_MS);
     expect(segments).toHaveLength(60);
+  });
+
+  it("連続モードは60分を超えて録音し12時間で停止する", async () => {
+    const { controller, segments } = setup(
+      MAX_CONTINUOUS_RECORDING_DURATION_MS,
+    );
+    controller.start();
+    await vi.advanceTimersByTimeAsync(MAX_RECORDING_DURATION_MS);
+    expect(controller.phase).toBe("recording");
+    await vi.advanceTimersByTimeAsync(
+      MAX_CONTINUOUS_RECORDING_DURATION_MS - MAX_RECORDING_DURATION_MS,
+    );
+    expect(controller.phase).toBe("stopped");
+    expect(segments).toHaveLength(720);
   });
 
   it("画面非表示で端数を確定して明示再開待ちにする", async () => {

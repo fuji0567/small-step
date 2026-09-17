@@ -12,8 +12,10 @@
     type CredentialStore,
   } from "./lib/auth";
   import RecorderScreen from "./lib/RecorderScreen.svelte";
+  import { ContinuousUploadQueue } from "./lib/continuous-upload";
   import {
     RecorderController,
+    MAX_CONTINUOUS_RECORDING_DURATION_MS,
     SEGMENT_DURATION_MS,
     selectSupportedMimeType,
   } from "./lib/recorder";
@@ -51,6 +53,11 @@
   let elapsedMs = $state(0);
   let segmentCount = $state(0);
   let finalizing = $state(false);
+  let continuous = $state(true);
+  let pendingCount = $state(0);
+  let acceptedCount = $state(0);
+  let recordingContinuously = false;
+  let continuousQueue: ContinuousUploadQueue | null = null;
   let ownedSessions = $state<LocalRecordingSession[]>([]);
   let foreignSessionExists = $state(false);
   let processing = $state<ProcessingProgress | null>(null);
@@ -90,6 +97,7 @@
         statusIssue = issue;
         if (issue === "unavailable") processing = null;
         if (issue === "authentication") {
+          stopForAuthentication();
           stopMonitoring();
           credentials.clear();
           teacher = null;
@@ -125,6 +133,9 @@
       stopMonitoring();
       mounted = false;
       recorder?.stop();
+      continuousQueue?.stop();
+      for (const track of activeStream?.getTracks() ?? []) track.stop();
+      void releaseWakeLock();
     };
   });
 
@@ -163,10 +174,16 @@
       credentials.save(tokens.accessToken, tokens.refreshToken);
       teacher = await verifyTeacher(browserFetch, tokens.accessToken);
       password = "";
-      if (currentSession) {
+      if (
+        currentSession &&
+        currentSession.ownerId === teacher.id &&
+        !recordingContinuously
+      ) {
         view = "stopped";
         await refreshSessions();
       } else {
+        currentSession = null;
+        recordingContinuously = false;
         view = "ready";
         await retryOwned(false);
       }
@@ -193,7 +210,7 @@
       if (!navigator.onLine)
         throw new Error("サーバーへ接続してから録音を開始してください。");
       await refreshCredentials();
-      await verifyTeacher(browserFetch, credentials.accessToken());
+      teacher = await verifyTeacher(browserFetch, credentials.accessToken());
       await repository.cleanup();
       const sessions = await repository.list();
       if (sessions.some((session) => session.ownerId !== teacher?.id)) {
@@ -208,6 +225,11 @@
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       activeStream = stream;
+      if (!mounted || document.visibilityState !== "visible") {
+        throw new Error(
+          "画面を前面に表示してから、録音開始を選び直してください。",
+        );
+      }
       const mimeType = selectSupportedMimeType((type) =>
         MediaRecorder.isTypeSupported(type),
       );
@@ -228,17 +250,67 @@
         durationMs: 0,
         segments: [],
       };
-      await repository.put(currentSession);
+      recordingContinuously = continuous;
+      pendingCount = sessions.length;
+      acceptedCount = 0;
+      if (!recordingContinuously) await repository.put(currentSession);
       await scheduleLocalCleanup();
 
       observeMicrophone(stream);
       const activeClientSessionId = currentSession.clientSessionId;
+      const ownerId = teacher.id;
+      continuousQueue?.stop();
+      continuousQueue = recordingContinuously
+        ? new ContinuousUploadQueue({
+            ownerId,
+            mimeType,
+            repository,
+            uploader,
+            api,
+            beforeUpload: refreshCredentials,
+            isCurrent: () => mounted && teacher?.id === ownerId,
+            isOnline: () =>
+              navigator.onLine && document.visibilityState === "visible",
+            onPending: (count) => {
+              pendingCount = count;
+              void scheduleLocalCleanup();
+            },
+            onAccepted: (id) => {
+              acceptedCount += 1;
+              monitoringOwner = ownerId;
+              statusMonitor.start(id);
+              updateStatusAvailability();
+            },
+            onBackpressure: () =>
+              recorder?.interrupt(
+                "未送信の録音が3区間になったため一時停止しました。送信と処理の完了を待ってから、録音を再開してください。",
+              ),
+            onError: (error) => {
+              if (
+                (error instanceof RecorderApiError && error.status === 401) ||
+                (error instanceof AuthRefreshError &&
+                  [400, 401].includes(error.status))
+              ) {
+                handleOperationError(error, "ログインし直してください。");
+              } else {
+                message =
+                  "送信または処理状況の確認に接続できませんでした。未送信データは端末に保持し、再接続を試みます。";
+              }
+            },
+          })
+        : null;
+      const queue = continuousQueue;
       recorder = new RecorderController({
         stream,
         mimeType,
+        maxDurationMs: recordingContinuously
+          ? MAX_CONTINUOUS_RECORDING_DURATION_MS
+          : undefined,
         createRecorder: (media, options) => new MediaRecorder(media, options),
         onSegment: (segment) => {
-          segmentPersistence = storeSegment(activeClientSessionId, segment);
+          segmentPersistence = queue
+            ? queue.enqueue(segment)
+            : storeSegment(activeClientSessionId, segment);
           return segmentPersistence;
         },
         onChange: syncRecorderState,
@@ -271,6 +343,7 @@
       return;
     const nextSession: LocalRecordingSession = {
       ...currentSession,
+      status: recorder.phase === "recording" ? "recording" : "pending",
       updatedAt: Date.now(),
       durationMs: recorder.totalDurationMs,
       segments: [...currentSession.segments, segment],
@@ -281,13 +354,14 @@
   }
 
   function syncRecorderState(): void {
-    if (!recorder) return;
+    if (!recorder || !mounted || !teacher) return;
     elapsedMs = recorder.elapsedMs;
     segmentCount = recorder.segmentCount;
     finalizing = recorder.isFinalizing;
     if (recorder.phase === "paused") {
       view = "paused";
       if (
+        !recordingContinuously &&
         currentSession &&
         currentSession.status !== "pending" &&
         !recorder.isFinalizing
@@ -309,6 +383,7 @@
     if (recorder.phase === "stopped") {
       view = "stopped";
       if (
+        !recordingContinuously &&
         currentSession &&
         currentSession.status !== "pending" &&
         !recorder.isFinalizing
@@ -336,43 +411,83 @@
 
   async function resumeRecording(): Promise<void> {
     message = null;
-    const usableTrack = activeStream
-      ?.getAudioTracks()
-      .some((track) => track.readyState === "live" && !track.muted);
-    if (!usableTrack && recorder) {
+    if (
+      busy ||
+      finalizing ||
+      !teacher ||
+      currentSession?.ownerId !== teacher.id
+    )
+      return;
+    busy = true;
+    try {
       try {
-        const previousStream = activeStream;
-        activeStream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-        });
-        for (const track of previousStream?.getTracks() ?? []) track.stop();
-        observeMicrophone(activeStream);
-        recorder.replaceStream(activeStream);
-      } catch {
-        message =
-          "マイクを再開できませんでした。端末の設定を確認してください。";
+        await refreshCredentials();
+      } catch (error) {
+        handleOperationError(error, "ログインを更新できませんでした。");
         return;
       }
-    }
-    if (currentSession) {
-      await sessionStatePersistence;
-      const resumedSession: LocalRecordingSession = {
-        ...currentSession,
-        status: "recording",
-        updatedAt: Date.now(),
-      };
-      try {
-        await repository.put(resumedSession);
-        currentSession = resumedSession;
-      } catch {
+      if (
+        !teacher ||
+        currentSession?.ownerId !== teacher.id ||
+        recorder?.phase !== "paused"
+      )
+        return;
+      if (recordingContinuously && (await repository.list()).length >= 3) {
         message =
-          "録音状態を端末に保存できませんでした。空き容量を確認してください。";
+          "未送信の録音が3区間あります。送信が終わってから再開してください。";
+        void continuousQueue?.retry();
         return;
       }
+      const usableTrack = activeStream
+        ?.getAudioTracks()
+        .some((track) => track.readyState === "live" && !track.muted);
+      if (!usableTrack && recorder) {
+        try {
+          const previousStream = activeStream;
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+          });
+          if (
+            !teacher ||
+            currentSession?.ownerId !== teacher.id ||
+            recorder.phase !== "paused"
+          ) {
+            for (const track of stream.getTracks()) track.stop();
+            return;
+          }
+          activeStream = stream;
+          for (const track of previousStream?.getTracks() ?? []) track.stop();
+          observeMicrophone(activeStream);
+          recorder.replaceStream(activeStream);
+        } catch {
+          message =
+            "マイクを再開できませんでした。端末の設定を確認してください。";
+          return;
+        }
+      }
+      if (currentSession && !recordingContinuously) {
+        await sessionStatePersistence;
+        const resumedSession: LocalRecordingSession = {
+          ...currentSession,
+          status: "recording",
+          updatedAt: Date.now(),
+        };
+        try {
+          await repository.put(resumedSession);
+          currentSession = resumedSession;
+        } catch {
+          message =
+            "録音状態を端末に保存できませんでした。空き容量を確認してください。";
+          return;
+        }
+      }
+      recorder?.resume();
+      view = "recording";
+      startAuthRefresh();
+      await requestWakeLock();
+    } finally {
+      busy = false;
     }
-    recorder?.resume();
-    view = "recording";
-    await requestWakeLock();
   }
 
   function stopRecording(): void {
@@ -459,6 +574,10 @@
 
   async function retryOwned(showMessage: boolean): Promise<void> {
     if (!teacher) return;
+    if (continuousQueue) {
+      await continuousQueue.retry();
+      return;
+    }
     const result = await uploader.retryOwned(
       teacher.id,
       currentSession?.clientSessionId,
@@ -482,6 +601,11 @@
   }
 
   async function showUnsent(): Promise<void> {
+    if (recordingContinuously) {
+      await waitForSegmentPersistence();
+      continuousQueue?.stop();
+      continuousQueue = null;
+    }
     stopMonitoring();
     await refreshSessions();
     view = "unsent";
@@ -541,10 +665,10 @@
     authRefreshTimer = setInterval(
       () =>
         void refreshCredentials().catch((error) => {
-          message =
-            error instanceof Error
-              ? error.message
-              : "ログインを更新できませんでした。";
+          recorder?.interrupt(
+            "ログインを更新できなかったため一時停止しました。接続を確認してください。",
+          );
+          handleOperationError(error, "ログインを更新できませんでした。");
           stopAuthRefresh();
         }),
       AUTH_REFRESH_INTERVAL_MS,
@@ -580,11 +704,35 @@
       (error instanceof AuthRefreshError && [400, 401].includes(error.status))
     ) {
       credentials.clear();
+      stopForAuthentication();
+      teacher = null;
       stopAuthRefresh();
       stopMonitoring();
       view = "login";
     }
     message = error instanceof Error ? error.message : fallback;
+  }
+
+  function stopForAuthentication(): void {
+    recorder?.stop();
+    continuousQueue?.stop();
+    continuousQueue = null;
+    for (const track of activeStream?.getTracks() ?? []) track.stop();
+    stopDisplayTimer();
+    void releaseWakeLock();
+  }
+
+  async function backToReady(): Promise<void> {
+    if (finalizing || busy) return;
+    await waitForSegmentPersistence();
+    continuousQueue?.stop();
+    continuousQueue = null;
+    currentSession = null;
+    recorder = null;
+    recordingContinuously = false;
+    stopMonitoring();
+    message = null;
+    view = "ready";
   }
 
   async function recoverInterruptedSessions(): Promise<void> {
@@ -631,18 +779,21 @@
 
   async function requestWakeLock(): Promise<void> {
     try {
-      wakeLock = await navigator.wakeLock?.request("screen");
+      const lock = await navigator.wakeLock?.request("screen");
+      if (!mounted || recorder?.phase !== "recording") {
+        await lock?.release();
+        return;
+      }
+      wakeLock = lock ?? null;
     } catch {
       wakeLock = null;
     }
   }
 
   async function releaseWakeLock(): Promise<void> {
-    try {
-      await wakeLock?.release();
-    } finally {
-      wakeLock = null;
-    }
+    const lock = wakeLock;
+    wakeLock = null;
+    await lock?.release().catch(() => undefined);
   }
 </script>
 
@@ -693,6 +844,11 @@
       {elapsedMs}
       {segmentCount}
       {finalizing}
+      {continuous}
+      {pendingCount}
+      {acceptedCount}
+      onContinuousChange={(enabled) => (continuous = enabled)}
+      onRetryContinuous={() => void continuousQueue?.retry()}
       {message}
       {busy}
       {cautionConfirmed}
@@ -711,11 +867,7 @@
       onSend={sendCurrent}
       onDiscard={discardCurrent}
       onShowUnsent={showUnsent}
-      onBack={() => {
-        stopMonitoring();
-        message = null;
-        view = "ready";
-      }}
+      onBack={backToReady}
       onRetry={retrySession}
       onDiscardSession={discardSavedSession}
     />

@@ -4,6 +4,56 @@ import { describe, expect, it, vi } from "vitest";
 import RecorderScreen from "./RecorderScreen.svelte";
 
 describe("RecorderScreen", () => {
+  it("連続録音開始前に自動送信とブラウザの制限を明示する", async () => {
+    const onStart = vi.fn();
+    render(RecorderScreen, {
+      view: "ready",
+      continuous: true,
+      cautionConfirmed: true,
+      onStart,
+    });
+    expect(screen.getByRole("checkbox", { name: /連続録音/ })).toBeChecked();
+    expect(
+      screen.getByText(/送信済みの音声は取り消せません/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/スリープ中の録音は保証できません/),
+    ).toBeInTheDocument();
+    await fireEvent.click(
+      screen.getByRole("button", { name: "連続録音・自動送信を開始" }),
+    );
+    expect(onStart).toHaveBeenCalledOnce();
+  });
+
+  it("連続録音の停止後は二重送信の操作を表示しない", () => {
+    render(RecorderScreen, {
+      view: "stopped",
+      continuous: true,
+      acceptedCount: 2,
+      pendingCount: 1,
+    });
+    expect(
+      screen.getByText("サーバー受付: 2区間 / 未送信: 1区間"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "送信する" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "破棄する" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "録音待機へ戻る" }),
+    ).toBeDisabled();
+  });
+
+  it("未送信が3区間ある間と末尾確定中は録音を再開できない", () => {
+    render(RecorderScreen, {
+      view: "paused",
+      continuous: true,
+      pendingCount: 3,
+    });
+    expect(screen.getByRole("button", { name: "録音を再開" })).toBeDisabled();
+  });
   it("受付後に進捗・結果リンクと待機へ戻る操作を表示する", () => {
     const recordId = "11111111-1111-4111-8111-111111111111";
     render(RecorderScreen, {

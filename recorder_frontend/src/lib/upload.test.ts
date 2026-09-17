@@ -35,6 +35,36 @@ function repository(): SessionRepository {
 }
 
 describe("UploadCoordinator", () => {
+  it("同じ録音の同時再送を一つにまとめる", async () => {
+    const getSession = vi.fn(async () => ({
+      status: "completed",
+      segments: [],
+    }));
+    const coordinator = new UploadCoordinator({
+      api: { getSession } as unknown as RecorderApi,
+      repository: repository(),
+    });
+    const first = coordinator.upload(localSession());
+    const second = coordinator.upload(localSession());
+    expect(first).toBe(second);
+    expect(await first).toBe("server-1");
+    expect(getSession).toHaveBeenCalledOnce();
+  });
+
+  it("受付後に処理失敗した録音を再送せず端末から削除する", async () => {
+    const store = repository();
+    const uploadSegment = vi.fn();
+    const coordinator = new UploadCoordinator({
+      api: {
+        getSession: vi.fn(async () => ({ status: "failed", segments: [] })),
+        uploadSegment,
+      } as unknown as RecorderApi,
+      repository: store,
+    });
+    expect(await coordinator.upload(localSession())).toBe("server-1");
+    expect(uploadSegment).not.toHaveBeenCalled();
+    expect(store.delete).toHaveBeenCalledWith("client-1");
+  });
   it("SHA-256・録音時間・fileをmultipartで送る", async () => {
     const uploadSegment = vi.fn(async () => null);
     const api = {

@@ -2,6 +2,8 @@ import type { RecorderSegment } from "./types";
 
 export const SEGMENT_DURATION_MS = 60_000;
 export const MAX_RECORDING_DURATION_MS = 60 * 60_000;
+export const MAX_CONTINUOUS_RECORDING_DURATION_MS =
+  12 * MAX_RECORDING_DURATION_MS;
 
 export type RecordingPhase = "idle" | "recording" | "paused" | "stopped";
 
@@ -17,6 +19,7 @@ export interface RecorderLike {
 export interface RecorderControllerOptions {
   stream: MediaStream;
   mimeType: string;
+  maxDurationMs?: number;
   createRecorder: (
     stream: MediaStream,
     options: MediaRecorderOptions,
@@ -44,6 +47,7 @@ export class RecorderController {
   totalDurationMs = 0;
   segmentCount = 0;
   readonly mimeType: string;
+  readonly #maxDurationMs: number;
   readonly #options: RecorderControllerOptions;
   readonly #now: () => number;
   readonly #setTimer: NonNullable<RecorderControllerOptions["setTimer"]>;
@@ -63,6 +67,14 @@ export class RecorderController {
     this.#options = options;
     this.#stream = options.stream;
     this.mimeType = options.mimeType;
+    this.#maxDurationMs = options.maxDurationMs ?? MAX_RECORDING_DURATION_MS;
+    if (
+      !Number.isFinite(this.#maxDurationMs) ||
+      this.#maxDurationMs <= 0 ||
+      this.#maxDurationMs > MAX_CONTINUOUS_RECORDING_DURATION_MS
+    ) {
+      throw new Error("録音時間の上限が不正です。");
+    }
     this.#now = options.now ?? Date.now;
     this.#setTimer =
       options.setTimer ??
@@ -169,11 +181,10 @@ export class RecorderController {
     recorder.onstop = () => void this.#completeSegment();
     recorder.start();
 
-    const remaining = MAX_RECORDING_DURATION_MS - this.totalDurationMs;
+    const remaining = this.#maxDurationMs - this.totalDurationMs;
     const delay = Math.min(SEGMENT_DURATION_MS, remaining);
     this.#timer = this.#setTimer(() => {
-      const reachesLimit =
-        this.totalDurationMs + delay >= MAX_RECORDING_DURATION_MS;
+      const reachesLimit = this.totalDurationMs + delay >= this.#maxDurationMs;
       this.#finishSegment(reachesLimit ? "stopped" : "recording");
     }, delay);
     this.#changed();
@@ -195,7 +206,7 @@ export class RecorderController {
     this.#timer = null;
     const duration = Math.min(
       Math.max(0, this.#now() - this.#segmentStartedAt),
-      MAX_RECORDING_DURATION_MS - this.totalDurationMs,
+      this.#maxDurationMs - this.totalDurationMs,
     );
     this.#pendingDurationMs = duration;
     this.totalDurationMs += duration;
@@ -242,7 +253,7 @@ export class RecorderController {
     if (
       !persistenceFailed &&
       this.#nextPhase === "recording" &&
-      this.totalDurationMs < MAX_RECORDING_DURATION_MS
+      this.totalDurationMs < this.#maxDurationMs
     ) {
       this.phase = "recording";
       this.#beginSegment();

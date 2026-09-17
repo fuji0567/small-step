@@ -13,8 +13,56 @@ describe("RecorderApi", () => {
     await api.getSession("server/1", abort.signal);
     expect(fetchFn).toHaveBeenCalledWith(
       "/api/v1/recorder/sessions/server%2F1",
-      expect.objectContaining({ signal: abort.signal, cache: "no-store" }),
+      expect.objectContaining({
+        signal: expect.any(AbortSignal),
+        cache: "no-store",
+      }),
     );
+  });
+
+  it("通信が30秒応答しなければ中断する", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchFn = vi.fn(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("Aborted", "AbortError")),
+            );
+          }),
+      );
+      const api = new RecorderApi({
+        fetch: fetchFn as typeof fetch,
+        accessToken: () => "token",
+      });
+      const result = expect(api.getSession("server-1")).rejects.toMatchObject({
+        name: "AbortError",
+      });
+      await vi.advanceTimersByTimeAsync(30_000);
+      await result;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("呼び出し元の中断を通信へ伝える", async () => {
+    const abort = new AbortController();
+    let signal: AbortSignal | null = null;
+    const api = new RecorderApi({
+      accessToken: () => "token",
+      fetch: vi.fn(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            signal = init?.signal ?? null;
+            signal?.addEventListener("abort", () =>
+              reject(new DOMException("Aborted", "AbortError")),
+            );
+          }),
+      ) as typeof fetch,
+    });
+    const pending = api.getSession("server-1", abort.signal);
+    abort.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("資格情報がないと通信せずログインが必要だと識別できる", async () => {
