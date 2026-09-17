@@ -66,6 +66,13 @@ npm run build
 Python runtime には生成物だけをコピーします。Node.js と `node_modules` は runtime image に含めません。
 配信と本番起動の契約は [デプロイ・運用](docs/architecture/deployment.md) を参照してください。
 
+### 他園での試用
+
+APIから新しく登録した園は「試用モード」で開始します。録音・候補作成・先生の承認までは試せますが、
+保護者のLINEへは送信しません。園の先生管理者が「園の設定」から確認を経て本番に切り替えます。
+試用中の記録は、本番へ切り替えた後も配信されません。既存の園の配信設定は移行時に維持します。
+安全な導入手順と制限は [園別試用モード](docs/school-trial-runbook.md) を参照してください。
+
 ### `/rec/` 録音PWAの開発
 
 園内の共用iPhone／Android向け録音画面は、既存画面と依存関係を共有しない `recorder_frontend/` にあります。

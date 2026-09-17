@@ -59,5 +59,6 @@ export interface AuthenticatedTeacher {
   id: string;
   name: string;
   role: "teacher" | "school_admin";
+  trial_mode?: boolean;
   [key: string]: unknown;
 }

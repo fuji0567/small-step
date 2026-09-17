@@ -5,6 +5,7 @@ export interface SchoolSummary {
   name: string;
   timezone: string;
   digest_time: string;
+  trial_mode?: boolean;
   created_at: string;
 }
 

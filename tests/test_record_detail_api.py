@@ -71,6 +71,11 @@ def record_detail_context(tmp_path, monkeypatch):
             json={"name": "単体取得A園", "initial_admin_name": "A園管理者"},
         )
         assert school_a_response.status_code == 201
+        assert client.patch(
+            f"/api/v1/schools/{school_a_response.json()['id']}/trial-mode",
+            headers=headers["admin_a"],
+            json={"trial_mode": False, "delivery_confirmed": True},
+        ).status_code == 200
         school_a_id = school_a_response.json()["id"]
 
         teachers = {}
@@ -97,6 +102,11 @@ def record_detail_context(tmp_path, monkeypatch):
             json={"name": "単体取得B園", "initial_admin_name": "B園管理者"},
         )
         assert school_b_response.status_code == 201
+        assert client.patch(
+            f"/api/v1/schools/{school_b_response.json()['id']}/trial-mode",
+            headers=headers["admin_b"],
+            json={"trial_mode": False, "delivery_confirmed": True},
+        ).status_code == 200
         school_b_id = school_b_response.json()["id"]
         admin_b = client.get("/api/v1/auth/me", headers=headers["admin_b"])
         assert admin_b.status_code == 200
@@ -223,6 +233,7 @@ def test_record_detail_returns_each_status_without_secrets_and_keeps_export_rout
     records = record_detail_context["records"]
 
     expected_fields = {
+        "is_trial",
         "id",
         "school_id",
         "teacher_id",

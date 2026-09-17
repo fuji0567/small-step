@@ -12,6 +12,7 @@ export interface RecordRead {
   source_event_id: string | null;
   confidence: number;
   audio_processing_incomplete?: boolean;
+  is_trial?: boolean;
   occurred_at: string;
   summary: string;
   conversation_prompt: string | null;

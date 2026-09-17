@@ -102,6 +102,7 @@ export const AUDIT_ACTION_LABELS: Record<AuditEventAction, string> = {
   teacher_restored: '先生アカウントの利用を再開',
   teacher_role_changed: '先生の権限を変更',
   school_digest_time_changed: '成長記録の配信時刻を変更',
+  school_trial_mode_changed: '試用モードを変更',
   manual_record_created: '手入力の記録を作成',
   record_history_exported: '記録履歴をCSV出力',
   audit_history_exported: '操作履歴をCSV出力',

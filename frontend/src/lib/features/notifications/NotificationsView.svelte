@@ -215,6 +215,7 @@
         <option value="sent">送信済み</option>
         <option value="failed">送信失敗</option>
         <option value="cancelled">配信取消</option>
+        <option value="trial">試用承認済み（配信なし）</option>
       </select>
     </div>
     <div class="notifications-field">
@@ -273,9 +274,11 @@
               />
             </div>
             <p class="notification-meta">
-              {notification.sent_at
-                ? `送信: ${formatDateTime(notification.sent_at)}`
-                : `配信予定: ${formatDateTime(notification.scheduled_for)}`}
+              {notification.status === 'trial'
+                ? '保護者への配信は行いません'
+                : notification.sent_at
+                  ? `送信: ${formatDateTime(notification.sent_at)}`
+                  : `配信予定: ${formatDateTime(notification.scheduled_for)}`}
               {#if notification.delivery_attempts > 0}
                 / 送信試行: {notification.delivery_attempts}回
               {/if}

@@ -40,7 +40,14 @@ class SchoolRead(APIModel):
     name: str
     timezone: str
     digest_time: str
+    trial_mode: bool
     created_at: datetime
+
+
+class SchoolTrialModeUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    trial_mode: bool = Field(strict=True)
+    delivery_confirmed: bool = Field(default=False, strict=True)
 
 
 class TeacherCreate(BaseModel):
@@ -84,6 +91,10 @@ class AuthClientConfig(BaseModel):
     voiceprint_enabled: bool = False
 
 
+class TeacherProfileRead(TeacherRead):
+    trial_mode: bool
+
+
 class RuntimeReadinessRead(BaseModel):
     """Public, secret-free deployment readiness summary."""
 
@@ -122,6 +133,7 @@ class RecordingSessionRead(APIModel):
     id: UUID
     client_session_id: UUID
     status: RecordingSessionStatus
+    is_trial: bool = False
     segments: list[RecordingSegmentRead] = Field(default_factory=list)
     total_duration_ms: int = Field(ge=0)
     expires_at: datetime
@@ -437,6 +449,7 @@ class RecordRead(APIModel):
     source_event_id: str | None
     confidence: float
     audio_processing_incomplete: bool = False
+    is_trial: bool = False
     occurred_at: datetime
     summary: str
     conversation_prompt: str | None

@@ -18,6 +18,7 @@ from app.models import Record, RecordCategory, RecordingSegment, RecordingSessio
 from app.recorder import RecorderStorage, RecorderStorageError
 from app.recorder_voiceprint import RecorderVoiceprintMatcher, SpeakerEmbeddingExtractor
 from app.recorder_children import RecorderChildMatcher
+from app.trial import lock_school
 
 
 DEFAULT_PROCESSING_TIMEOUT = timedelta(minutes=10)
@@ -183,8 +184,13 @@ def _finish_session(
     _validate_owner(db, session)
     record_id = None
     if candidate is not None:
+        school = lock_school(db, session.school_id)
+        source_is_trial = db.scalar(
+            select(RecordingSession.is_trial).where(RecordingSession.id == session.id)
+        )
         record = Record(
             school_id=session.school_id, teacher_id=session.teacher_id, child_id=None,
+            is_trial=session.is_trial or bool(source_is_trial) or school.trial_mode,
             source_event_id=f"recorder-session-{session.id}",
             occurred_at=_as_utc(session.created_at),
             audio_processing_incomplete=failed > 0,

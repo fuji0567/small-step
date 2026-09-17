@@ -2,6 +2,18 @@
 
 - 索引: [../architecture.md](../architecture.md)
 
+## 園別試用モード
+
+`POST /schools` は `trial_mode=true` で作成します。`SchoolRead` と `GET /auth/me` は現在の園の
+`trial_mode`、記録と録音セッションの応答は永久保持する `is_trial` を返します。
+`PATCH /schools/{id}/trial-mode` はその園の先生管理者限定です。本番への切り替えは
+`{"trial_mode": false, "delivery_confirmed": true}` が必須です。未確認や文字列のフラグは422です。
+変更は本文や秘密情報を含まない `school_trial_mode_changed` 操作履歴を残します。
+
+試用記録の承認は記録を `approved`、通知を終端状態 `trial` にし、送信先は保持しません。
+試用通知は配信キューから除外し、再送・日時変更・送信済み変更・Notion同期を409で拒否します。
+LINEワーカーもAPIを経由せず同じDBの試用フラグを確認します。詳細は [試用導入手順](../school-trial-runbook.md)。
+
 FastAPI 製の単一プロセスです。全エンドポイントは `/api/v1` 配下にあり、
 先生用・保護者用の静的アプリも同じプロセスから配信します。
 

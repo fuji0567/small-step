@@ -78,7 +78,8 @@ export function notificationStatusLabel(status: NotificationStatus): string {
     waiting_guardian_link: '保護者LINEの連携待ち',
     sent: '送信済み',
     failed: '送信失敗',
-    cancelled: '配信取消'
+    cancelled: '配信取消',
+    trial: '試用承認済み（配信なし）'
   }[status];
 }
 

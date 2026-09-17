@@ -13,6 +13,11 @@
 送信は API プロセスではなく、別プロセスのワーカーが行います。ワーカーは API を呼ばず、
 API と同じデータベースを直接読み書きするため、先生のアクセストークンを必要としません。
 
+各送信前に園の行ロックを取得し、園の `trial_mode` と記録の `is_trial` を再取得します。
+いずれかがtrueなら送信せず、通知を送信先なしの終端状態 `trial` にします。再送指定でも同様です。
+試用の承認は最初から `trial` なのでLINE連携の再開対象にもなりません。試用記録は配信アーカイブと
+Notion同期の対象外です。運用責任者への障害通知は保護者配信とは別であり、試用中も有効です。
+
 ```
 scripts/send_pending_line_notifications.py [--watch] [--dry-run] [--retry-failed]
   ├ DB から scheduled_for を過ぎた pending を取得（--retry-failed なら failed も）

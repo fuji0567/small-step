@@ -2,6 +2,17 @@
 
 - 索引: [../architecture.md](../architecture.md)
 
+## 試用記録の配信防止
+
+`0027_school_trial_mode` は `schools.trial_mode`、`records.is_trial`、`recording_sessions.is_trial`、
+`cloud_audio_jobs.is_trial` と通知状態 `trial` を追加します。既存行はfalseとして現在の運用を保持します。
+APIの新規園はtrueです。直接SQLで作成する管理処理は既定falseなので、試用園では明示trueを指定します。
+試用の録音・ジョブから作成した記録にも試用フラグを引き継ぎ、後の本番切り替えでは消しません。
+試用への切り替えは未承認記録、処理前・処理中の録音、送信待ち・連携待ち・失敗通知を永久に試用扱いにします。
+試用通知は送信先なしの終端状態で、記録は承認済みのままです。保護者の配信アーカイブには載りません。
+本番の要約用過去履歴からも試用記録を除外し、重複判定は同じ試用フラグの記録だけに限定します。
+配信防止列の削除で誤送信を起こさないよう、この移行のdowngradeは拒否します。
+
 SQLAlchemy 2.0 の宣言スタイル（`Mapped` / `mapped_column`）で `app/models.py` に定義しています。
 主キーはすべて UUID の文字列（`String(36)`）、日時はタイムゾーン付きで UTC 保存です。
 

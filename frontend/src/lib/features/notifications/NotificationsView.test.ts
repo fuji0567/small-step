@@ -35,6 +35,34 @@ function failedNotification() {
 afterEach(cleanup);
 
 describe('NotificationsView', () => {
+  it('試用の承認は配信なしと表示し、管理者にも再送操作を出さない', async () => {
+    render(NotificationsView, {
+      api: new ApiClient({
+        fetch: vi.fn<typeof fetch>().mockResolvedValue(
+          responseJson([
+            {
+              ...failedNotification(),
+              status: 'trial',
+              delivery_attempts: 0,
+              last_attempt_at: null,
+              last_failure_kind: null
+            }
+          ])
+        )
+      }),
+      schoolId: 'school-1',
+      isSchoolAdmin: true,
+      controller: new AppController()
+    });
+    expect(
+      await screen.findByText('保護者への配信は行いません')
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText('試用承認済み（配信なし）').length
+    ).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: '再送を予約' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '配信を取消' })).toBeNull();
+  });
   it('一般の先生には管理操作をDOMへ出さない', async () => {
     const api = new ApiClient({
       fetch: vi

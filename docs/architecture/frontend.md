@@ -8,6 +8,12 @@
 `@sveltejs/adapter-static` が `app/frontend_dist/` へ生成した静的ファイルを FastAPI が配信します。
 SvelteKit のサーバーへ業務ロジックを移しておらず、API と認可の本体は引き続き FastAPI です。
 
+園の `trial_mode` を共通レイアウトで「試用中（保護者への配信なし）」と表示します。
+園の設定は先生管理者だけが利用モードを変更でき、本番への切り替えはチェックと確認ダイアログの二段階です。
+記録の `is_trial` は一覧・詳細・承認確認で配信なしと明示し、通知状態 `trial` は専用表示とフィルターだけを
+提供します。再送・取消・日時変更の操作は出しません。録音PWAはログイン情報の `trial_mode` を表示します。
+表示は安全性の唯一の根拠ではなく、APIとLINEワーカーのDBガードが配信を防ぎます。
+
 | URL | SvelteKit route | 配信方式 | 対象利用者 |
 | --- | --- | --- | --- |
 | `/teacher/*` | `frontend/src/routes/teacher/` | CSR。`200.html` への先生用限定 SPA fallback | 先生・先生管理者 |

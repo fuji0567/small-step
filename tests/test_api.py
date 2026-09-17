@@ -64,6 +64,19 @@ def _fernet_test_key() -> str:
     return Fernet.generate_key().decode("ascii")
 
 
+def create_live_school(client: TestClient, **kwargs):
+    """Existing delivery tests explicitly activate a newly created trial school."""
+    response = client.post("/api/v1/schools", **kwargs)
+    if response.status_code == 201:
+        activation = client.patch(
+            f"/api/v1/schools/{response.json()['id']}/trial-mode",
+            json={"trial_mode": False, "delivery_confirmed": True},
+            headers=kwargs.get("headers"),
+        )
+        assert activation.status_code == 200
+    return response
+
+
 def line_signature(secret: str, body: bytes) -> str:
     return base64.b64encode(hmac.new(secret.encode("utf-8"), body, hashlib.sha256).digest()).decode("ascii")
 
@@ -176,7 +189,7 @@ def test_navigation_badges_do_not_count_optional_line_delivery_as_readiness_issu
         )
     )
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "LINE任意設定テスト園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "LINE任意設定テスト園"}).json()["id"]
         with app.state.session_factory() as db:
             record_worker_heartbeat(db=db, worker_name=GPU_AUDIO_WORKER_NAME)
 
@@ -204,7 +217,7 @@ def test_navigation_badges_count_each_school_admin_indicator(tmp_path):
         )
     )
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "ナビバッジ集計園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "ナビバッジ集計園"}).json()["id"]
         with app.state.session_factory() as db:
             record_worker_heartbeat(db=db, worker_name=GPU_AUDIO_WORKER_NAME)
             record_worker_heartbeat(db=db, worker_name=LINE_DELIVERY_WORKER_NAME)
@@ -334,8 +347,8 @@ def test_navigation_badges_limit_teacher_counts_and_school_access(tmp_path, monk
     with TestClient(app) as client:
         admin_headers = {"Authorization": "Bearer admin-token"}
         teacher_headers = {"Authorization": "Bearer teacher-token"}
-        school = client.post(
-            "/api/v1/schools",
+        school = create_live_school(
+            client,
             headers=admin_headers,
             json={"name": "先生スコープバッジ園", "initial_admin_name": "バッジ管理者"},
         )
@@ -460,7 +473,7 @@ def test_guardian_archive_only_shows_one_childs_delivered_notifications(tmp_path
         )
     )
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "アーカイブ確認園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "アーカイブ確認園"}).json()["id"]
         teacher_id = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "確認先生", "email": "archive@example.com"},
@@ -566,7 +579,7 @@ def test_child_retirement_stops_future_delivery_and_keeps_searchable_history(tmp
         )
     )
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "退園確認園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "退園確認園"}).json()["id"]
         teacher_id = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "確認先生", "email": "retirement@example.com"},
@@ -761,7 +774,7 @@ def test_teacher_disablement_stops_devices_and_allows_safe_restoration(tmp_path)
         )
     )
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "先生停止確認園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "先生停止確認園"}).json()["id"]
         first_admin = client.post(
             "/api/v1/teachers",
             json={
@@ -862,7 +875,7 @@ def test_teacher_disablement_stops_devices_and_allows_safe_restoration(tmp_path)
 def test_school_admin_role_handover_keeps_an_active_administrator(tmp_path):
     app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/test.db", auth_mode="development"))
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "管理者引継ぎ確認園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "管理者引継ぎ確認園"}).json()["id"]
         first_admin = client.post(
             "/api/v1/teachers",
             json={
@@ -935,7 +948,7 @@ def test_disabled_supabase_teacher_is_rejected_before_using_the_api(tmp_path, mo
 def test_school_admin_can_export_filtered_record_history_csv_without_sensitive_ids(tmp_path):
     app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/test.db", auth_mode="development"))
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "CSV出力確認園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "CSV出力確認園"}).json()["id"]
         teacher = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "CSV確認先生", "email": "csv@example.com"},
@@ -1015,7 +1028,7 @@ def test_school_admin_can_export_filtered_record_history_csv_without_sensitive_i
 def test_school_admin_can_filter_and_export_minimal_audit_history_csv(tmp_path):
     app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/test.db", auth_mode="development"))
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "操作履歴CSV確認園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "操作履歴CSV確認園"}).json()["id"]
         teacher = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "操作履歴先生", "email": "audit@example.com"},
@@ -1078,7 +1091,7 @@ def test_school_admin_can_filter_and_export_minimal_audit_history_csv(tmp_path):
 def test_growth_record_is_reviewed_and_scheduled(tmp_path):
     app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/test.db", auth_mode="development"))
     with TestClient(app) as client:
-        school = client.post("/api/v1/schools", json={"name": "ひまわり幼稚園"})
+        school = create_live_school(client, json={"name": "ひまわり幼稚園"})
         assert school.status_code == 201
         school_id = school.json()["id"]
 
@@ -1160,7 +1173,7 @@ def test_growth_record_is_reviewed_and_scheduled(tmp_path):
 def test_school_digest_time_only_changes_future_growth_record_notifications(tmp_path):
     app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/test.db", auth_mode="development"))
     with TestClient(app) as client:
-        school = client.post("/api/v1/schools", json={"name": "配信時刻設定園"})
+        school = create_live_school(client, json={"name": "配信時刻設定園"})
         assert school.status_code == 201
         school_id = school.json()["id"]
         assert school.json()["digest_time"] == "17:00"
@@ -1220,7 +1233,7 @@ def test_school_digest_time_only_changes_future_growth_record_notifications(tmp_
 def test_teacher_can_add_a_manual_record_to_the_existing_review_flow(tmp_path):
     app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/test.db", auth_mode="development"))
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "手入力記録園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "手入力記録園"}).json()["id"]
         teacher_id = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "手入力先生", "email": "manual-record@example.com"},
@@ -1262,7 +1275,7 @@ def test_teacher_can_add_a_manual_record_to_the_existing_review_flow(tmp_path):
 def test_injury_is_immediately_queued_after_approval(tmp_path):
     app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/test.db", auth_mode="development"))
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "あおぞら幼稚園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "あおぞら幼稚園"}).json()["id"]
         teacher_id = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "佐藤先生", "email": "sato@example.com"},
@@ -1301,7 +1314,7 @@ def test_injury_is_immediately_queued_after_approval(tmp_path):
 def test_failed_notification_can_be_requeued_by_a_school_admin(tmp_path):
     app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/test.db", auth_mode="development"))
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "再送テスト園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "再送テスト園"}).json()["id"]
         teacher_id = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "再送先生", "email": "retry@example.com"},
@@ -1349,7 +1362,7 @@ def test_failed_notification_can_be_requeued_by_a_school_admin(tmp_path):
 def test_pending_notification_can_be_cancelled_before_line_delivery(tmp_path):
     app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/test.db", auth_mode="development"))
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "取消テスト園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "取消テスト園"}).json()["id"]
         teacher_id = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "取消先生", "email": "cancel@example.com"},
@@ -1392,7 +1405,7 @@ def test_pending_notification_can_be_cancelled_before_line_delivery(tmp_path):
 def test_pending_notification_can_be_rescheduled_by_a_school_admin(tmp_path):
     app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/test.db", auth_mode="development"))
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "予定変更テスト園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "予定変更テスト園"}).json()["id"]
         teacher_id = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "予定変更先生", "email": "reschedule@example.com"},
@@ -1466,7 +1479,7 @@ def test_guardian_line_unlink_revokes_access_and_stops_pending_notifications(tmp
         )
     )
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "連携解除テスト園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "連携解除テスト園"}).json()["id"]
         teacher_id = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "解除先生", "email": "unlink@example.com"},
@@ -1534,7 +1547,7 @@ def test_line_delivery_worker_sends_pending_only_and_requires_explicit_retry(tmp
     monkeypatch.setattr("scripts.send_pending_line_notifications.push_text_message", fake_push_text_message)
 
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "LINEワーカー園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "LINEワーカー園"}).json()["id"]
         teacher_id = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "配信先生", "email": "worker@example.com"},
@@ -1667,8 +1680,8 @@ def test_supabase_user_links_to_pre_registered_teacher(tmp_path, monkeypatch):
             "supabase_publishable_key": "sb_publishable_test",
             "voiceprint_enabled": False,
         }
-        school = client.post(
-            "/api/v1/schools",
+        school = create_live_school(
+            client,
             headers=admin_headers,
             json={"name": "認証テスト園", "initial_admin_name": "管理者先生"},
         )
@@ -1832,7 +1845,9 @@ def test_supabase_user_links_to_pre_registered_teacher(tmp_path, monkeypatch):
             "/api/v1/audit-events", headers=admin_headers, params={"school_id": school_id}
         )
         assert audit_events.status_code == 200
-        assert [event["action"] for event in audit_events.json()] == ["record_approved", "record_approved"]
+        assert [event["action"] for event in audit_events.json()] == [
+            "record_approved", "record_approved", "school_trial_mode_changed",
+        ]
         assert all(event["actor_display_name"] == "管理者先生" for event in audit_events.json())
         serialized_audit_events = json.dumps(audit_events.json(), ensure_ascii=False)
         assert "担当先生の通知" not in serialized_audit_events
@@ -1884,7 +1899,7 @@ def test_bootstrap_admin_can_join_an_existing_school(tmp_path, monkeypatch):
     database_url = f"sqlite:///{tmp_path}/test.db"
     development_app = create_app(Settings(database_url=database_url, auth_mode="development"))
     with TestClient(development_app) as client:
-        school = client.post("/api/v1/schools", json={"name": "既存の接続テスト園"})
+        school = create_live_school(client, json={"name": "既存の接続テスト園"})
         assert school.status_code == 201
         school_id = school.json()["id"]
 
@@ -1924,7 +1939,7 @@ def test_bootstrap_admin_can_join_an_existing_school(tmp_path, monkeypatch):
 def test_edge_device_key_can_only_submit_anonymized_records(tmp_path):
     app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/test.db", auth_mode="development"))
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "端末認証テスト園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "端末認証テスト園"}).json()["id"]
         teacher_id = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "端末担当先生", "email": "edge-teacher@example.com"},
@@ -2047,7 +2062,7 @@ def test_cloud_audio_job_is_opt_in_and_deletes_raw_audio_after_processing(tmp_pa
             )
 
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "VRTテスト園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "VRTテスト園"}).json()["id"]
         teacher_id = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "VRT先生", "email": "vrt-teacher@example.com"},
@@ -2230,7 +2245,7 @@ def test_only_one_worker_can_claim_a_queued_cloud_audio_job(tmp_path):
         )
     )
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "同時処理テスト園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "同時処理テスト園"}).json()["id"]
         teacher_id = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "同時処理先生", "email": "atomic-worker@example.com"},
@@ -2271,7 +2286,7 @@ def test_a_stopped_workers_stale_cloud_audio_job_can_be_reclaimed(tmp_path):
     )
     started_at = datetime(2026, 8, 30, tzinfo=timezone.utc)
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "再開テスト園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "再開テスト園"}).json()["id"]
         teacher_id = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "再開先生", "email": "lease-worker@example.com"},
@@ -2376,7 +2391,7 @@ def test_line_link_invitation_binds_a_guardian_without_storing_message_text(tmp_
         )
     )
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "LINE紐付け園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "LINE紐付け園"}).json()["id"]
         child = client.post(
             "/api/v1/children",
             json={"school_id": school_id, "display_name": "はる"},
@@ -2439,7 +2454,7 @@ def test_active_line_link_invitations_expose_expiration_without_exposing_codes(t
         )
     )
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "招待状況テスト園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "招待状況テスト園"}).json()["id"]
         child = client.post(
             "/api/v1/children",
             json={"school_id": school_id, "display_name": "招待状況園児"},
@@ -2482,7 +2497,7 @@ def test_unlinked_guardian_notification_waits_then_resumes_after_line_link(tmp_p
         )
     )
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "保護者連携待ち園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "保護者連携待ち園"}).json()["id"]
         teacher_id = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "連携待ち先生", "email": "waiting-guardian@example.com"},
@@ -2547,7 +2562,7 @@ def test_waiting_guardian_notification_can_be_rescheduled_or_cancelled_before_li
         )
     )
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "連携待ち取消テスト園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "連携待ち取消テスト園"}).json()["id"]
         teacher_id = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "連携待ち取消先生", "email": "waiting-cancel@example.com"},
@@ -2634,7 +2649,7 @@ def test_delivered_record_syncs_to_notion_once_without_a_guardian_line_id(tmp_pa
         )
     )
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "Notion連携園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "Notion連携園"}).json()["id"]
         teacher_id = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "連携先生", "email": "notion@example.com"},
@@ -2890,7 +2905,7 @@ def test_cloud_audio_retry_uses_one_job_when_the_first_response_was_lost(tmp_pat
     )
     upload_id = "4e69d5d0-9788-4c50-9f4c-5921d4d0e934"
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "再送確認園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "再送確認園"}).json()["id"]
         teacher_id = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "再送先生", "email": "retry@example.com"},
@@ -3208,7 +3223,7 @@ def test_mcp_http_and_llm_endpoints_are_local_by_default():
 def test_record_cannot_be_approved_without_child(tmp_path):
     app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/test.db", auth_mode="development"))
     with TestClient(app) as client:
-        school_id = client.post("/api/v1/schools", json={"name": "園児選択確認園"}).json()["id"]
+        school_id = create_live_school(client, json={"name": "園児選択確認園"}).json()["id"]
         teacher_id = client.post(
             "/api/v1/teachers",
             json={"school_id": school_id, "name": "確認先生", "email": "review@example.com"},

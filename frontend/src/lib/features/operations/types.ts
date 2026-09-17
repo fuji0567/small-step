@@ -73,6 +73,7 @@ export type AuditEventAction =
   | 'teacher_restored'
   | 'teacher_role_changed'
   | 'school_digest_time_changed'
+  | 'school_trial_mode_changed'
   | 'manual_record_created'
   | 'record_history_exported'
   | 'audit_history_exported'

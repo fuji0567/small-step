@@ -16,6 +16,7 @@ from app.database import create_database_engine, create_session_factory, initial
 from app.line import LineMessagingError, build_notification_text, push_text_message
 from app.models import Notification, NotificationStatus, Record, RecordStatus, utc_now
 from app.worker_heartbeat import LINE_DELIVERY_WORKER_NAME, WorkerHeartbeatMonitor
+from app.trial import lock_school
 
 
 FAILURE_GUARDIAN_NOT_LINKED = "guardian_not_linked"
@@ -72,6 +73,19 @@ def send_due_notifications(
 
             for notification in notifications:
                 record = session.get(Record, notification.record_id)
+                if record is not None:
+                    school = lock_school(session, record.school_id)
+                    session.refresh(notification)
+                    session.refresh(record)
+                    if notification.status not in eligible_statuses:
+                        session.commit()
+                        continue
+                    if record.is_trial or school.trial_mode:
+                        record.is_trial = True
+                        notification.status = NotificationStatus.trial
+                        notification.recipient_line_user_id = None
+                        session.commit()
+                        continue
                 if record is None or not notification.recipient_line_user_id:
                     notification.status = NotificationStatus.failed
                     notification.last_failure_kind = FAILURE_GUARDIAN_NOT_LINKED

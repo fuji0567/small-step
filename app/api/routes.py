@@ -106,7 +106,10 @@ from app.schemas import (
     VoiceprintRead,
     VoiceprintSuggestionRead,
     ChildSuggestionRead,
+    SchoolTrialModeUpdate,
+    TeacherProfileRead,
 )
+from app.trial import lock_school, protect_trial_work
 from app.voiceprint import VOICEPRINT_ENROLLMENT_SAMPLE_COUNT, voiceprint_storage_keys
 from app.recorder_voiceprint import eligible_teacher_ids
 from app.worker_heartbeat import (
@@ -141,6 +144,7 @@ AUDIT_EVENT_LABELS = {
     AuditEventAction.teacher_restored: "先生アカウントの利用を再開",
     AuditEventAction.teacher_role_changed: "先生の権限を変更",
     AuditEventAction.school_digest_time_changed: "成長記録の配信時刻を変更",
+    AuditEventAction.school_trial_mode_changed: "試用モードを変更",
     AuditEventAction.manual_record_created: "手入力の記録を作成",
     AuditEventAction.record_history_exported: "記録履歴をCSV出力",
     AuditEventAction.audit_history_exported: "操作履歴をCSV出力",
@@ -184,7 +188,7 @@ def require_entity(db: Session, model: type, entity_id: str, label: str):
 def require_record_for_update(db: Session, record_id: str) -> Record:
     """Lock a record while changing its review state or assignee."""
 
-    record = db.scalar(select(Record).where(Record.id == record_id).with_for_update())
+    record = db.scalar(select(Record).where(Record.id == record_id).with_for_update().execution_options(populate_existing=True))
     if record is None:
         raise HTTPException(status_code=404, detail="Record not found")
     return record
@@ -515,6 +519,7 @@ def recorder_session_response(db: Session, recorder_session: RecordingSession) -
         id=recorder_session.id,
         client_session_id=recorder_session.client_session_id,
         status=recorder_session.status,
+        is_trial=recorder_session.is_trial,
         segments=[
             RecordingSegmentRead(
                 sequence=segment.sequence,
@@ -982,6 +987,7 @@ def create_school(
     school = School(
         **payload.model_dump(exclude={"initial_admin_name", "digest_time"}),
         digest_time=payload.digest_time or request.app.state.settings.digest_time,
+        trial_mode=True,
     )
     db.add(school)
     try:
@@ -1034,6 +1040,30 @@ def update_school_digest_time(
         target_type="school",
         current_teacher=current_teacher,
     )
+    db.commit()
+    db.refresh(school)
+    return school
+
+
+@router.patch("/schools/{school_id}/trial-mode", response_model=SchoolRead, tags=["schools"])
+def update_school_trial_mode(
+    school_id: str, payload: SchoolTrialModeUpdate,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> School:
+    require_entity(db, School, school_id, "School")
+    assert_school_access(current_teacher, school_id)
+    assert_school_admin(current_teacher)
+    if not payload.trial_mode and not payload.delivery_confirmed:
+        raise HTTPException(status_code=422, detail="Confirm guardian delivery before enabling production mode")
+    school = lock_school(db, school_id)
+    if school.trial_mode == payload.trial_mode:
+        return school
+    school.trial_mode = payload.trial_mode
+    if payload.trial_mode:
+        protect_trial_work(db, school_id)
+    add_audit_event(db, school_id=school_id, action=AuditEventAction.school_trial_mode_changed,
+                    target_type="school", current_teacher=current_teacher)
     db.commit()
     db.refresh(school)
     return school
@@ -1143,18 +1173,22 @@ def link_supabase_user_to_teacher(
     return teacher
 
 
-@router.get("/auth/me", response_model=TeacherRead, tags=["auth"])
+@router.get("/auth/me", response_model=TeacherProfileRead, tags=["auth"])
 def get_my_teacher_profile(
     current_teacher: CurrentTeacher = Depends(get_current_teacher),
     db: Session = Depends(get_db),
-) -> Teacher:
+) -> TeacherProfileRead:
+    def profile(teacher: Teacher) -> TeacherProfileRead:
+        school = require_entity(db, School, teacher.school_id, "School")
+        return TeacherProfileRead(**TeacherRead.model_validate(teacher).model_dump(), trial_mode=school.trial_mode)
+
     if current_teacher.teacher is None:
         if current_teacher.is_development:
             teacher = db.scalar(select(Teacher).order_by(Teacher.created_at, Teacher.id))
             if teacher is not None:
-                return teacher
+                return profile(teacher)
         raise HTTPException(status_code=404, detail="Development account has no teacher profile")
-    return current_teacher.teacher
+    return profile(current_teacher.teacher)
 
 
 @router.post("/teachers", response_model=TeacherRead, status_code=status.HTTP_201_CREATED, tags=["teachers"])
@@ -2031,6 +2065,7 @@ def get_guardian_archive(
         .join(Record, Notification.record_id == Record.id)
         .where(Record.school_id == archive_link.school_id)
         .where(Record.child_id == archive_link.child_id)
+        .where(Record.is_trial.is_(False))
         .where(Notification.status == NotificationStatus.sent)
         .where(Notification.sent_at.is_not(None))
         .order_by(Notification.sent_at.desc())
@@ -2082,6 +2117,7 @@ def create_record_candidate(
     record = Record(
         **{
             **payload.model_dump(exclude={"school_id", "teacher_id", "child_id"}),
+            "is_trial": lock_school(db, school_id).trial_mode,
             "school_id": school_id,
             "teacher_id": teacher_id,
             "child_id": child_id,
@@ -2129,6 +2165,7 @@ def create_manual_record_candidate(
 
     record = Record(
         school_id=school_id,
+        is_trial=lock_school(db, school_id).trial_mode,
         teacher_id=teacher_id,
         child_id=child_id,
         category=payload.category,
@@ -2165,6 +2202,7 @@ def create_edge_record_candidate(
     record = Record(
         **{
             **payload.model_dump(exclude={"child_id"}),
+            "is_trial": lock_school(db, device.school_id).trial_mode,
             "school_id": device.school_id,
             "teacher_id": device.teacher_id,
             "child_id": child_id,
@@ -2246,6 +2284,7 @@ def create_recorder_session(
 
     recorder_session = RecordingSession(
         school_id=owner.school_id,
+        is_trial=lock_school(db, owner.school_id).trial_mode,
         teacher_id=owner.id,
         client_session_id=client_session_id,
         status=RecordingSessionStatus.draft,
@@ -2639,6 +2678,7 @@ async def create_cloud_audio_job(
     now = utc_now()
     job = CloudAudioJob(
         school_id=device.school_id,
+        is_trial=lock_school(db, device.school_id).trial_mode,
         teacher_id=device.teacher_id,
         device_id=device.id,
         child_id=safe_child_id,
@@ -2934,6 +2974,9 @@ def approve_record(
     current_teacher: CurrentTeacher = Depends(get_current_teacher),
     db: Session = Depends(get_db),
 ) -> Record:
+    record = require_entity(db, Record, record_id, "Record")
+    assert_record_access(current_teacher, record)
+    school = lock_school(db, record.school_id)
     record = require_record_for_update(db, record_id)
     assert_record_access(current_teacher, record)
     if record.status != RecordStatus.pending_review:
@@ -2953,6 +2996,7 @@ def approve_record(
         record.conversation_prompt = payload.conversation_prompt
 
     record.status = RecordStatus.approved
+    record.is_trial = record.is_trial or school.trial_mode
     record.candidate_child_id = None
     record.reviewed_at = utc_now()
     child = require_entity(db, Child, record.child_id, "Child")
@@ -2967,14 +3011,15 @@ def approve_record(
         school = require_entity(db, School, record.school_id, "School")
         scheduled_for = get_next_digest_time(utc_now(), school.timezone or settings.timezone, school.digest_time)
 
-    recipient_line_user_id = child.guardian_line_user_id
+    recipient_line_user_id = None if record.is_trial else child.guardian_line_user_id
     notification = Notification(
         record_id=record.id,
         recipient_line_user_id=recipient_line_user_id,
         status=(
-            NotificationStatus.pending
-            if recipient_line_user_id
-            else NotificationStatus.waiting_guardian_link
+            NotificationStatus.trial if record.is_trial else (
+                NotificationStatus.pending if recipient_line_user_id
+                else NotificationStatus.waiting_guardian_link
+            )
         ),
         scheduled_for=scheduled_for,
     )
@@ -3028,7 +3073,9 @@ def list_ready_notifications(
     query = (
         select(Notification)
         .join(Record, Notification.record_id == Record.id)
+        .join(School, School.id == Record.school_id)
         .where(Notification.status == NotificationStatus.pending)
+        .where(Record.is_trial.is_(False), School.trial_mode.is_(False))
         .where(Notification.scheduled_for <= effective_now)
     )
     if not current_teacher.is_development:
@@ -3179,6 +3226,11 @@ def mark_notification_sent(
     assert_school_admin(current_teacher)
     record = require_entity(db, Record, notification.record_id, "Record")
     assert_school_access(current_teacher, record.school_id)
+    school = lock_school(db, record.school_id)
+    db.refresh(record)
+    db.refresh(notification)
+    if school.trial_mode or record.is_trial:
+        raise HTTPException(status_code=409, detail="Trial records cannot be delivered")
     if notification.status != NotificationStatus.pending:
         raise HTTPException(status_code=409, detail="Only pending notifications can be sent")
     now = utc_now()
@@ -3206,6 +3258,11 @@ def retry_failed_notification(
     assert_school_admin(current_teacher)
     record = require_entity(db, Record, notification.record_id, "Record")
     assert_school_access(current_teacher, record.school_id)
+    school = lock_school(db, record.school_id)
+    db.refresh(record)
+    db.refresh(notification)
+    if school.trial_mode or record.is_trial:
+        raise HTTPException(status_code=409, detail="Trial records cannot be retried")
     if notification.status != NotificationStatus.failed:
         raise HTTPException(status_code=409, detail="Only failed notifications can be retried")
     if not notification.recipient_line_user_id:
@@ -3273,6 +3330,11 @@ def reschedule_pending_notification(
     assert_school_admin(current_teacher)
     record = require_entity(db, Record, notification.record_id, "Record")
     assert_school_access(current_teacher, record.school_id)
+    school = lock_school(db, record.school_id)
+    db.refresh(record)
+    db.refresh(notification)
+    if school.trial_mode or record.is_trial:
+        raise HTTPException(status_code=409, detail="Trial records cannot be rescheduled")
     if notification.status not in {NotificationStatus.pending, NotificationStatus.waiting_guardian_link}:
         raise HTTPException(status_code=409, detail="Only queued notifications can be rescheduled")
 
@@ -3310,6 +3372,10 @@ def sync_delivered_record_to_notion(
     record = require_entity(db, Record, record_id, "Record")
     assert_record_access(current_teacher, record)
     assert_school_admin(current_teacher)
+    school = lock_school(db, record.school_id)
+    db.refresh(record)
+    if school.trial_mode or record.is_trial:
+        raise HTTPException(status_code=409, detail="Trial records cannot be shared to Notion")
     if record.status != RecordStatus.dispatched:
         raise HTTPException(status_code=409, detail="Only delivered records can be synced to Notion")
 

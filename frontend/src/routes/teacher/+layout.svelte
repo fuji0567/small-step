@@ -66,6 +66,7 @@
     const pathChanged = previousPath !== null && previousPath !== navigatedPath;
     previousPath = navigatedPath;
     if (pathChanged && shell.phase === 'ready' && shell.schools.schoolId) {
+      void shell.reloadSchools().catch(() => undefined);
       void shell.navigationBadges.refresh(shell.schools.schoolId);
     }
     globalThis.requestAnimationFrame(() => {
@@ -138,6 +139,13 @@
     {headerActions}
     {toolbar}
   >
+    {#if shell.schools.selectedSchool?.trial_mode}
+      <Notice tone="warning" title="試用中（保護者への配信なし）">
+        <p>
+          録音から承認まで試せます。試用記録は本番へ切り替えても保護者には配信されません。
+        </p>
+      </Notice>
+    {/if}
     {#if redirectedFromAdmin}
       <Notice tone="warning" title="権限がありません">
         <p>先生管理者専用の画面からホームへ移動しました。</p>

@@ -1,7 +1,12 @@
 import type { RecordCategory } from '$lib/api';
 
 export type NotificationStatus =
-  'pending' | 'waiting_guardian_link' | 'sent' | 'failed' | 'cancelled';
+  | 'pending'
+  | 'waiting_guardian_link'
+  | 'sent'
+  | 'failed'
+  | 'cancelled'
+  | 'trial';
 
 export interface NotificationOverview {
   id: string;

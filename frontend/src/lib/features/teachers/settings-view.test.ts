@@ -26,6 +26,40 @@ const json = (value: unknown): Response =>
 afterEach(cleanup);
 
 describe('SchoolSettingsView', () => {
+  it('本番配信はチェックと確認を経て有効になり、キャンセルでは変更しない', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      json({ ...school, trial_mode: false })
+    );
+    const onReloadSchools = vi.fn();
+    render(SchoolSettingsView, {
+      api: new ApiClient({ fetch: fetchMock }),
+      appController: new AppController(),
+      school: { ...school, trial_mode: true },
+      isSchoolAdmin: true,
+      onReloadSchools
+    });
+    const switchButton = screen.getByRole('button', {
+      name: '本番モードへ切り替え'
+    });
+    expect(switchButton).toBeDisabled();
+    await fireEvent.click(screen.getByRole('checkbox'));
+    expect(switchButton).toBeEnabled();
+    await fireEvent.click(switchButton);
+    await fireEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
+    expect(fetchMock).not.toHaveBeenCalled();
+    await fireEvent.click(switchButton);
+    await fireEvent.click(
+      screen.getByRole('button', { name: '配信を有効にする' })
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/schools/school-1/trial-mode');
+    expect(JSON.parse(String(init?.body))).toEqual({
+      trial_mode: false,
+      delivery_confirmed: true
+    });
+    expect(onReloadSchools).toHaveBeenCalledOnce();
+  });
   it('非管理者には配信時刻の入力を表示しない', async () => {
     render(SchoolSettingsView, {
       api: new ApiClient(),

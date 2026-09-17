@@ -9,6 +9,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.cloud_audio import CloudAudioJobStorage
+from app.trial import lock_school
 from app.edge_audio import EdgeAudioAnalysis, EdgeAudioCandidate, EdgeAudioError, EdgeAudioProcessor
 from app.models import (
     Child,
@@ -122,8 +123,11 @@ def _create_record_from_cloud_job(
         child = db.get(Child, job.child_id)
         if child is None or child.school_id != job.school_id or not child.is_active:
             raise EdgeAudioError("The selected child is no longer available")
+    school = lock_school(db, job.school_id)
+    db.refresh(job, attribute_names=["is_trial"])
     return Record(
         school_id=job.school_id,
+        is_trial=job.is_trial or school.trial_mode,
         teacher_id=job.teacher_id,
         child_id=job.child_id,
         category=candidate.category,
@@ -147,6 +151,7 @@ def _recent_approved_context(*, db: Session, job: CloudAudioJob) -> str | None:
             .where(
                 Record.child_id == job.child_id,
                 Record.school_id == job.school_id,
+                Record.is_trial.is_(False),
                 Record.status.in_((RecordStatus.approved, RecordStatus.dispatched)),
                 Record.occurred_at < job.queued_at,
             )
@@ -182,6 +187,7 @@ def _find_recent_duplicate_record(
     db: Session,
     job: CloudAudioJob,
     candidate: EdgeAudioCandidate,
+    is_trial: bool = False,
 ) -> Record | None:
     """Reuse a near-identical pending record from an adjacent audio chunk."""
 
@@ -205,6 +211,7 @@ def _find_recent_duplicate_record(
             CloudAudioJob.queued_at >= job.queued_at - DUPLICATE_WINDOW,
             CloudAudioJob.queued_at < job.queued_at,
             Record.school_id == job.school_id,
+            Record.is_trial == is_trial,
             Record.child_id == job.child_id,
             Record.category == candidate.category,
             Record.status == RecordStatus.pending_review,
@@ -271,7 +278,9 @@ def process_next_cloud_audio_job(
         record_id = None
         if candidate.recordable:
             record = _create_record_from_cloud_job(db=db, job=job, candidate=candidate)
-            duplicate = _find_recent_duplicate_record(db=db, job=job, candidate=candidate)
+            duplicate = _find_recent_duplicate_record(
+                db=db, job=job, candidate=candidate, is_trial=record.is_trial,
+            )
             if duplicate is not None:
                 record_id = duplicate.id
             else:

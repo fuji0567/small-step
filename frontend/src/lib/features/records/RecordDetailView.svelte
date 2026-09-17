@@ -334,6 +334,13 @@
       <p>園を選択してから日誌を開いてください。</p>
     </Notice>
   {:else if record}
+    {#if record.is_trial}
+      <Notice tone="warning" title="試用記録（保護者への配信なし）"
+        ><p>
+          承認してもLINEには送信しません。本番へ切り替えてもこの記録は配信されません。
+        </p></Notice
+      >
+    {/if}
     {#if !isSchoolAdmin}
       <Notice tone="info" title="自分が担当する日誌です">
         <p>一般の先生には、自分に割り当てられた日誌だけを表示します。</p>
@@ -531,7 +538,9 @@
           <div class="records-actions">
             <Button
               onclick={() => (confirmation = 'approve')}
-              guide="編集内容を保存し、保護者へのLINE通知を準備します。"
+              guide={record.is_trial
+                ? '編集内容を保存します。試用記録は配信しません。'
+                : '編集内容を保存し、保護者へのLINE通知を準備します。'}
               disabled={saving ||
                 assigning ||
                 (needsChildConfirmation && (!childId || !childConfirmed))}
@@ -557,7 +566,9 @@
     : '日誌を承認しますか？'}
   description={confirmation === 'reject'
     ? 'この日誌はレビュー待ちの一覧から外れます。'
-    : '編集内容を保存し、保護者への通知を準備します。'}
+    : record?.is_trial
+      ? '編集内容を保存します。試用記録のため、保護者への配信は行いません。'
+      : '編集内容を保存し、保護者への通知を準備します。'}
   confirmLabel={confirmation === 'reject' ? '却下する' : '承認する'}
   tone={confirmation === 'reject' ? 'danger' : 'default'}
   busy={saving}

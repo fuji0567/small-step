@@ -11,6 +11,38 @@ from app.database_migrations import (
 )
 
 
+def test_trial_migration_preserves_existing_production_school(tmp_path):
+    database_url = f"sqlite:///{tmp_path}/trial-upgrade.db"
+    config = build_alembic_config(database_url)
+    command.upgrade(config, "0026_recorder_child_suggestions")
+    engine = create_database_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(
+                "INSERT INTO schools (id, name, timezone, digest_time, created_at) "
+                "VALUES ('existing', 'Existing school', 'Asia/Tokyo', '17:00', CURRENT_TIMESTAMP)"
+            ))
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT trial_mode FROM schools WHERE id = 'existing'")) == 0
+    finally:
+        engine.dispose()
+
+
+def test_trial_postgresql_migration_adds_safe_defaults_without_access_changes():
+    import io
+
+    config = build_alembic_config("postgresql+psycopg://unused:unused@localhost/unused")
+    config.output_buffer = output = io.StringIO()
+    command.upgrade(config, "0026_recorder_child_suggestions:0027_school_trial_mode", sql=True)
+    sql = output.getvalue()
+    assert "trial_mode BOOLEAN DEFAULT false NOT NULL" in sql
+    assert sql.count("is_trial BOOLEAN DEFAULT false NOT NULL") == 3
+    assert "notificationstatus ADD VALUE IF NOT EXISTS 'trial'" in sql
+    assert "school_trial_mode_changed" in sql
+    assert "GRANT" not in sql and "DISABLE ROW LEVEL SECURITY" not in sql
+
+
 def test_revision_identifiers_fit_the_postgresql_version_column():
     script = ScriptDirectory.from_config(build_alembic_config("sqlite://"))
 
@@ -93,7 +125,7 @@ def test_initial_migration_creates_the_current_schema(tmp_path):
     assert "audio_processing_incomplete" in record_columns
     assert {"voiceprint_candidate_teacher_id", "voiceprint_matching_checked"} <= record_columns
     assert "candidate_child_id" in record_columns
-    assert migration_revision(database_url) == "0026_recorder_child_suggestions"
+    assert migration_revision(database_url) == "0027_school_trial_mode"
 
 
 def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_path):
@@ -107,7 +139,7 @@ def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_pat
     message = prepare_database(database_url)
 
     assert "登録しました" in message
-    assert migration_revision(database_url) == "0026_recorder_child_suggestions"
+    assert migration_revision(database_url) == "0027_school_trial_mode"
 
 
 def test_both_0022_branches_upgrade_to_the_merged_head(tmp_path):
@@ -129,7 +161,7 @@ def test_both_0022_branches_upgrade_to_the_merged_head(tmp_path):
             }
         finally:
             engine.dispose()
-        assert migration_revision(database_url) == "0026_recorder_child_suggestions"
+        assert migration_revision(database_url) == "0027_school_trial_mode"
 
 
 def test_recorder_worker_migration_preserves_existing_session_metadata(tmp_path):

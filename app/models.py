@@ -36,6 +36,7 @@ class NotificationStatus(str, enum.Enum):
     sent = "sent"
     failed = "failed"
     cancelled = "cancelled"
+    trial = "trial"
 
 
 class TeacherRole(str, enum.Enum):
@@ -116,6 +117,7 @@ class AuditEventAction(str, enum.Enum):
     teacher_restored = "teacher_restored"
     teacher_role_changed = "teacher_role_changed"
     school_digest_time_changed = "school_digest_time_changed"
+    school_trial_mode_changed = "school_trial_mode_changed"
     manual_record_created = "manual_record_created"
     record_history_exported = "record_history_exported"
     audit_history_exported = "audit_history_exported"
@@ -132,6 +134,7 @@ class School(Base):
     name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     timezone: Mapped[str] = mapped_column(String(64), default="Asia/Tokyo")
     digest_time: Mapped[str] = mapped_column(String(5), default="17:00")
+    trial_mode: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
@@ -253,6 +256,7 @@ class CloudAudioJob(Base):
     child_id: Mapped[str | None] = mapped_column(ForeignKey("children.id"), nullable=True, index=True)
     # A random edge-only value prevents duplicate jobs after an uncertain network response.
     edge_upload_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    is_trial: Mapped[bool] = mapped_column(Boolean, default=False)
     storage_key: Mapped[str] = mapped_column(String(80), unique=True)
     status: Mapped[CloudAudioJobStatus] = mapped_column(
         Enum(CloudAudioJobStatus), default=CloudAudioJobStatus.queued, index=True
@@ -358,6 +362,7 @@ class Record(Base):
     voiceprint_candidate_teacher_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     voiceprint_matching_checked: Mapped[bool] = mapped_column(Boolean, default=False)
     candidate_child_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    is_trial: Mapped[bool] = mapped_column(Boolean, default=False)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
@@ -383,6 +388,7 @@ class RecordingSession(Base):
     school_id: Mapped[str] = mapped_column(ForeignKey("schools.id"), index=True)
     teacher_id: Mapped[str] = mapped_column(ForeignKey("teachers.id"), index=True)
     client_session_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    is_trial: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[RecordingSessionStatus] = mapped_column(
         Enum(RecordingSessionStatus), default=RecordingSessionStatus.draft, index=True
     )

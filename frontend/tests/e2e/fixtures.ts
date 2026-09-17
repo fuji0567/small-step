@@ -50,8 +50,13 @@ function json(route: Route, value: unknown, status = 200): Promise<void> {
 
 export async function mockApi(
   page: Page,
-  options: { guardian?: GuardianResponse; recorderChild?: boolean } = {}
+  options: {
+    guardian?: GuardianResponse;
+    recorderChild?: boolean;
+    trialSchool?: boolean;
+  } = {}
 ): Promise<void> {
+  let trialMode = options.trialSchool ?? false;
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -65,7 +70,11 @@ export async function mockApi(
         });
         return;
       case '/api/v1/schools':
-        await json(route, [school]);
+        await json(route, [{ ...school, trial_mode: trialMode }]);
+        return;
+      case '/api/v1/schools/school-1/trial-mode':
+        trialMode = request.postDataJSON().trial_mode;
+        await json(route, { ...school, trial_mode: trialMode });
         return;
       case '/api/v1/records':
         await json(route, [record]);

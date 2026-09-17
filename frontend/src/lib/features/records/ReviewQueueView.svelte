@@ -132,6 +132,10 @@
                   : '園児未選択'}
               </h3>
               <StatusBadge label={categoryLabel(record.category)} tone="info" />
+              {#if record.is_trial}<StatusBadge
+                  label="試用記録（配信なし）"
+                  tone="neutral"
+                />{/if}
             </div>
             <p class="records-meta">
               発生: {formatDateTime(record.occurred_at)}・信頼度

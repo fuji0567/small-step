@@ -808,6 +808,9 @@
       <h1>録音</h1>
     </div>
     {#if teacher}<p class="teacher">{teacher.name}</p>{/if}
+    {#if teacher?.trial_mode}<p role="status">
+        試用中（保護者への配信なし）
+      </p>{/if}
   </div>
 </header>
 

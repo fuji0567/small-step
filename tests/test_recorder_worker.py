@@ -160,6 +160,33 @@ class Processor:
         return event(f"{previous.summary}; {following.summary}")
 
 
+@pytest.mark.parametrize("initial_trial", [False, True])
+def test_trial_source_stays_trial_when_school_returns_to_production(runtime, initial_trial):
+    from app.trial import lock_school, protect_trial_work
+
+    factory, storage, (school_id, _) = runtime
+    session_id = enqueue(runtime, count=1)
+    with factory() as db:
+        db.get(RecordingSession, session_id).is_trial = initial_trial
+        db.commit()
+    def change_mode(_sequence):
+        with factory() as db:
+            school = lock_school(db, school_id)
+            school.trial_mode = True
+            protect_trial_work(db, school_id)
+            db.commit()
+            school.trial_mode = False
+            db.commit()
+    with factory() as db:
+        result = process_next_recorder_session(
+            db=db, storage=storage,
+            processor=Processor(db, hook=change_mode if not initial_trial else None),
+        )
+        assert result.status == RecordingSessionStatus.completed
+        assert db.get(Record, result.record_id).is_trial is True
+        assert list(db.scalars(select(Notification))) == []
+
+
 @pytest.mark.parametrize("partial_failure", [False, True])
 def test_worker_saves_only_child_advice_without_selecting_or_notifying(runtime, partial_failure):
     from app.models import Child

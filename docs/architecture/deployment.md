@@ -1,5 +1,9 @@
 # デプロイ・運用
 
+園別試用モードには `0027_school_trial_mode` とAPI・GPU・LINEワーカーの同時更新が必要です。
+旧ワーカーを動かしたまま移行しないでください。停止順、バックアップ、再起動、切り替え確認は
+[園別試用モード導入手順](../school-trial-runbook.md)を参照します。
+
 録音の園児候補は `RECORDER_CHILD_MATCHING_ENABLED=false` が既定です。有効化には録音有効化、
 `0026_recorder_child_suggestions` のDB移行、API・GPUワーカーの更新が必要です。
 移行中は録音を停止し、処理中セッションの完了を確認してください。手順は[録音導入手順](../recorder-vrt-runbook.md#任意の園児候補)を参照します。
