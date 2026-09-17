@@ -34,7 +34,7 @@ from app.speaker_diarization import (
 )
 
 
-SUPPORTED_AUDIO_SUFFIXES = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".webm"}
+SUPPORTED_AUDIO_SUFFIXES = {".wav", ".mp3", ".m4a", ".mp4", ".aac", ".ogg", ".flac", ".webm"}
 EMAIL_PATTERN = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
 PHONE_PATTERN = re.compile(r"(?<!\d)(?:\+81[- ]?)?(?:0\d{1,4}[- ]?){2}\d{3,4}(?!\d)")
 CANDIDATE_FORMAT = {

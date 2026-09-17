@@ -19,7 +19,7 @@ from app.models import (
     Notification, Record, RecordCategory, RecordStatus, RecordingSegment,
     RecordingSession, RecordingSessionStatus, School, Teacher, utc_now,
 )
-from app.recorder import RecorderStorage, RecorderStorageError
+from app.recorder import SUPPORTED_MEDIA_TYPES, RecorderStorage, RecorderStorageError
 from app.recorder_worker import (
     RecorderMaintenance, claim_next_recorder_session, cleanup_recorder_sessions,
     process_next_recorder_session,
@@ -28,6 +28,18 @@ from app.recorder_worker import (
 
 def event(summary="Anonymous growth", category=RecordCategory.growth):
     return EdgeAudioCandidate(recordable=True, category=category, confidence=0.9, summary=summary)
+
+
+@pytest.mark.parametrize("media_type", list(SUPPORTED_MEDIA_TYPES))
+def test_accepted_recorder_formats_pass_analysis_path_validation(tmp_path, media_type):
+    from app.edge_audio import resolve_audio_path
+
+    path = tmp_path / ("sample" + SUPPORTED_MEDIA_TYPES[media_type])
+    path.touch()
+    assert resolve_audio_path(
+        audio_path=str(path), inbox_dir=str(tmp_path), max_file_bytes=1024,
+        require_inbox=False,
+    ) == path.resolve()
 
 
 def test_failure_diagnostics_do_not_include_private_exception_content(capsys):
