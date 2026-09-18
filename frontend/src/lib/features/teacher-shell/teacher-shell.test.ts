@@ -21,6 +21,105 @@ function school(id = 'school-1') {
 }
 
 describe('TeacherShellState', () => {
+  it('招待URLでは既存セッションを消し、パスワード設定後にだけ本人を紐付ける', async () => {
+    const storage = {
+      getItem: vi.fn(() => 'old-admin-token'),
+      setItem: vi.fn(),
+      removeItem: vi.fn()
+    };
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/auth/config'))
+        return jsonResponse({
+          auth_mode: 'supabase',
+          supabase_url: 'https://example.supabase.co',
+          supabase_publishable_key: 'public-key'
+        });
+      if (
+        url === 'https://example.supabase.co/auth/v1/user' &&
+        init?.method === 'PUT'
+      )
+        return jsonResponse({});
+      if (url.endsWith('/auth/me')) return jsonResponse({}, 403);
+      if (url.endsWith('/auth/link-teacher'))
+        return jsonResponse({
+          id: 'invited',
+          school_id: 'school-1',
+          role: 'teacher'
+        });
+      return jsonResponse([school()]);
+    });
+    const shell = new TeacherShellState(fetchMock);
+    await shell.initialize(createTeacherSession(storage), 'invite-jwt');
+    expect(shell.phase).toBe('password-setup');
+    expect(storage.removeItem).toHaveBeenCalled();
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await shell.completeInvitation('my-password');
+    expect(shell.phase).toBe('ready');
+    expect(shell.isSchoolAdmin).toBe(false);
+    expect(storage.setItem).toHaveBeenCalledWith(
+      'small-step.access-token',
+      'invite-jwt'
+    );
+  });
+
+  it('設定失敗では招待トークンを保存せず、再試行できる', async () => {
+    const storage = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(),
+      removeItem: vi.fn()
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          auth_mode: 'supabase',
+          supabase_url: 'https://example.supabase.co',
+          supabase_publishable_key: 'public-key'
+        })
+      )
+      .mockResolvedValueOnce(jsonResponse({ error: 'hidden' }, 401));
+    const shell = new TeacherShellState(fetchMock);
+    await shell.initialize(createTeacherSession(storage), 'invite-jwt');
+    await shell.completeInvitation('my-password');
+    expect(shell.phase).toBe('password-setup');
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(shell.errorMessage).toContain('招待の期限');
+  });
+
+  it('設定の通信中にログアウトした場合、遅い成功応答でログインを復活させない', async () => {
+    const storage = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(),
+      removeItem: vi.fn()
+    };
+    let finish!: (value: Response) => void;
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          auth_mode: 'supabase',
+          supabase_url: 'https://example.supabase.co',
+          supabase_publishable_key: 'public-key'
+        })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          })
+      );
+    const shell = new TeacherShellState(fetchMock);
+    await shell.initialize(createTeacherSession(storage), 'invite-jwt');
+    const pending = shell.completeInvitation('my-password');
+    shell.logout();
+    finish(jsonResponse({}));
+    await pending;
+    expect(shell.phase).toBe('login');
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
   it('developmentではログインなしで管理者用シェルを開く', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

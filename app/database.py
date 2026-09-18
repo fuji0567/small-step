@@ -34,6 +34,8 @@ def initialise_database(engine: Engine) -> None:
     Base.metadata.create_all(bind=engine)
     with engine.begin() as connection:
         for table, name, definition in (
+            ("teachers", "invitation_attempted_at", "DATETIME"),
+            ("teachers", "invitation_sent_at", "DATETIME"),
             ("schools", "trial_mode", "BOOLEAN NOT NULL DEFAULT 0"),
             ("records", "is_trial", "BOOLEAN NOT NULL DEFAULT 0"),
             ("recording_sessions", "is_trial", "BOOLEAN NOT NULL DEFAULT 0"),

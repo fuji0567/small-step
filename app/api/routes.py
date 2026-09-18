@@ -111,6 +111,7 @@ from app.schemas import (
     TeacherProfileRead,
 )
 from app.trial import lock_school, protect_trial_work
+from app.teacher_invitations import TeacherInvitationError, send_teacher_invitation
 from app.voiceprint import VOICEPRINT_ENROLLMENT_SAMPLE_COUNT, voiceprint_storage_keys
 from app.recorder_voiceprint import eligible_teacher_ids
 from app.worker_heartbeat import (
@@ -1083,6 +1084,7 @@ def get_auth_client_config(request: Request) -> AuthClientConfig:
         supabase_publishable_key=settings.supabase_publishable_key,
         voiceprint_enabled=settings.voiceprint_enabled,
         recorder_demo_trace_enabled=settings.recorder_demo_trace_enabled,
+        teacher_invitations_enabled=settings.teacher_invitations_enabled,
     )
 
 
@@ -1236,6 +1238,64 @@ def list_teachers(
             .order_by(Teacher.is_active.desc(), Teacher.name)
         )
     )
+
+
+@router.post("/teachers/{teacher_id}/invite", response_model=TeacherRead, tags=["teachers"])
+def invite_teacher(
+    teacher_id: UUID,
+    request: Request,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> Teacher:
+    teacher = require_entity(db, Teacher, str(teacher_id), "Teacher")
+    assert_school_access(current_teacher, teacher.school_id)
+    assert_school_admin(current_teacher)
+    settings = request.app.state.settings
+    if current_teacher.is_development or not settings.teacher_invitations_enabled:
+        raise HTTPException(status_code=503, detail="Teacher invitations are not configured")
+    if not teacher.is_active or teacher.is_auth_linked or not teacher.email:
+        raise HTTPException(status_code=409, detail="Only active, unlinked teachers can be invited")
+    now = utc_now()
+    # Persist the reservation before contacting the mail provider. Parallel requests
+    # and API restarts cannot bypass the one-minute cooldown, even after a timeout.
+    claimed = db.execute(
+        update(Teacher)
+        .where(
+            Teacher.id == teacher.id,
+            Teacher.is_active.is_(True),
+            Teacher.auth_user_id.is_(None),
+            Teacher.invitation_attempted_at.is_(None)
+            | (Teacher.invitation_attempted_at <= now - timedelta(seconds=60)),
+        )
+        .values(invitation_attempted_at=now)
+        .execution_options(synchronize_session=False)
+    )
+    if claimed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(
+            status_code=429,
+            detail="Wait before sending another invitation",
+            headers={"Retry-After": "60"},
+        )
+    db.commit()
+    db.refresh(teacher)
+    try:
+        send_teacher_invitation(settings, teacher.email)
+    except TeacherInvitationError as error:
+        code = {"rate_limited": 429, "account_exists": 409}.get(error.kind, 503)
+        detail = {
+            "account_exists": "A login account already exists; use its password to sign in",
+            "rate_limited": "Invitation email sending is rate limited",
+        }.get(error.kind, "Invitation email could not be sent; teacher registration is retained")
+        raise HTTPException(
+            status_code=code,
+            detail=detail,
+            headers={"Retry-After": "60"} if code == 429 else None,
+        ) from None
+    teacher.invitation_sent_at = utc_now()
+    db.commit()
+    db.refresh(teacher)
+    return teacher
 
 
 @router.patch("/teachers/{teacher_id}/role", response_model=TeacherRead, tags=["teachers"])

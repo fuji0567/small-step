@@ -28,6 +28,53 @@ function passwordEndpoint(supabaseUrl: string): string {
   return base.toString();
 }
 
+export function takeInvitationToken(): string | null {
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  if (params.has('access_token') || params.has('error')) {
+    window.history.replaceState(null, '', window.location.pathname);
+  }
+  return params.get('type') === 'invite' ? params.get('access_token') : null;
+}
+
+export async function setInvitedPassword(options: {
+  token: string;
+  password: string;
+  supabaseUrl: string;
+  publishableKey: string;
+  fetch: typeof fetch;
+}): Promise<void> {
+  const url = new URL(passwordEndpoint(options.supabaseUrl));
+  url.pathname = url.pathname.replace(/\/token$/, '/user');
+  url.search = '';
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(
+    () => controller.abort(),
+    AUTH_TIMEOUT_MS
+  );
+  try {
+    const response = await options.fetch(url.toString(), {
+      method: 'PUT',
+      headers: {
+        apikey: options.publishableKey,
+        Authorization: `Bearer ${options.token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ password: options.password }),
+      signal: controller.signal
+    });
+    if (!response.ok)
+      throw new Error(
+        'パスワードを設定できませんでした。招待の期限やパスワードの条件を確認してください。'
+      );
+  } catch {
+    throw new Error(
+      'パスワードを設定できませんでした。招待の期限・通信・パスワードの条件を確認してください。'
+    );
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
+}
+
 export async function signInWithSupabasePassword({
   email,
   password,

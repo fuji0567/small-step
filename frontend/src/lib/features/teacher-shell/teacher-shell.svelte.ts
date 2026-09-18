@@ -7,7 +7,7 @@ import {
   type SchoolSummary
 } from '$lib/state';
 
-import { signInWithSupabasePassword } from './auth';
+import { signInWithSupabasePassword, setInvitedPassword } from './auth';
 import { NavigationBadgeState } from './navigation-badges.svelte';
 import type {
   AuthClientConfig,
@@ -57,6 +57,7 @@ export class TeacherShellState {
   #errorMessage = $state<string | null>(null);
   #bootstrapSchools = $state.raw<readonly SchoolSummary[]>([]);
   #session: SessionTokenStore | null = null;
+  #invitationToken: string | null = null;
   readonly #fetch: typeof fetch;
   readonly api: ApiClient;
 
@@ -104,6 +105,10 @@ export class TeacherShellState {
     return this.#config?.voiceprint_enabled === true;
   }
 
+  get invitationsEnabled(): boolean {
+    return this.#config?.teacher_invitations_enabled === true;
+  }
+
   get snapshot(): TeacherShellSnapshot {
     return {
       phase: this.#phase,
@@ -114,7 +119,10 @@ export class TeacherShellState {
     };
   }
 
-  async initialize(session: SessionTokenStore | null): Promise<void> {
+  async initialize(
+    session: SessionTokenStore | null,
+    invitationToken: string | null = null
+  ): Promise<void> {
     this.#session = session;
     this.#phase = 'initializing';
     this.#errorMessage = null;
@@ -122,6 +130,13 @@ export class TeacherShellState {
       this.#config = await this.#requireJson<AuthClientConfig>('auth/config');
       if (this.#config.auth_mode === 'development') {
         await this.#openApp(null);
+        return;
+      }
+
+      if (invitationToken) {
+        this.#clearAuthentication();
+        this.#invitationToken = invitationToken;
+        this.#phase = 'password-setup';
         return;
       }
 
@@ -190,6 +205,40 @@ export class TeacherShellState {
     }
   }
 
+  async completeInvitation(password: string): Promise<void> {
+    const token = this.#invitationToken;
+    const config = this.#config;
+    if (!token || !config?.supabase_url || !config.supabase_publishable_key)
+      return;
+    this.#errorMessage = null;
+    try {
+      await setInvitedPassword({
+        token,
+        password,
+        supabaseUrl: config.supabase_url,
+        publishableKey: config.supabase_publishable_key,
+        fetch: this.#fetch
+      });
+    } catch (error) {
+      if (this.#invitationToken !== token) return;
+      this.#errorMessage = this.#messageFrom(error);
+      return;
+    }
+    if (this.#invitationToken !== token) return;
+    this.#invitationToken = null;
+    this.#accessToken = token;
+    this.#session?.write(token);
+    this.#phase = 'initializing';
+    try {
+      await this.#establishTeacherSession();
+    } catch {
+      this.#clearAuthentication();
+      this.#errorMessage =
+        'パスワードは設定しました。登録したメールアドレスでログインし直してください。';
+      this.#phase = 'login';
+    }
+  }
+
   async reloadSchools(): Promise<void> {
     await this.#loadSchools();
   }
@@ -255,6 +304,7 @@ export class TeacherShellState {
   }
 
   #clearAuthentication(): void {
+    this.#invitationToken = null;
     this.#session?.clear();
     this.#accessToken = null;
     this.#teacher = null;

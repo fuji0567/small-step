@@ -149,6 +149,8 @@ class Teacher(Base):
     role: Mapped[TeacherRole] = mapped_column(Enum(TeacherRole), default=TeacherRole.teacher)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    invitation_attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    invitation_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     @property

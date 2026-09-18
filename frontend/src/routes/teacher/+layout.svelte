@@ -14,6 +14,7 @@
     teacherNavItems,
     teacherPageTitle
   } from '$lib/features/teacher-shell';
+  import { takeInvitationToken } from '$lib/features/teacher-shell/auth';
   import { onMount, type Snippet } from 'svelte';
 
   let { children }: { children: Snippet } = $props();
@@ -36,8 +37,9 @@
   );
 
   onMount(() => {
+    const invitationToken = takeInvitationToken();
     session = initializeTeacherSession();
-    void shell.initialize(session);
+    void shell.initialize(session, invitationToken);
   });
 
   $effect(() => {
@@ -87,7 +89,7 @@
 
 {#if shell.phase === 'initializing'}
   <Loading mode="fixed" label="先生用画面を準備しています" />
-{:else if shell.phase === 'login'}
+{:else if shell.phase === 'login' || shell.phase === 'password-setup'}
   <LoginPanel {shell} />
 {:else if shell.phase === 'bootstrap'}
   <BootstrapPanel {shell} />

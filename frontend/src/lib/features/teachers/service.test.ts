@@ -9,6 +9,16 @@ const response = (value: unknown): Response =>
   });
 
 describe('TeachersService', () => {
+  it('招待は登録済み先生のIDだけを送り、メールやredirectを指定しない', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response({}));
+    const service = new TeachersService(new ApiClient({ fetch: fetchMock }));
+    await service.invite('teacher/id');
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/v1/teachers/teacher%2Fid/invite'
+    );
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    expect(fetchMock.mock.calls[0][1]?.body).toBeUndefined();
+  });
   it('先生は常に通常権限で事前登録する', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

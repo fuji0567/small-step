@@ -4,14 +4,16 @@ from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlparse
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Runtime settings loaded from environment variables or a local .env file."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore", hide_input_in_errors=True
+    )
 
     app_env: Literal["development", "production"] = "development"
     database_url: str = "sqlite:///./data/otayori.db"
@@ -19,6 +21,35 @@ class Settings(BaseSettings):
     supabase_url: str | None = None
     supabase_publishable_key: str | None = None
     supabase_bootstrap_admin_emails: str = ""
+    supabase_secret_key: SecretStr | None = Field(default=None, exclude=True)
+    teacher_invitations_enabled: bool = False
+    teacher_invitation_redirect_url: str | None = None
+
+    @model_validator(mode="after")
+    def validate_teacher_invitations(self) -> "Settings":
+        if not self.teacher_invitations_enabled:
+            return self
+        if (
+            self.auth_mode != "supabase"
+            or not self.supabase_secret_key
+            or not self.supabase_secret_key.get_secret_value().strip()
+        ):
+            raise ValueError("Teacher invitations require Supabase authentication and a server secret key")
+        key = self.supabase_secret_key.get_secret_value()
+        if key == self.supabase_publishable_key or key.startswith("sb_publishable_"):
+            raise ValueError("Teacher invitations require a server secret key, not a publishable key")
+        for value, redirect in (
+            (self.supabase_url, False), (self.teacher_invitation_redirect_url, True)
+        ):
+            url = urlparse(value or "")
+            if (
+                url.scheme != "https" or not url.hostname or url.username or url.password
+                or url.query or url.fragment
+                or (url.path != "/teacher/" if redirect else url.path not in ("", "/"))
+            ):
+                raise ValueError("Teacher invitations require HTTPS Supabase and /teacher/ redirect URLs")
+        return self
+
     digest_time: str = Field(default="17:00", pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
     timezone: str = "Asia/Tokyo"
     line_channel_secret: str | None = None

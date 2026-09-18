@@ -125,7 +125,7 @@ def test_initial_migration_creates_the_current_schema(tmp_path):
     assert "audio_processing_incomplete" in record_columns
     assert {"voiceprint_candidate_teacher_id", "voiceprint_matching_checked"} <= record_columns
     assert "candidate_child_id" in record_columns
-    assert migration_revision(database_url) == "0027_school_trial_mode"
+    assert migration_revision(database_url) == "0028_teacher_invitations"
 
 
 def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_path):
@@ -139,7 +139,7 @@ def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_pat
     message = prepare_database(database_url)
 
     assert "登録しました" in message
-    assert migration_revision(database_url) == "0027_school_trial_mode"
+    assert migration_revision(database_url) == "0028_teacher_invitations"
 
 
 def test_both_0022_branches_upgrade_to_the_merged_head(tmp_path):
@@ -161,7 +161,7 @@ def test_both_0022_branches_upgrade_to_the_merged_head(tmp_path):
             }
         finally:
             engine.dispose()
-        assert migration_revision(database_url) == "0027_school_trial_mode"
+        assert migration_revision(database_url) == "0028_teacher_invitations"
 
 
 def test_recorder_worker_migration_preserves_existing_session_metadata(tmp_path):

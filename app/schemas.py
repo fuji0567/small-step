@@ -72,9 +72,10 @@ class TeacherRead(APIModel):
     is_auth_linked: bool
     is_active: bool
     disabled_at: datetime | None
+    invitation_sent_at: datetime | None
     created_at: datetime
 
-    @field_validator("disabled_at", "created_at")
+    @field_validator("disabled_at", "created_at", "invitation_sent_at")
     @classmethod
     def normalise_datetime(cls, value: datetime | None) -> datetime | None:
         if value is None:
@@ -90,6 +91,7 @@ class AuthClientConfig(BaseModel):
     supabase_publishable_key: str | None = None
     voiceprint_enabled: bool = False
     recorder_demo_trace_enabled: bool = False
+    teacher_invitations_enabled: bool = False
 
 
 class TeacherProfileRead(TeacherRead):

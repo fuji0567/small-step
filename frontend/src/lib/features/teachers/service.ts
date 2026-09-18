@@ -49,6 +49,15 @@ export class TeachersService {
     return this.postAction(teacherId, 'restore');
   }
 
+  async invite(teacherId: string): Promise<TeacherRead> {
+    return required(
+      await this.client.requestJson<TeacherRead>(
+        `teachers/${encodeURIComponent(teacherId)}/invite`,
+        { method: 'POST' }
+      )
+    );
+  }
+
   private async postAction(
     teacherId: string,
     action: 'disable' | 'restore'

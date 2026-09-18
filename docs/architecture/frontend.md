@@ -1,5 +1,11 @@
 # フロントエンド
 
+先生管理は公開認証設定の `teacher_invitations_enabled` がtrueなら登録後に招待APIを呼び、
+未連携の先生に送信・再送ボタンを表示します。登録成功と送信失敗を区別し、登録を二重に作りません。
+招待リンクの `type=invite` は先生layoutのマウント時に取り出してURLから削除し、ログイン画面を
+パスワード設定画面へ切り替えます。パスワード確認後、公開キーと本人トークンでSupabase `/auth/v1/user`
+へ直接PUTします。API用のsecret keyはfrontendへ渡しません。
+
 - 索引: [../architecture.md](../architecture.md)
 - 画面一覧と遷移図: [../transition.md](../transition.md)
 - 移行時の判断と履歴: [../svelte-migration-runbook.md](../svelte-migration-runbook.md)

@@ -74,14 +74,19 @@ create_app(settings)
 
 ## エンドポイントの分類
 
-タグごとのエンドポイント数です（`/api/v1` 配下、合計 69 本）。
+`POST /teachers/{id}/invite` は同じ園の管理者だけが使う招待送信です。
+有効・未連携の先生に限定し、開発モードや送信未設定は503、対象状態不一致は409、再送間隔は429です。
+成功は通常の先生メタデータと `invitation_sent_at` を返し、メール・トークンを含むSupabase応答は返しません。
+`GET /auth/config` の `teacher_invitations_enabled` は公開可否フラグだけです。
+
+タグごとのエンドポイント数です（`/api/v1` 配下、合計 70 本）。
 
 | タグ | 数 | 代表的なエンドポイント |
 | --- | --- | --- |
 | `records` | 8 | `GET /records/{id}`, `PATCH /records/{id}/assignee`, `POST /records/{id}/approve`, `POST /records/manual` |
 | `notifications` | 6 | `GET /notifications`, `POST /notifications/{id}/retry`, `PATCH /notifications/{id}/schedule` |
 | `children` | 6 | `POST /children`, `POST /children/{id}/archive`, `DELETE /children/{id}/guardian-line-link` |
-| `teachers` | 5 | `GET /teachers`, `PATCH /teachers/{id}/role`, `POST /teachers/{id}/disable` |
+| `teachers` | 6 | `GET /teachers`, `POST /teachers/{id}/invite`, `PATCH /teachers/{id}/role`, `POST /teachers/{id}/disable` |
 | `auth` | 5 | `GET /auth/config`, `GET /auth/me`, `POST /auth/link-teacher`, `POST /auth/bootstrap/teacher` |
 | `edge devices` | 4 | `POST /edge-devices`, `POST /edge-devices/{id}/rotate-key` |
 | `voice consent` | 3 | `GET /voice-consent/me`, `POST /voice-consent/me/revoke` |

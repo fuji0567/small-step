@@ -12,4 +12,5 @@
   schoolId={shell.schools.schoolId}
   isSchoolAdmin={shell.isSchoolAdmin}
   currentTeacherId={shell.teacher?.id ?? null}
+  invitationsEnabled={shell.invitationsEnabled}
 />

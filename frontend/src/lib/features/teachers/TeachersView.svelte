@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ApiClient } from '$lib/api';
+  import { ApiHttpError, type ApiClient } from '$lib/api';
   import {
     Button,
     ConfirmDialog,
@@ -19,10 +19,17 @@
     schoolId: string | null;
     isSchoolAdmin: boolean;
     currentTeacherId: string | null;
+    invitationsEnabled?: boolean;
   };
 
-  let { api, appController, schoolId, isSchoolAdmin, currentTeacherId }: Props =
-    $props();
+  let {
+    api,
+    appController,
+    schoolId,
+    isSchoolAdmin,
+    currentTeacherId,
+    invitationsEnabled = false
+  }: Props = $props();
   const service = $derived(new TeachersService(api));
   let teachers = $state.raw<TeacherRead[]>([]);
   let loading = $state(false);
@@ -89,16 +96,65 @@
       return;
     busy = true;
     errorMessage = null;
+    successMessage = null;
     try {
-      await service.create(selectedSchoolId, normalizedName, normalizedEmail);
+      const created = await service.create(
+        selectedSchoolId,
+        normalizedName,
+        normalizedEmail
+      );
+      if (selectedSchoolId !== schoolId) return;
       name = '';
       email = '';
-      successMessage =
-        '先生を登録しました。同じメールアドレスへSupabaseから招待を送ってください。';
+      if (invitationsEnabled) {
+        try {
+          await service.invite(created.id);
+          if (selectedSchoolId !== schoolId) return;
+          successMessage =
+            '先生を登録し、招待メールの送信を受け付けました。メールからパスワードを設定してください。';
+        } catch (error) {
+          if (selectedSchoolId !== schoolId) return;
+          successMessage = '先生の登録は完了しています。';
+          errorMessage = invitationError(error);
+        }
+      } else {
+        successMessage =
+          '先生を登録しました。アプリからの招待送信は未設定です。同じメールアドレスへSupabaseから招待を送ってください。';
+      }
+      const invitationFailure = errorMessage;
       await refresh();
+      if (selectedSchoolId === schoolId && invitationFailure)
+        errorMessage = invitationFailure;
     } catch {
       errorMessage =
         '先生を登録できませんでした。メールアドレスの重複などを確認してください。';
+    } finally {
+      busy = false;
+    }
+  }
+
+  function invitationError(error: unknown): string {
+    if (error instanceof ApiHttpError && error.status === 429)
+      return '招待メールの送信間隔・送信上限に達しています。少し待ってから再試行してください。';
+    if (error instanceof ApiHttpError && error.status === 409)
+      return '既存のログインアカウントがあるか、先生の状態が変わっています。登録済みのパスワードでログインするか、一覧を再読み込みしてください。';
+    return '招待メールの送信を確認できませんでした。先生の登録は残っています。メールが届いていない場合は、1分以上待って一覧から再送してください。';
+  }
+
+  async function inviteTeacher(teacher: TeacherRead): Promise<void> {
+    if (busy) return;
+    const selectedSchoolId = schoolId;
+    busy = true;
+    errorMessage = null;
+    successMessage = null;
+    try {
+      await service.invite(teacher.id);
+      if (selectedSchoolId !== schoolId) return;
+      successMessage =
+        '招待メールの送信を受け付けました。受信した先生はメールからパスワードを設定してください。';
+      await refresh();
+    } catch (error) {
+      if (selectedSchoolId === schoolId) errorMessage = invitationError(error);
     } finally {
       busy = false;
     }
@@ -167,7 +223,7 @@
 <section class="teachers-page" aria-labelledby="teachers-heading">
   <header class="teachers-heading">
     <h2 id="teachers-heading">先生管理</h2>
-    <p>先生を事前登録し、権限と利用状態を管理します。</p>
+    <p>先生を登録し、招待・権限・利用状態を管理します。</p>
   </header>
 
   {#if !isSchoolAdmin}
@@ -194,7 +250,9 @@
           bind:value={email}
         />
       </div>
-      <Button type="submit" loading={busy}>先生を登録</Button>
+      <Button type="submit" loading={busy}
+        >{invitationsEnabled ? '登録して招待を送る' : '先生を登録'}</Button
+      >
     </form>
 
     {#if successMessage}<Notice tone="success"><p>{successMessage}</p></Notice
@@ -244,13 +302,30 @@
                     tone={teacher.is_active ? 'success' : 'error'}
                   />
                   <StatusBadge
-                    label={teacher.is_auth_linked ? '認証連携済み' : '招待待ち'}
+                    label={teacher.is_auth_linked
+                      ? '認証連携済み'
+                      : teacher.invitation_sent_at
+                        ? '招待送信済み（ログイン待ち）'
+                        : '招待待ち'}
                     tone={teacher.is_auth_linked ? 'success' : 'warning'}
                   />
                 </div>
               </div>
               <div class="teachers-actions">
                 {#if teacher.is_active}
+                  {#if invitationsEnabled && !teacher.is_auth_linked && teacher.email}
+                    <Button
+                      size="compact"
+                      variant="secondary"
+                      disabled={busy}
+                      onclick={() => inviteTeacher(teacher)}
+                      guide="登録済みのメールアドレスへ招待を送ります。再送は1分以上空けてください。"
+                    >
+                      {teacher.invitation_sent_at
+                        ? '招待メールを再送'
+                        : '招待メールを送る'}
+                    </Button>
+                  {/if}
                   {#if teacher.id === currentTeacherId}
                     <p class="teachers-self-note">
                       自分自身の権限変更・利用停止はできません。

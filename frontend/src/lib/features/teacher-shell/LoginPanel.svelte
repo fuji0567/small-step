@@ -6,51 +6,98 @@
   let email = $state('');
   let password = $state('');
   let submitting = $state(false);
+  let passwordConfirm = $state('');
+  let validationError = $state<string | null>(null);
+  const invitation = $derived(shell.phase === 'password-setup');
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
+    validationError = null;
+    if (invitation && password !== passwordConfirm) {
+      validationError = '確認用のパスワードが一致しません。';
+      return;
+    }
     submitting = true;
     try {
-      await shell.signIn(email.trim(), password);
+      if (invitation) await shell.completeInvitation(password);
+      else await shell.signIn(email.trim(), password);
       password = '';
+      passwordConfirm = '';
     } finally {
       submitting = false;
     }
   }
 </script>
 
+<svelte:head>
+  <title
+    >{invitation ? '招待された先生のパスワード設定' : '先生用画面へログイン'} | Small
+    Step</title
+  >
+</svelte:head>
+
 <main class="auth-panel">
   <section aria-labelledby="login-heading">
     <p class="eyebrow">Small Step</p>
-    <h1 id="login-heading">先生用画面へログイン</h1>
-    <p>登録済みのメールアドレスとパスワードを入力してください。</p>
+    <h1 id="login-heading">
+      {invitation ? '招待された先生のパスワード設定' : '先生用画面へログイン'}
+    </h1>
+    <p>
+      {invitation
+        ? '自分だけが使うパスワードを設定してください。設定後に先生用画面を開きます。'
+        : '登録済みのメールアドレスとパスワードを入力してください。'}
+    </p>
 
     {#if shell.errorMessage}
       <Notice tone="error" title="ログインできませんでした">
         <p>{shell.errorMessage}</p>
       </Notice>
     {/if}
+    {#if validationError}<Notice tone="error"><p>{validationError}</p></Notice
+      >{/if}
 
     <form onsubmit={submit}>
-      <label for="teacher-email">メールアドレス</label>
-      <input
-        id="teacher-email"
-        name="email"
-        type="email"
-        autocomplete="username"
-        required
-        bind:value={email}
-      />
+      {#if !invitation}<label for="teacher-email">メールアドレス</label>
+        <input
+          id="teacher-email"
+          name="email"
+          type="email"
+          autocomplete="username"
+          required
+          bind:value={email}
+        />
+      {/if}
       <label for="teacher-password">パスワード</label>
       <input
         id="teacher-password"
         name="password"
         type="password"
-        autocomplete="current-password"
+        autocomplete={invitation ? 'new-password' : 'current-password'}
+        minlength={invitation ? 8 : undefined}
         required
         bind:value={password}
       />
-      <Button type="submit" loading={submitting}>ログイン</Button>
+      {#if invitation}
+        <p>
+          8文字以上で設定してください。園の設定によって追加の条件がある場合があります。
+        </p>
+        <label for="teacher-password-confirm">パスワード（確認）</label>
+        <input
+          id="teacher-password-confirm"
+          type="password"
+          autocomplete="new-password"
+          required
+          bind:value={passwordConfirm}
+        />
+      {/if}
+      <Button type="submit" loading={submitting}
+        >{invitation ? 'パスワードを設定して始める' : 'ログイン'}</Button
+      >
+      {#if invitation}<Button
+          variant="secondary"
+          disabled={submitting}
+          onclick={() => shell.logout()}>ログイン画面へ戻る</Button
+        >{/if}
     </form>
   </section>
 </main>

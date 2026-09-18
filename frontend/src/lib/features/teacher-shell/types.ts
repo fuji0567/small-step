@@ -19,10 +19,11 @@ export interface AuthClientConfig {
   supabase_url: string | null;
   supabase_publishable_key: string | null;
   voiceprint_enabled: boolean;
+  teacher_invitations_enabled?: boolean;
 }
 
 export type TeacherShellPhase =
-  'initializing' | 'login' | 'bootstrap' | 'ready' | 'fatal';
+  'initializing' | 'login' | 'password-setup' | 'bootstrap' | 'ready' | 'fatal';
 
 export interface TeacherShellSnapshot {
   phase: TeacherShellPhase;

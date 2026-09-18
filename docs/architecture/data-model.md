@@ -65,6 +65,9 @@ erDiagram
 | `notion_syncs` | Notion 同期の結果 | `record_id` に一意制約。ページ ID と URL |
 | `audit_events` | 操作履歴 | 音声・文字起こし・秘密情報を含めない |
 
+先生招待の移行 `0028_teacher_invitations` は `teachers.invitation_attempted_at`（送信予約・60秒制限）と
+`invitation_sent_at`（Supabase送信受付時刻）を追加します。既存行はNULLです。キーや招待トークンは保存しません。
+
 `records.voiceprint_candidate_teacher_id` は照合による提案であり、実際の担当 `teacher_id` と別です。
 `voiceprint_matching_checked` は照合実施有無です。候補はIDだけで、声紋・類似度・話者区間は保持しません。
 候補IDはAPIの通常のRecordReadには含めず、別の園スコープ付きAPIで同意・期限・有効先生を確認して返します。

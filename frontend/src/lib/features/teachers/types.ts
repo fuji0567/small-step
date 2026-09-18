@@ -9,6 +9,7 @@ export interface TeacherRead {
   is_auth_linked: boolean;
   is_active: boolean;
   disabled_at: string | null;
+  invitation_sent_at?: string | null;
   created_at: string;
 }
 
