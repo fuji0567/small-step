@@ -4,6 +4,13 @@
 
 ## 園別試用モード
 
+プロコン用の処理表示は `POST /recorder/sessions` の厳密な真偽値 `demo_trace_requested`（既定false）で
+明示同意した試用録音に限定します。DBへ本文を保存せず、内容を含まない暗号化済み一時同意ファイルを使います。
+`GET /recorder/sessions/{id}/demo` は本人ログイン・録音所有者・現在の園の試用モードを毎回確認し、
+専用キーで復号した5分以内の結果だけを `Cache-Control: no-store, private` で返します。
+管理者への例外許可やdevelopment認証の素通しはありません。通常のセッションGETや一覧には内容を混ぜません。
+公開認証設定には有効フラグだけを追加し、暗号化キーやLLM接続情報は公開しません。
+
 `POST /schools` は `trial_mode=true` で作成します。`SchoolRead` と `GET /auth/me` は現在の園の
 `trial_mode`、記録と録音セッションの応答は永久保持する `is_trial` を返します。
 `PATCH /schools/{id}/trial-mode` はその園の先生管理者限定です。本番への切り替えは

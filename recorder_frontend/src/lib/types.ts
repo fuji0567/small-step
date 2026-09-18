@@ -15,6 +15,7 @@ export interface RecorderSegment {
 }
 
 export interface LocalRecordingSession {
+  demoTraceRequested?: boolean;
   clientSessionId: string;
   serverSessionId: string | null;
   ownerId: string;
@@ -50,9 +51,19 @@ export interface ServerRecordingSession {
 }
 
 export interface AuthConfig {
+  recorder_demo_trace_enabled?: boolean;
   auth_mode: "development" | "supabase";
   supabase_url: string | null;
   supabase_publishable_key: string | null;
+}
+
+export interface RecorderDemo {
+  outcome:
+    "waiting" | "unavailable" | "record_created" | "no_record" | "failed";
+  expires_at?: number;
+  record_id?: string | null;
+  truncated?: boolean;
+  events: { phase: string; kind: string; text: string; truncated: boolean }[];
 }
 
 export interface AuthenticatedTeacher {

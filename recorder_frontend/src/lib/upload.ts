@@ -44,7 +44,10 @@ export class UploadCoordinator {
   async #upload(session: LocalRecordingSession): Promise<string> {
     let serverId = session.serverSessionId;
     if (!serverId) {
-      const created = await this.#api.createSession(session.clientSessionId);
+      const created = await this.#api.createSession(
+        session.clientSessionId,
+        session.demoTraceRequested ?? false,
+      );
       serverId = created.id;
       session = {
         ...session,

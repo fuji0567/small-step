@@ -30,6 +30,51 @@ def event(summary="Anonymous growth", category=RecordCategory.growth):
     return EdgeAudioCandidate(recordable=True, category=category, confidence=0.9, summary=summary)
 
 
+@pytest.mark.parametrize("opt_in,switch_live", [(False, False), (True, False), (True, True)])
+def test_worker_demo_captures_only_opt_in_trial_recordings(runtime, monkeypatch, opt_in, switch_live):
+    import httpx
+    from app.recorder_demo import RecorderDemoStorage
+    from cryptography.fernet import Fernet
+
+    factory, storage, (school_id, _) = runtime
+    session_id = enqueue(runtime, count=1)
+    with factory() as db:
+        db.get(School, school_id).trial_mode = True
+        db.get(RecordingSession, session_id).is_trial = True
+        db.commit()
+    key = Fernet.generate_key().decode()
+    demo_storage = RecorderDemoStorage(storage.session_dir, key)
+    if opt_in:
+        demo_storage.grant(session_id)
+    class Transcriber:
+        def transcribe(self, *args, **kwargs):
+            if switch_live:
+                with factory() as db:
+                    db.get(School, school_id).trial_mode = False
+                    db.commit()
+            return "speaker_01: 架空の生の会話。積み木を5つ積めたね。"
+    monkeypatch.setattr("app.edge_audio.httpx.post", lambda *args, **kwargs: httpx.Response(200,
+        json={"choices": [{"message": {"content": event("園児が積み木を5段積めた。").model_dump_json()}}]}))
+    settings = Settings(_env_file=None, recorder_enabled=True, recorder_demo_trace_enabled=True,
+        recorder_demo_trace_encryption_key=key, llm_base_url="http://localhost:8001/v1", llm_model="demo")
+    processor = EdgeAudioProcessor(settings=settings, transcriber=Transcriber())
+    with factory() as db:
+        result = process_next_recorder_session(db=db, storage=storage, processor=processor)
+        assert result.status == RecordingSessionStatus.completed
+        record_id = result.record_id
+        assert "架空の生の会話" not in db.get(Record, record_id).summary
+    assert result.status == RecordingSessionStatus.completed
+    data = demo_storage.read(session_id)
+    if opt_in and not switch_live:
+        assert data["outcome"] == "record_created"
+        assert data["record_id"] == record_id
+        assert any("架空の生の会話" in event["text"] for event in data["events"])
+        assert any(event["kind"] == "llm_output" for event in data["events"])
+    else:
+        assert data is None
+    assert not storage.session_path(session_id).exists()
+
+
 @pytest.mark.parametrize("media_type", list(SUPPORTED_MEDIA_TYPES))
 def test_accepted_recorder_formats_pass_analysis_path_validation(tmp_path, media_type):
     from app.edge_audio import resolve_audio_path

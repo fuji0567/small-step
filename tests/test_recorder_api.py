@@ -82,6 +82,56 @@ def recorder_client(tmp_path: Path):
         app.dependency_overrides.clear()
 
 
+def test_demo_owner_trial_gates_and_no_store(recorder_client):
+    from cryptography.fernet import Fernet
+    from app.recorder_demo import DemoTrace, RecorderDemoStorage
+
+    client, app, school_id, teacher_id, other_id = recorder_client
+    settings = app.state.settings
+    settings.recorder_demo_trace_enabled = True
+    settings.recorder_demo_trace_encryption_key = Fernet.generate_key().decode()
+    payload = {"client_session_id": str(uuid4()), "demo_trace_requested": True}
+    assert client.post("/api/v1/recorder/sessions", json=payload).status_code == 403
+    with app.state.session_factory() as db:
+        db.get(School, school_id).trial_mode = True
+        db.commit()
+    response = client.post("/api/v1/recorder/sessions", json=payload)
+    assert response.status_code == 201
+    session_id = response.json()["id"]
+    url = f"/api/v1/recorder/sessions/{session_id}/demo"
+    assert client.get(url).json()["outcome"] == "waiting"
+    storage = RecorderDemoStorage(settings.recorder_session_dir, settings.recorder_demo_trace_encryption_key)
+    trace = DemoTrace()
+    trace.observe("transcript", "架空の会話")
+    storage.publish(session_id, trace, outcome="no_record", record_id=None)
+    assert client.get(url).json()["events"][0]["text"] == "架空の会話"
+    assert client.get(url).headers["cache-control"] == "no-store, private"
+    assert "架空の会話" not in client.get(f"/api/v1/recorder/sessions/{session_id}").text
+    _authenticate_as(app, other_id)
+    assert client.get(url).status_code == 403
+    with app.state.session_factory() as db:
+        db.get(Teacher, other_id).role = TeacherRole.school_admin
+        db.commit()
+    _authenticate_as(app, other_id)
+    assert client.get(url).status_code == 403
+    _authenticate_as(app, teacher_id)
+    with app.state.session_factory() as db:
+        db.get(School, school_id).trial_mode = False
+        db.commit()
+    assert client.get(url).status_code == 403
+    assert storage.read(session_id) is None
+
+
+def test_demo_disabled_cannot_opt_in(recorder_client):
+    client, app, school_id, _, _ = recorder_client
+    with app.state.session_factory() as db:
+        db.get(School, school_id).trial_mode = True
+        db.commit()
+    assert client.post("/api/v1/recorder/sessions", json={
+        "client_session_id": str(uuid4()), "demo_trace_requested": True,
+    }).status_code == 403
+
+
 def test_create_upload_idempotency_and_hash_conflict(recorder_client):
     client, _app, _school_id, _teacher_id, _other_id = recorder_client
     client_id = str(uuid4())

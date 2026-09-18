@@ -89,6 +89,7 @@ class AuthClientConfig(BaseModel):
     supabase_url: str | None = None
     supabase_publishable_key: str | None = None
     voiceprint_enabled: bool = False
+    recorder_demo_trace_enabled: bool = False
 
 
 class TeacherProfileRead(TeacherRead):
@@ -127,6 +128,7 @@ class RecordingSegmentRead(APIModel):
 
 class RecordingSessionCreate(BaseModel):
     client_session_id: UUID
+    demo_trace_requested: bool = Field(default=False, strict=True)
 
 
 class RecordingSessionRead(APIModel):

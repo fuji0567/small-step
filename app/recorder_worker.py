@@ -14,7 +14,8 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.edge_audio import EdgeAudioCandidate, EdgeAudioError, EdgeAudioProcessor, NoSpeechDetectedError
-from app.models import Record, RecordCategory, RecordingSegment, RecordingSession, RecordingSessionStatus, Teacher, utc_now
+from app.models import Record, RecordCategory, RecordingSegment, RecordingSession, RecordingSessionStatus, School, Teacher, utc_now
+from app.recorder_demo import DemoTrace, RecorderDemoStorage, cleanup_demo_files
 from app.recorder import RecorderStorage, RecorderStorageError
 from app.recorder_voiceprint import RecorderVoiceprintMatcher, SpeakerEmbeddingExtractor
 from app.recorder_children import RecorderChildMatcher
@@ -58,6 +59,10 @@ def cleanup_recorder_sessions(
     if processing_timeout <= timedelta() or orphan_retention <= timedelta():
         raise ValueError("Recorder timeouts must be positive")
     current_time = now or utc_now()
+    try:
+        cleanup_demo_files(storage.session_dir)
+    except OSError:
+        print("デモ表示の後片付けを次回再試行します。", flush=True)
     expired_ids = list(db.scalars(
         update(RecordingSession)
         .where(RecordingSession.status.in_(ACTIVE_STATUSES), RecordingSession.expires_at <= current_time)
@@ -288,6 +293,14 @@ def process_next_recorder_session(
     candidate = None
     voiceprint_matcher = None
     settings = getattr(processor, "settings", None)
+    demo_storage = None
+    demo = None
+    result = None
+    if getattr(settings, "recorder_demo_trace_enabled", False):
+        demo_storage = RecorderDemoStorage(storage.session_dir, settings.recorder_demo_trace_encryption_key)
+        school = db.get(School, session.school_id)
+        if session.is_trial and school and school.trial_mode and demo_storage.requested(session_id):
+            demo = DemoTrace()
     child_matcher = (
         RecorderChildMatcher(db=db, school_id=session.school_id)
         if getattr(settings, "recorder_child_matching_enabled", False) else None
@@ -334,6 +347,9 @@ def process_next_recorder_session(
                         options["speaker_observer"] = voiceprint_matcher.observe
                     if child_matcher is not None:
                         options["child_matcher"] = child_matcher
+                    if demo is not None:
+                        demo.phase = f"音声区間 {segment.sequence + 1} / 試行 {_attempt + 1}"
+                        options["demo_observer"] = demo.observe
                     following = processor.analyze_trusted_recorder_audio_file(str(path), **options)
                     if not isinstance(following, EdgeAudioCandidate):
                         raise EdgeAudioError("Invalid recorder analysis")
@@ -342,6 +358,8 @@ def process_next_recorder_session(
                     following = EdgeAudioCandidate(recordable=False, category=None, confidence=0, summary=None)
                     break
                 except Exception as error:
+                    if demo is not None:
+                        demo.observe("failure", "音声区間の処理に失敗しました。自動再試行後も失敗した区間は採用しません。")
                     _log_processing_failure(stage, error)
                     following = None
             if following is None:
@@ -354,7 +372,11 @@ def process_next_recorder_session(
                         _renew_claim(db=db, session_id=session_id, claim_token=claim_token, processed=processed, failed=failed)
                         try:
                             stage = "summary_merge"
-                            merged = processor.merge_recorder_candidates(candidate, following)
+                            merge_options = {}
+                            if demo is not None:
+                                demo.phase = f"候補の統合 / 試行 {_attempt + 1}"
+                                merge_options["demo_observer"] = demo.observe
+                            merged = processor.merge_recorder_candidates(candidate, following, **merge_options)
                             if not isinstance(merged, EdgeAudioCandidate) or not merged.recordable:
                                 raise EdgeAudioError("Invalid recorder merge")
                             candidate = merged
@@ -376,12 +398,13 @@ def process_next_recorder_session(
             following = None
             _renew_claim(db=db, session_id=session_id, claim_token=claim_token, processed=processed, failed=failed)
         stage = "record_finalization"
-        return _finish_session(
+        result = _finish_session(
             db=db, session=session, claim_token=claim_token,
             candidate=candidate, processed=processed, failed=failed,
             voiceprint_matcher=voiceprint_matcher,
             child_matcher=child_matcher,
         )
+        return result
     except LostRecorderClaim:
         db.rollback()
         return None
@@ -398,9 +421,46 @@ def process_next_recorder_session(
             .values(status=RecordingSessionStatus.failed, claim_token=None, updated_at=utc_now())
         )
         db.commit()
-        return db.get(RecordingSession, session_id) if changed.rowcount == 1 else None
+        result = db.get(RecordingSession, session_id) if changed.rowcount == 1 else None
+        return result
     finally:
         candidate = None
+        if demo is not None:
+            try:
+                # The dispatcher reads the result after closing this DB session.
+                if result is not None:
+                    db.expunge(result)
+                db.rollback()
+                school_trial = db.scalar(select(School.trial_mode).where(School.id == session.school_id))
+                if result is not None and result.is_trial and school_trial:
+                    outcome = ("record_created" if result.record_id else
+                               "failed" if result.status == RecordingSessionStatus.failed else "no_record")
+                    demo.phase = "最終判定"
+                    demo.observe("decision", {
+                        "status": result.status.value, "processed_segments": result.processed_segment_count,
+                        "failed_segments": result.failed_segment_count,
+                        "child_confirmation_required": bool(result.record_id),
+                        "automatic_delivery": False,
+                    })
+                    record = db.get(Record, result.record_id) if result.record_id else None
+                    if record is not None:
+                        demo.observe("matching", {
+                            "child_suggested": record.candidate_child_id is not None,
+                            "teacher_voiceprint_checked": record.voiceprint_matching_checked,
+                            "teacher_suggested": record.voiceprint_candidate_teacher_id is not None,
+                            "child_confirmed": record.child_id is not None,
+                            "assignee_is_recording_owner": record.teacher_id == session.teacher_id,
+                            "category": record.category.value,
+                        })
+                    demo_storage.publish(session_id, demo, outcome=outcome, record_id=result.record_id)
+                else:
+                    demo_storage.erase(session_id)
+            except Exception:
+                # Demo storage must never change a recording's actual processing result.
+                print("デモ表示の保存を省略しました。", flush=True)
+            finally:
+                demo.clear()
+                db.rollback()
         if child_matcher is not None:
             child_matcher.clear()
         # Processing sessions are never reclaimed. A timed-out original worker

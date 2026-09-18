@@ -448,7 +448,8 @@ class OpenAICompatibleSummarizer:
             )
         return self.base_url
 
-    def summarize(self, transcript: str, *, prior_context: str | None = None) -> EdgeAudioCandidate:
+    def summarize(self, transcript: str, *, prior_context: str | None = None,
+                  demo_observer: Callable[[str, object], None] | None = None) -> EdgeAudioCandidate:
         base_url = self._validate_endpoint()
         safe_transcript = redact_obvious_identifiers(transcript)
         safe_prior_context = redact_obvious_identifiers(prior_context) if prior_context else None
@@ -515,6 +516,9 @@ class OpenAICompatibleSummarizer:
             request_payload["chat_template_kwargs"] = {"enable_thinking": False}
         else:
             request_payload["reasoning_effort"] = "none"
+        if demo_observer is not None:
+            demo_observer("llm_instruction", request_payload["messages"][0]["content"])
+            demo_observer("llm_input", request_payload["messages"][1]["content"])
         response = httpx.post(
             f"{base_url}/chat/completions",
             headers=headers,
@@ -530,7 +534,17 @@ class OpenAICompatibleSummarizer:
             raise EdgeAudioError("The local LLM response did not contain a chat completion") from error
         if not isinstance(content, str):
             raise EdgeAudioError("The local LLM completion content was not text")
-        return parse_local_llm_candidate(content)
+        if demo_observer is not None:
+            demo_observer("llm_output", content)
+        try:
+            candidate = parse_local_llm_candidate(content)
+        except EdgeAudioError:
+            if demo_observer is not None:
+                demo_observer("validation", "JSON形式・候補形式の検証に失敗しました。記録には採用しません。")
+            raise
+        if demo_observer is not None:
+            demo_observer("validation", candidate.model_dump(mode="json"))
+        return candidate
 
 
 class EdgeAudioProcessor:
@@ -596,6 +610,7 @@ class EdgeAudioProcessor:
         prior_context: str | None = None,
         speaker_observer: Callable[[Path, SpeakerDiarizationResult | None], None] | None = None,
         child_matcher: RecorderChildMatcher | None = None,
+        demo_observer: Callable[[str, object], None] | None = None,
     ) -> EdgeAudioAnalysis:
         diarization = None
         try:
@@ -617,17 +632,30 @@ class EdgeAudioProcessor:
                     language=self.settings.edge_audio_language,
                 )
         except NoSpeechDetectedError:
+            if demo_observer is not None:
+                demo_observer("transcript", "")
+                demo_observer("decision", "発話を検出できなかったため、LLMの呼び出しを省略しました。")
             candidate = EdgeAudioCandidate(
                 recordable=False, category=None, confidence=1.0, summary=None
             )
         else:
+            if demo_observer is not None:
+                demo_observer("transcript", transcript)
             if child_matcher is not None:
                 transcript = child_matcher.prepare(transcript)
-            candidate = self.summarizer.summarize(transcript, prior_context=prior_context)
+            options = {}
+            if demo_observer is not None and isinstance(self.summarizer, OpenAICompatibleSummarizer):
+                options["demo_observer"] = demo_observer
+            candidate = self.summarizer.summarize(transcript, prior_context=prior_context, **options)
             if child_matcher is not None:
                 candidate = child_matcher.process(candidate)
+            if demo_observer is not None:
+                demo_observer("candidate", candidate.model_dump(mode="json"))
             if speaker_observer is not None and candidate.recordable:
                 speaker_observer(audio_path, diarization)
+            if demo_observer is not None:
+                demo_observer("decision", "記録対象の候補を採用しました。先生の確認が必要です。" if candidate.recordable
+                              else "LLMがrecordable=falseを返したため、この区間から記録候補を作りません。")
         return EdgeAudioAnalysis(
             candidate=candidate,
             detected_speaker_count=diarization.speaker_count if diarization else None,
@@ -699,25 +727,31 @@ class EdgeAudioProcessor:
         self, audio_path: str, *,
         speaker_observer: Callable[[Path, SpeakerDiarizationResult | None], None] | None = None,
         child_matcher: RecorderChildMatcher | None = None,
+        demo_observer: Callable[[str, object], None] | None = None,
     ) -> EdgeAudioCandidate:
         """Analyze one private segment; the recorder worker owns retry and deletion."""
 
         resolved_path = self._validate_audio_path(audio_path, require_inbox=False)
         return self._analyze_resolved_audio_with_metrics(
             resolved_path, speaker_observer=speaker_observer, child_matcher=child_matcher,
+            demo_observer=demo_observer,
         ).candidate
 
     def merge_recorder_candidates(
-        self, previous: EdgeAudioCandidate, following: EdgeAudioCandidate
+        self, previous: EdgeAudioCandidate, following: EdgeAudioCandidate, *,
+        demo_observer: Callable[[str, object], None] | None = None,
     ) -> EdgeAudioCandidate:
         """Bound the running summary using only already-anonymized candidates."""
 
+        options = {}
+        if demo_observer is not None and isinstance(self.summarizer, OpenAICompatibleSummarizer):
+            options["demo_observer"] = demo_observer
         merged = self.summarizer.summarize(
             "以下は同じ録音から順番に抽出した匿名化済み記録候補です。"
             "重複を除き、材料にない出来事を追加せず、一つの記録に統合してください。"
             "けがの情報を省略せず、元の候補の内容を否定・削除しないでください。\n"
             f"前の候補: {previous.model_dump_json()}\n"
-            f"次の候補: {following.model_dump_json()}"
+            f"次の候補: {following.model_dump_json()}", **options,
         )
         if not merged.recordable:
             raise EdgeAudioError("Concrete recorder events cannot be discarded during merging")

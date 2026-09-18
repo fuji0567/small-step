@@ -31,6 +31,7 @@ from app.guardian_archive import generate_guardian_archive_token, hash_guardian_
 from app.line import generate_link_code, hash_link_code, parse_link_code, verify_webhook_signature
 from app.notion import NotionSyncError, create_delivered_notification_page
 from app.recorder import RecorderStorage, RecorderStorageError, normalise_media_type, validate_sha256
+from app.recorder_demo import RecorderDemoStorage
 from app.models import (
     AuditEvent,
     AuditEventAction,
@@ -1081,6 +1082,7 @@ def get_auth_client_config(request: Request) -> AuthClientConfig:
         supabase_url=settings.supabase_url,
         supabase_publishable_key=settings.supabase_publishable_key,
         voiceprint_enabled=settings.voiceprint_enabled,
+        recorder_demo_trace_enabled=settings.recorder_demo_trace_enabled,
     )
 
 
@@ -2219,6 +2221,14 @@ def create_edge_record_candidate(
     return record
 
 
+def recorder_created_response(db: Session, request: Request, payload: RecordingSessionCreate,
+                              session: RecordingSession) -> RecordingSessionRead:
+    if payload.demo_trace_requested and session.is_trial and session.status == RecordingSessionStatus.draft:
+        settings = request.app.state.settings
+        RecorderDemoStorage(settings.recorder_session_dir, settings.recorder_demo_trace_encryption_key).grant(session.id)
+    return recorder_session_response(db, session)
+
+
 @router.post(
     "/recorder/sessions",
     response_model=RecordingSessionRead,
@@ -2235,6 +2245,13 @@ def create_recorder_session(
     """Create one resumable draft, idempotent for the owner and client UUID."""
 
     owner = recorder_owner(current_teacher=current_teacher, db=db)
+    settings = request.app.state.settings
+    if payload.demo_trace_requested:
+        if current_teacher.is_development:
+            raise HTTPException(status_code=403, detail="Demo display requires authenticated recorder access")
+        school = lock_school(db, owner.school_id)
+        if not settings.recorder_demo_trace_enabled or not school.trial_mode:
+            raise HTTPException(status_code=403, detail="Demo display requires enabled school trial mode")
     client_session_id = as_id(payload.client_session_id)
     existing = db.scalar(
         select(RecordingSession).where(
@@ -2246,7 +2263,7 @@ def create_recorder_session(
         # An expired draft remains safely observable for the client so it can
         # remove its local IndexedDB copy without creating another session.
         expire_recorder_session_if_needed(db=db, request=request, recorder_session=existing)
-        return recorder_session_response(db, existing)
+        return recorder_created_response(db, request, payload, existing)
 
     # Expire old drafts before enforcing the per-owner limit.  This is the
     # request-driven cleanup boundary; a worker is responsible for terminal
@@ -2272,7 +2289,7 @@ def create_recorder_session(
         )
     )
     if existing is not None:
-        return recorder_session_response(db, existing)
+        return recorder_created_response(db, request, payload, existing)
     active_drafts = db.scalar(
         select(func.count())
         .select_from(RecordingSession)
@@ -2305,9 +2322,9 @@ def create_recorder_session(
         )
         if existing is None:
             raise HTTPException(status_code=409, detail="Recorder session could not be created") from error
-        return recorder_session_response(db, existing)
+        return recorder_created_response(db, request, payload, existing)
     db.refresh(recorder_session)
-    return recorder_session_response(db, recorder_session)
+    return recorder_created_response(db, request, payload, recorder_session)
 
 
 @router.get(
@@ -2387,6 +2404,35 @@ def get_recorder_session(
     )
     expire_recorder_session_if_needed(db=db, request=request, recorder_session=recorder_session)
     return recorder_session_response(db, recorder_session)
+
+
+@router.get("/recorder/sessions/{session_id}/demo", tags=["recorder"])
+def get_recorder_demo(
+    session_id: UUID, request: Request,
+    _recorder_enabled: bool = Depends(require_recorder_enabled),
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+):
+    from fastapi.responses import JSONResponse
+
+    session = get_owned_recorder_session(db=db, request=request, session_id=as_id(session_id), current_teacher=current_teacher)
+    if current_teacher.is_development or current_teacher.teacher is None or session.teacher_id != current_teacher.teacher.id:
+        raise HTTPException(status_code=403, detail="Demo display requires the authenticated recording owner")
+    settings = request.app.state.settings
+    if not settings.recorder_demo_trace_enabled:
+        raise HTTPException(status_code=404, detail="Demo display is disabled")
+    storage = RecorderDemoStorage(settings.recorder_session_dir, settings.recorder_demo_trace_encryption_key)
+    school = db.get(School, session.school_id)
+    if not session.is_trial or not school or not school.trial_mode:
+        storage.erase(session.id)
+        raise HTTPException(status_code=403, detail="Demo display requires school trial mode")
+    data = storage.read(session.id)
+    return JSONResponse(
+        data or {"outcome": "waiting" if storage.requested(session.id) and session.status in (
+            RecordingSessionStatus.draft, RecordingSessionStatus.queued, RecordingSessionStatus.processing,
+        ) else "unavailable", "events": []},
+        headers={"Cache-Control": "no-store, private", "Pragma": "no-cache"},
+    )
 
 
 @router.put(

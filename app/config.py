@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     # Independent /rec recorder settings. 25 MB is ample for a one-minute
     # AAC/WebM segment while still bounding request and disk usage.
     recorder_enabled: bool = False
+    recorder_demo_trace_enabled: bool = False
+    recorder_demo_trace_encryption_key: str | None = None
     recorder_child_matching_enabled: bool = False
     recorder_session_dir: str = "data/edge-audio-inbox/recorder-sessions"
     recorder_retention_hours: int = Field(default=24, ge=1, le=720)
@@ -142,6 +144,14 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "aws:kms backup encryption requires DATABASE_BACKUP_S3_KMS_KEY_ID"
                 )
+        if self.recorder_demo_trace_enabled:
+            if not self.recorder_enabled:
+                raise ValueError("RECORDER_DEMO_TRACE_ENABLED requires RECORDER_ENABLED")
+            from cryptography.fernet import Fernet
+            try:
+                Fernet((self.recorder_demo_trace_encryption_key or "").encode())
+            except (ValueError, binascii.Error) as error:
+                raise ValueError("RECORDER_DEMO_TRACE_ENCRYPTION_KEY must be a valid Fernet key") from error
         if self.recorder_voiceprint_matching_enabled and not (self.recorder_enabled and self.voiceprint_enabled):
             raise ValueError("RECORDER_VOICEPRINT_MATCHING_ENABLED requires RECORDER_ENABLED and VOICEPRINT_ENABLED")
         if self.recorder_child_matching_enabled and not self.recorder_enabled:

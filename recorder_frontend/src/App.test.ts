@@ -40,6 +40,7 @@ describe("App continuous recording", () => {
   let getUserMedia: ReturnType<typeof vi.fn>;
   let fetchFn: ReturnType<typeof vi.fn>;
   let unauthorized: boolean;
+  let trialDemo: boolean;
   const servers = new Map<
     string,
     {
@@ -56,6 +57,7 @@ describe("App continuous recording", () => {
     fixtures.sessions.clear();
     servers.clear();
     unauthorized = false;
+    trialDemo = false;
     sessionStorage.clear();
     localStorage.clear();
     sessionStorage.setItem("small-step.access-token", "test-token");
@@ -111,9 +113,17 @@ describe("App continuous recording", () => {
           headers: { "Content-Type": "application/json" },
         });
       if (path === "/api/v1/auth/config")
-        return json({ auth_mode: "supabase" });
+        return json({
+          auth_mode: "supabase",
+          recorder_demo_trace_enabled: trialDemo,
+        });
       if (path === "/api/v1/auth/me")
-        return json({ id: "teacher", name: "Test teacher", role: "teacher" });
+        return json({
+          id: "teacher",
+          name: "Test teacher",
+          role: "teacher",
+          trial_mode: trialDemo,
+        });
       if (unauthorized) return new Response(null, { status: 401 });
       if (path === "/api/v1/recorder/sessions" && init?.method === "POST") {
         const clientId = JSON.parse(init.body as string)
@@ -139,6 +149,31 @@ describe("App continuous recording", () => {
     vi.restoreAllMocks();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("試用専用の処理表示に同意した場合だけ各区間に要求を付ける", async () => {
+    trialDemo = true;
+    const { unmount } = render(App);
+    await settle();
+    await fireEvent.click(
+      screen.getByRole("checkbox", { name: /処理内容を表示することに同意/ }),
+    );
+    await fireEvent.click(
+      screen.getByRole("button", { name: "連続録音・自動送信を開始" }),
+    );
+    await settle();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+    const created = fetchFn.mock.calls.find(
+      ([path, init]) =>
+        path === "/api/v1/recorder/sessions" && init.method === "POST",
+    );
+    expect(JSON.parse(created![1].body).demo_trace_requested).toBe(true);
+    expect(
+      screen.getByRole("button", { name: "直近の録音の処理内容を表示" }),
+    ).toBeInTheDocument();
+    unmount();
+    await settle();
   });
 
   it("明示開始までマイクを開かず60秒ごとと停止時の端数を自動送信する", async () => {

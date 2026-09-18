@@ -1679,6 +1679,7 @@ def test_supabase_user_links_to_pre_registered_teacher(tmp_path, monkeypatch):
             "supabase_url": "https://example.supabase.co",
             "supabase_publishable_key": "sb_publishable_test",
             "voiceprint_enabled": False,
+            "recorder_demo_trace_enabled": False,
         }
         school = create_live_school(
             client,

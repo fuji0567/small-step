@@ -12,6 +12,7 @@
     type CredentialStore,
   } from "./lib/auth";
   import RecorderScreen from "./lib/RecorderScreen.svelte";
+  import RecorderDemoView from "./lib/RecorderDemoView.svelte";
   import { ContinuousUploadQueue } from "./lib/continuous-upload";
   import {
     RecorderController,
@@ -54,6 +55,8 @@
   let segmentCount = $state(0);
   let finalizing = $state(false);
   let continuous = $state(true);
+  let demoTraceRequested = $state(false);
+  let demoSessionId = $state<string | null>(null);
   let pendingCount = $state(0);
   let acceptedCount = $state(0);
   let recordingContinuously = false;
@@ -67,7 +70,7 @@
 
   let credentials: CredentialStore;
   let repository: IndexedDbSessionRepository;
-  let api: RecorderApi;
+  let api = $state<RecorderApi>()!;
   let uploader: UploadCoordinator;
   let statusMonitor: SessionStatusMonitor;
   let monitoringOwner: string | null = null;
@@ -211,6 +214,10 @@
         throw new Error("サーバーへ接続してから録音を開始してください。");
       await refreshCredentials();
       teacher = await verifyTeacher(browserFetch, credentials.accessToken());
+      const demoEnabled =
+        demoTraceRequested &&
+        teacher.trial_mode === true &&
+        authConfig?.recorder_demo_trace_enabled === true;
       await repository.cleanup();
       const sessions = await repository.list();
       if (sessions.some((session) => session.ownerId !== teacher?.id)) {
@@ -240,6 +247,7 @@
       }
       const now = Date.now();
       currentSession = {
+        demoTraceRequested: demoEnabled,
         clientSessionId: crypto.randomUUID(),
         serverSessionId: null,
         ownerId: teacher.id,
@@ -263,6 +271,7 @@
       continuousQueue = recordingContinuously
         ? new ContinuousUploadQueue({
             ownerId,
+            demoTraceRequested: demoEnabled,
             mimeType,
             repository,
             uploader,
@@ -276,6 +285,7 @@
               void scheduleLocalCleanup();
             },
             onAccepted: (id) => {
+              demoSessionId = id;
               acceptedCount += 1;
               monitoringOwner = ownerId;
               statusMonitor.start(id);
@@ -612,6 +622,7 @@
   }
 
   function stopMonitoring(): void {
+    demoSessionId = null;
     statusMonitor?.stop();
     monitoringOwner = null;
     processing = null;
@@ -626,6 +637,7 @@
   function showAccepted(serverId: string): void {
     if (!mounted || !teacher) return;
     stopMonitoring();
+    demoSessionId = serverId;
     monitoringOwner = teacher.id;
     view = "accepted";
     message = null;
@@ -842,6 +854,20 @@
       </form>
     </section>
   {:else}
+    {#if view === "ready" && teacher?.trial_mode && authConfig?.recorder_demo_trace_enabled}
+      <section aria-labelledby="demo-option-title">
+        <h2 id="demo-option-title">プロコン用の処理表示（試用専用）</h2>
+        <p>
+          架空の園児・先生だけで実演してください。文字起こし・LLMの入出力を一時的に暗号化して保存し、処理終了から5分後に表示を終了します。通常のデータベースやログには保存しません。
+        </p>
+        <label
+          ><input
+            type="checkbox"
+            bind:checked={demoTraceRequested}
+          />次の録音の処理内容を表示することに同意する</label
+        >
+      </section>
+    {/if}
     <RecorderScreen
       {view}
       {elapsedMs}
@@ -874,5 +900,15 @@
       onRetry={retrySession}
       onDiscardSession={discardSavedSession}
     />
+    {#if demoSessionId && teacher?.trial_mode && authConfig?.recorder_demo_trace_enabled}
+      {#key `${teacher.id}:${demoSessionId}`}
+        <RecorderDemoView
+          sessionId={demoSessionId}
+          {api}
+          onAuthenticationError={(error) =>
+            handleOperationError(error, "ログインし直してください。")}
+        />
+      {/key}
+    {/if}
   {/if}
 </main>

@@ -1,4 +1,4 @@
-import type { ServerRecordingSession } from "./types";
+import type { RecorderDemo, ServerRecordingSession } from "./types";
 
 export interface RecorderApiOptions {
   fetch?: typeof fetch;
@@ -24,12 +24,30 @@ export class RecorderApi {
     this.#accessToken = options.accessToken;
   }
 
-  createSession(clientSessionId: string): Promise<ServerRecordingSession> {
+  createSession(
+    clientSessionId: string,
+    demoTraceRequested = false,
+  ): Promise<ServerRecordingSession> {
     return this.#json("/api/v1/recorder/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ client_session_id: clientSessionId }),
+      body: JSON.stringify({
+        client_session_id: clientSessionId,
+        ...(demoTraceRequested ? { demo_trace_requested: true } : {}),
+      }),
     });
+  }
+
+  async getDemo(id: string, signal?: AbortSignal): Promise<RecorderDemo> {
+    const result = await this.#request<RecorderDemo>(
+      `/api/v1/recorder/sessions/${encodeURIComponent(id)}/demo`,
+      {
+        signal,
+        cache: "no-store",
+      },
+    );
+    if (!result) throw new Error("処理内容を取得できませんでした。");
+    return result;
   }
 
   getSession(
@@ -77,10 +95,10 @@ export class RecorderApi {
     return result;
   }
 
-  async #request(
+  async #request<T = ServerRecordingSession>(
     path: string,
     init: RequestInit = {},
-  ): Promise<ServerRecordingSession | null> {
+  ): Promise<T | null> {
     const headers = new Headers(init.headers);
     const token = this.#accessToken();
     if (!token) throw new RecorderApiError(401, "ログインが必要です。");
@@ -113,7 +131,7 @@ export class RecorderApi {
       ) {
         return null;
       }
-      return (await response.json()) as ServerRecordingSession;
+      return (await response.json()) as T;
     } finally {
       clearTimeout(timer);
       init.signal?.removeEventListener("abort", abort);

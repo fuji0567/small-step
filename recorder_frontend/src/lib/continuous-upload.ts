@@ -4,6 +4,7 @@ import type { RecorderSegment } from "./types";
 import type { UploadCoordinator } from "./upload";
 
 interface Options {
+  demoTraceRequested?: boolean;
   ownerId: string;
   mimeType: string;
   repository: SessionRepository;
@@ -34,6 +35,7 @@ export class ContinuousUploadQueue {
     const now = Date.now();
     await this.#options.repository.put({
       clientSessionId: crypto.randomUUID(),
+      demoTraceRequested: this.#options.demoTraceRequested ?? false,
       serverSessionId: null,
       ownerId: this.#options.ownerId,
       mimeType: this.#options.mimeType,
