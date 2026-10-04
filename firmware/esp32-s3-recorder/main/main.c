@@ -32,15 +32,26 @@ static bool atomic_write(const char *temporary_path, const char *path, const voi
 {
     FILE *file = fopen(temporary_path, "wb");
     if (file == NULL) {
+        ESP_LOGE(TAG, "fopen(%s) failed: errno=%d", temporary_path, errno);
         return false;
     }
-    bool success = fwrite(data, 1U, size, file) == size
-        && fflush(file) == 0
-        && fsync(fileno(file)) == 0;
+    bool success = true;
+    if (fwrite(data, 1U, size, file) != size) {
+        ESP_LOGE(TAG, "fwrite(%s) failed: errno=%d", temporary_path, errno);
+        success = false;
+    } else if (fflush(file) != 0) {
+        ESP_LOGE(TAG, "fflush(%s) failed: errno=%d", temporary_path, errno);
+        success = false;
+    } else if (fsync(fileno(file)) != 0) {
+        ESP_LOGE(TAG, "fsync(%s) failed: errno=%d", temporary_path, errno);
+        success = false;
+    }
     if (fclose(file) != 0) {
+        ESP_LOGE(TAG, "fclose(%s) failed: errno=%d", temporary_path, errno);
         success = false;
     }
     if (success && rename(temporary_path, path) != 0) {
+        ESP_LOGE(TAG, "rename(%s -> %s) failed: errno=%d", temporary_path, path, errno);
         success = false;
     }
     if (!success) {
