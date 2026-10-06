@@ -1,7 +1,7 @@
 import csv
 import io
 import json
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 import httpx
@@ -36,10 +36,15 @@ from app.models import (
     AuditEvent,
     AuditEventAction,
     Child,
+    Classroom,
+    ClassNewsletter,
+    ClassNewsletterRecipient,
     CloudAudioJob,
     CloudAudioJobStatus,
     EdgeDevice,
     GuardianArchiveLink,
+    GrowthDeliveryBatch,
+    GrowthDeliveryEntry,
     LineLinkInvitation,
     NotionSync,
     Notification,
@@ -65,8 +70,20 @@ from app.schemas import (
     AuthBootstrapTeacherCreate,
     AuthClientConfig,
     ChildCreate,
+    ChildClassroomUpdate,
     ChildRead,
     ChildUpdate,
+    ClassroomCreate,
+    ClassroomRead,
+    ClassroomUpdate,
+    ClassNewsletterApproval,
+    ClassNewsletterDraft,
+    ClassNewsletterEdit,
+    ClassNewsletterRead,
+    GrowthDeliveryApproval,
+    GrowthDeliveryBatchRead,
+    GrowthDeliveryEntryRead,
+    GrowthDeliveryPropose,
     CloudAudioJobRead,
     EdgeDeviceCreate,
     EdgeDeviceCredential,
@@ -859,6 +876,7 @@ async def receive_line_webhook(request: Request) -> dict[str, bool]:
             if child is None or child.school_id != invitation.school_id or not child.is_active:
                 continue
             child.guardian_line_user_id = line_user_id
+            child.guardian_line_linked_at = utc_now()
             invitation.used_at = utc_now()
             notifications = session.scalars(
                 select(Notification)
@@ -1805,12 +1823,623 @@ def create_child(
     require_entity(db, School, as_id(payload.school_id), "School")
     assert_school_access(current_teacher, as_id(payload.school_id))
     assert_school_admin(current_teacher)
-    child = Child(**{**payload.model_dump(), "school_id": as_id(payload.school_id)})
+    child_data = payload.model_dump()
+    child = Child(
+        **{
+            **child_data,
+            "school_id": as_id(payload.school_id),
+            "guardian_line_linked_at": utc_now() if child_data.get("guardian_line_user_id") else None,
+        }
+    )
     db.add(child)
     clear_child_suggestions(db, child.school_id)
     db.commit()
     db.refresh(child)
     return child
+
+
+def class_delivery_time(school: School, delivery_date: str) -> datetime:
+    try:
+        day = date.fromisoformat(delivery_date)
+        local_time = time.fromisoformat(school.digest_time)
+        return datetime.combine(day, local_time, tzinfo=ZoneInfo(school.timezone)).astimezone(timezone.utc)
+    except (ValueError, KeyError) as error:
+        raise HTTPException(status_code=422, detail="Invalid delivery date or school timezone") from error
+
+
+def require_classroom(db: Session, classroom_id: str) -> Classroom:
+    return require_entity(db, Classroom, classroom_id, "Classroom")
+
+
+def current_teacher_id(current_teacher: CurrentTeacher) -> str | None:
+    return current_teacher.teacher.id if current_teacher.teacher is not None else None
+
+
+def newsletter_read(db: Session, newsletter: ClassNewsletter) -> ClassNewsletterRead:
+    counts = dict(
+        db.query(ClassNewsletterRecipient.status, func.count(ClassNewsletterRecipient.id))
+        .filter(ClassNewsletterRecipient.newsletter_id == newsletter.id)
+        .group_by(ClassNewsletterRecipient.status)
+        .all()
+    )
+    return ClassNewsletterRead(
+        id=newsletter.id, school_id=newsletter.school_id, classroom_id=newsletter.classroom_id,
+        delivery_date=newsletter.delivery_date, body=newsletter.body, status=newsletter.status,
+        scheduled_for=as_utc_datetime(newsletter.scheduled_for), approved_at=newsletter.approved_at,
+        cancelled_at=newsletter.cancelled_at, is_trial=newsletter.is_trial,
+        recipient_count=sum(counts.values()), sent_count=counts.get("sent", 0),
+        failed_count=counts.get("failed", 0), created_at=as_utc_datetime(newsletter.created_at),
+    )
+
+
+def growth_batch_read(
+    db: Session, batch: GrowthDeliveryBatch, current_teacher: CurrentTeacher
+) -> GrowthDeliveryBatchRead:
+    rows = db.execute(
+        select(GrowthDeliveryEntry, Child, Notification)
+        .join(Child, Child.id == GrowthDeliveryEntry.child_id)
+        .outerjoin(Notification, Notification.growth_delivery_entry_id == GrowthDeliveryEntry.id)
+        .where(GrowthDeliveryEntry.batch_id == batch.id)
+    ).all()
+    sent_history = db.execute(
+        select(GrowthDeliveryEntry.child_id, func.count(Notification.id), func.max(Notification.sent_at))
+        .join(Notification, Notification.growth_delivery_entry_id == GrowthDeliveryEntry.id)
+        .where(GrowthDeliveryEntry.school_id == batch.school_id)
+        .where(Notification.status == NotificationStatus.sent)
+        .group_by(GrowthDeliveryEntry.child_id)
+    ).all()
+    history = {child_id: (count, sent_at) for child_id, count, sent_at in sent_history}
+    entries = []
+    requires_admin_review = False
+    for entry, child, notification in rows:
+        record = db.get(Record, entry.record_id)
+        if record is None:
+            continue
+        try:
+            assert_record_access(current_teacher, record)
+        except HTTPException as error:
+            if error.status_code == 403:
+                requires_admin_review = requires_admin_review or entry.selected
+                continue
+            raise
+        count, last_sent = history.get(child.id, (0, None))
+        entries.append(GrowthDeliveryEntryRead(
+            record_id=entry.record_id, child_id=child.id, child_name=child.display_name,
+            summary=record.summary, selected=entry.selected,
+            last_sent_at=as_utc_datetime(last_sent) if last_sent else None,
+            accepted_delivery_count=count,
+        ))
+    return GrowthDeliveryBatchRead(
+        id=batch.id, classroom_id=batch.classroom_id, delivery_date=batch.delivery_date,
+        daily_limit=batch.daily_limit, status=batch.status, scheduled_for=as_utc_datetime(batch.scheduled_for),
+        approved_at=batch.approved_at, cancelled_at=batch.cancelled_at, is_trial=batch.is_trial,
+        requires_admin_review=requires_admin_review,
+        entries=entries,
+    )
+
+
+@router.post("/classrooms", response_model=ClassroomRead, status_code=status.HTTP_201_CREATED, tags=["classrooms"])
+def create_classroom(
+    payload: ClassroomCreate,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> Classroom:
+    school_id = as_id(payload.school_id)
+    require_entity(db, School, school_id, "School")
+    assert_school_access(current_teacher, school_id)
+    assert_school_admin(current_teacher)
+    classroom = Classroom(school_id=school_id, name=payload.name.strip())
+    db.add(classroom)
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="A class with this name already exists") from error
+    db.refresh(classroom)
+    return classroom
+
+
+@router.get("/classrooms", response_model=list[ClassroomRead], tags=["classrooms"])
+def list_classrooms(
+    school_id: str,
+    include_inactive: bool = False,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> list[Classroom]:
+    assert_school_access(current_teacher, school_id)
+    query = select(Classroom).where(Classroom.school_id == school_id)
+    if not include_inactive:
+        query = query.where(Classroom.is_active.is_(True))
+    return list(db.scalars(query.order_by(Classroom.name, Classroom.id)))
+
+
+@router.patch("/classrooms/{classroom_id}", response_model=ClassroomRead, tags=["classrooms"])
+def update_classroom(
+    classroom_id: str,
+    payload: ClassroomUpdate,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> Classroom:
+    classroom = require_classroom(db, classroom_id)
+    assert_school_access(current_teacher, classroom.school_id)
+    assert_school_admin(current_teacher)
+    lock_school(db, classroom.school_id)
+    db.refresh(classroom)
+    if payload.delivery_enabled and not payload.is_active:
+        raise HTTPException(status_code=409, detail="Inactive classes cannot enable delivery")
+    classroom.name = payload.name.strip()
+    classroom.daily_growth_limit = payload.daily_growth_limit
+    was_delivery_enabled = classroom.delivery_enabled
+    classroom.is_active = payload.is_active
+    classroom.delivery_enabled = payload.delivery_enabled
+    if not payload.is_active:
+        classroom.is_active = False
+        classroom.delivery_enabled = False
+    if classroom.delivery_enabled and not was_delivery_enabled:
+        classroom.delivery_enabled_since = utc_now()
+    elif not classroom.delivery_enabled:
+        classroom.delivery_enabled_since = None
+    if not classroom.delivery_enabled:
+        now = utc_now()
+        for newsletter in db.scalars(select(ClassNewsletter).where(
+            ClassNewsletter.classroom_id == classroom.id, ClassNewsletter.status == "approved"
+        )):
+            newsletter.status = "cancelled"
+            newsletter.cancelled_at = now
+            db.execute(update(ClassNewsletterRecipient).where(
+                ClassNewsletterRecipient.newsletter_id == newsletter.id,
+                ClassNewsletterRecipient.status == "pending",
+            ).values(status="cancelled"))
+        selected_entries = db.scalars(select(GrowthDeliveryEntry).where(
+            GrowthDeliveryEntry.classroom_id == classroom.id, GrowthDeliveryEntry.selected.is_(True)
+        ))
+        for entry in selected_entries:
+            notification = db.scalar(select(Notification).where(Notification.growth_delivery_entry_id == entry.id))
+            if notification and notification.status in (NotificationStatus.pending, NotificationStatus.waiting_guardian_link):
+                notification.status = NotificationStatus.cancelled
+        for batch in db.scalars(select(GrowthDeliveryBatch).where(
+            GrowthDeliveryBatch.classroom_id == classroom.id,
+            GrowthDeliveryBatch.status == "approved",
+        )):
+            batch.status = "cancelled"
+            batch.cancelled_at = now
+    db.commit()
+    db.refresh(classroom)
+    return classroom
+
+
+@router.put("/children/{child_id}/classroom", response_model=ChildRead, tags=["children"])
+def assign_child_classroom(
+    child_id: str,
+    payload: ChildClassroomUpdate,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> Child:
+    child = require_entity(db, Child, child_id, "Child")
+    assert_school_access(current_teacher, child.school_id)
+    assert_school_admin(current_teacher)
+    lock_school(db, child.school_id)
+    db.refresh(child)
+    if not child.is_active:
+        raise HTTPException(status_code=409, detail="Archived children cannot be assigned")
+    if payload.classroom_id is None:
+        child.classroom_id = None
+    else:
+        classroom = require_classroom(db, as_id(payload.classroom_id))
+        if classroom.school_id != child.school_id or not classroom.is_active:
+            raise HTTPException(status_code=422, detail="Classroom must be active and belong to the child's school")
+        child.classroom_id = classroom.id
+    db.commit()
+    db.refresh(child)
+    return child
+
+
+@router.get("/class-newsletters", response_model=list[ClassNewsletterRead], tags=["classrooms"])
+def list_class_newsletters(
+    school_id: str,
+    classroom_id: str | None = None,
+    delivery_date: str | None = None,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> list[ClassNewsletterRead]:
+    assert_school_access(current_teacher, school_id)
+    query = select(ClassNewsletter).where(ClassNewsletter.school_id == school_id)
+    if classroom_id:
+        classroom = require_classroom(db, classroom_id)
+        if classroom.school_id != school_id:
+            raise HTTPException(status_code=404, detail="Classroom not found")
+        query = query.where(ClassNewsletter.classroom_id == classroom_id)
+    if delivery_date:
+        query = query.where(ClassNewsletter.delivery_date == delivery_date)
+    return [newsletter_read(db, row) for row in db.scalars(query.order_by(ClassNewsletter.delivery_date.desc()))]
+
+
+@router.post("/classrooms/{classroom_id}/class-newsletters", response_model=ClassNewsletterRead, status_code=status.HTTP_201_CREATED, tags=["classrooms"])
+def save_class_newsletter_draft(
+    classroom_id: str,
+    payload: ClassNewsletterDraft,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> ClassNewsletterRead:
+    classroom = require_classroom(db, classroom_id)
+    assert_school_access(current_teacher, classroom.school_id)
+    if not classroom.is_active:
+        raise HTTPException(status_code=409, detail="Inactive classes cannot create a newsletter")
+    school = require_entity(db, School, classroom.school_id, "School")
+    scheduled_for = class_delivery_time(school, payload.delivery_date)
+    existing = db.scalar(select(ClassNewsletter).where(
+        ClassNewsletter.classroom_id == classroom.id,
+        ClassNewsletter.delivery_date == payload.delivery_date,
+    ))
+    if existing:
+        if existing.status != "draft":
+            raise HTTPException(status_code=409, detail="A newsletter already exists for this class and date")
+        existing.body = payload.body.strip()
+        existing.scheduled_for = scheduled_for
+        db.commit()
+        db.refresh(existing)
+        return newsletter_read(db, existing)
+    newsletter = ClassNewsletter(
+        school_id=school.id, classroom_id=classroom.id, delivery_date=payload.delivery_date,
+        body=payload.body.strip(), scheduled_for=scheduled_for,
+        is_trial=school.trial_mode, created_by_teacher_id=current_teacher_id(current_teacher),
+    )
+    db.add(newsletter)
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="A newsletter already exists for this class and date") from error
+    db.refresh(newsletter)
+    return newsletter_read(db, newsletter)
+
+
+@router.patch("/class-newsletters/{newsletter_id}", response_model=ClassNewsletterRead, tags=["classrooms"])
+def edit_class_newsletter(
+    newsletter_id: str,
+    payload: ClassNewsletterEdit,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> ClassNewsletterRead:
+    newsletter = require_entity(db, ClassNewsletter, newsletter_id, "Class newsletter")
+    assert_school_access(current_teacher, newsletter.school_id)
+    if newsletter.status != "draft":
+        raise HTTPException(status_code=409, detail="Only draft newsletters can be edited")
+    newsletter.body = payload.body.strip()
+    db.commit()
+    db.refresh(newsletter)
+    return newsletter_read(db, newsletter)
+
+
+@router.post("/class-newsletters/{newsletter_id}/approve", response_model=ClassNewsletterRead, tags=["classrooms"])
+def approve_class_newsletter(
+    newsletter_id: str,
+    payload: ClassNewsletterApproval,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> ClassNewsletterRead:
+    newsletter = require_entity(db, ClassNewsletter, newsletter_id, "Class newsletter")
+    assert_school_access(current_teacher, newsletter.school_id)
+    if not payload.content_checked:
+        raise HTTPException(status_code=422, detail="Confirm the class-wide content review")
+    school = lock_school(db, newsletter.school_id)
+    db.refresh(newsletter)
+    classroom = require_classroom(db, newsletter.classroom_id)
+    if newsletter.status != "draft":
+        raise HTTPException(status_code=409, detail="Only draft newsletters can be approved")
+    if not classroom.is_active or not classroom.delivery_enabled:
+        raise HTTPException(status_code=409, detail="Class delivery is not enabled")
+    if newsletter.delivery_date != datetime.now(ZoneInfo(school.timezone)).date().isoformat():
+        raise HTTPException(status_code=409, detail="Only today's newsletter can be approved")
+    newsletter.is_trial = newsletter.is_trial or school.trial_mode
+    newsletter.status = "approved"
+    newsletter.approved_at = utc_now()
+    guardian_children: dict[str, list[str]] = {}
+    for child_id, guardian_id in db.execute(select(Child.id, Child.guardian_line_user_id).where(
+        Child.school_id == school.id, Child.classroom_id == classroom.id,
+        Child.is_active.is_(True), Child.guardian_line_user_id.is_not(None),
+    )):
+        guardian_children.setdefault(guardian_id, []).append(child_id)
+    for guardian_id, child_ids in guardian_children.items():
+        db.add(ClassNewsletterRecipient(
+            newsletter_id=newsletter.id, recipient_line_user_id=guardian_id,
+            child_ids=child_ids,
+            status="trial" if newsletter.is_trial else "pending",
+        ))
+    db.commit()
+    db.refresh(newsletter)
+    return newsletter_read(db, newsletter)
+
+
+@router.post("/class-newsletters/{newsletter_id}/cancel", response_model=ClassNewsletterRead, tags=["classrooms"])
+def cancel_class_newsletter(
+    newsletter_id: str,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> ClassNewsletterRead:
+    newsletter = require_entity(db, ClassNewsletter, newsletter_id, "Class newsletter")
+    assert_school_access(current_teacher, newsletter.school_id)
+    lock_school(db, newsletter.school_id)
+    db.refresh(newsletter)
+    if newsletter.status not in ("draft", "approved"):
+        raise HTTPException(status_code=409, detail="This newsletter can no longer be cancelled")
+    newsletter.status = "cancelled"
+    newsletter.cancelled_at = utc_now()
+    db.execute(update(ClassNewsletterRecipient).where(
+        ClassNewsletterRecipient.newsletter_id == newsletter.id,
+        ClassNewsletterRecipient.status == "pending",
+    ).values(status="cancelled"))
+    db.commit()
+    db.refresh(newsletter)
+    return newsletter_read(db, newsletter)
+
+
+@router.post("/class-newsletters/{newsletter_id}/retry", response_model=ClassNewsletterRead, tags=["classrooms"])
+def retry_class_newsletter_failures(
+    newsletter_id: str,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> ClassNewsletterRead:
+    newsletter = require_entity(db, ClassNewsletter, newsletter_id, "Class newsletter")
+    assert_school_access(current_teacher, newsletter.school_id)
+    school = lock_school(db, newsletter.school_id)
+    db.refresh(newsletter)
+    classroom = require_classroom(db, newsletter.classroom_id)
+    if (newsletter.status != "approved" or newsletter.is_trial or school.trial_mode
+            or not classroom.is_active or not classroom.delivery_enabled):
+        raise HTTPException(status_code=409, detail="This class newsletter cannot be retried")
+    for recipient in db.scalars(select(ClassNewsletterRecipient).where(
+        ClassNewsletterRecipient.newsletter_id == newsletter.id,
+        ClassNewsletterRecipient.status == "failed",
+    )):
+        still_linked = db.scalar(select(Child.id).where(
+            Child.school_id == school.id, Child.classroom_id == classroom.id,
+            Child.is_active.is_(True),
+            Child.guardian_line_user_id == recipient.recipient_line_user_id,
+            Child.id.in_(recipient.child_ids or []),
+            Child.guardian_line_linked_at.is_(None)
+            | (Child.guardian_line_linked_at <= newsletter.approved_at),
+        ).limit(1))
+        if still_linked:
+            recipient.status = "pending"
+            recipient.last_failure_kind = None
+        else:
+            recipient.status = "cancelled"
+            recipient.last_failure_kind = "recipient_no_longer_linked"
+    db.commit()
+    db.refresh(newsletter)
+    return newsletter_read(db, newsletter)
+
+
+@router.post("/classrooms/{classroom_id}/growth-delivery/propose", response_model=GrowthDeliveryBatchRead, tags=["classrooms"])
+def propose_growth_delivery(
+    classroom_id: str,
+    payload: GrowthDeliveryPropose,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> GrowthDeliveryBatchRead:
+    classroom = require_classroom(db, classroom_id)
+    assert_school_access(current_teacher, classroom.school_id)
+    if not classroom.is_active or not classroom.delivery_enabled:
+        raise HTTPException(status_code=409, detail="Class delivery is not enabled")
+    school = lock_school(db, classroom.school_id)
+    db.refresh(classroom)
+    day = datetime.now(ZoneInfo(school.timezone)).date()
+    if payload.delivery_date != day.isoformat():
+        raise HTTPException(status_code=409, detail="Only today's candidates can be proposed")
+    existing = db.scalar(select(GrowthDeliveryBatch).where(
+        GrowthDeliveryBatch.classroom_id == classroom.id,
+        GrowthDeliveryBatch.delivery_date == payload.delivery_date,
+    ))
+    if existing:
+        return growth_batch_read(db, existing, current_teacher)
+    start = datetime.combine(day, time.min, tzinfo=ZoneInfo(school.timezone)).astimezone(timezone.utc)
+    end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=ZoneInfo(school.timezone)).astimezone(timezone.utc)
+    eligible_query = (
+        select(Record, Child)
+        .join(Child, Child.id == Record.child_id)
+        .outerjoin(Notification, Notification.record_id == Record.id)
+        .where(Record.school_id == school.id, Record.category == RecordCategory.growth)
+        .where(Record.status == RecordStatus.approved, Record.is_trial.is_(False))
+        .where(Record.occurred_at >= start, Record.occurred_at < end)
+        .where(Child.classroom_id == classroom.id, Child.is_active.is_(True))
+        .where(Child.guardian_line_user_id.is_not(None), Notification.id.is_(None))
+        .order_by(Record.occurred_at, Record.id)
+    )
+    eligible = db.execute(eligible_query).all()
+    by_child: dict[str, tuple[Record, Child]] = {}
+    for record, child in eligible:
+        by_child.setdefault(child.id, (record, child))
+    history_rows = db.execute(
+        select(GrowthDeliveryEntry.child_id, func.count(Notification.id), func.max(Notification.sent_at))
+        .join(Notification, Notification.growth_delivery_entry_id == GrowthDeliveryEntry.id)
+        .where(GrowthDeliveryEntry.school_id == classroom.school_id, Notification.status == NotificationStatus.sent)
+        .group_by(GrowthDeliveryEntry.child_id)
+    ).all()
+    history = {child_id: (count, sent_at) for child_id, count, sent_at in history_rows}
+    ordered = sorted(by_child.values(), key=lambda pair: (
+        history.get(pair[1].id, (0, None))[0],
+        history.get(pair[1].id, (0, None))[1] or datetime.min.replace(tzinfo=timezone.utc),
+        pair[1].id,
+    ))
+    unlinked_query = (
+        select(func.count(func.distinct(Child.id)))
+        .join(Record, Record.child_id == Child.id)
+        .outerjoin(Notification, Notification.record_id == Record.id)
+        .where(Record.school_id == school.id, Record.category == RecordCategory.growth)
+        .where(Record.status == RecordStatus.approved, Record.is_trial.is_(False))
+        .where(Record.occurred_at >= start, Record.occurred_at < end)
+        .where(Child.classroom_id == classroom.id, Child.is_active.is_(True))
+        .where(Child.guardian_line_user_id.is_(None), Notification.id.is_(None))
+    )
+    if not current_teacher.is_development and not current_teacher.is_school_admin:
+        # This informational count must not reveal other teachers' records.
+        unlinked_query = unlinked_query.where(Record.teacher_id == current_teacher.teacher.id)
+    unlinked_count = db.scalar(unlinked_query) or 0
+    batch = GrowthDeliveryBatch(
+        school_id=school.id, classroom_id=classroom.id, delivery_date=payload.delivery_date,
+        daily_limit=classroom.daily_growth_limit, scheduled_for=class_delivery_time(school, payload.delivery_date),
+        is_trial=school.trial_mode, created_by_teacher_id=current_teacher_id(current_teacher),
+    )
+    db.add(batch)
+    db.flush()
+    for index, (record, child) in enumerate(ordered):
+        db.add(GrowthDeliveryEntry(
+            batch_id=batch.id, school_id=school.id, classroom_id=classroom.id,
+            record_id=record.id, child_id=child.id, selected=index < batch.daily_limit,
+        ))
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Today's proposal was created concurrently; reload it") from error
+    db.refresh(batch)
+    result = growth_batch_read(db, batch, current_teacher)
+    result.candidates_without_guardian_link = unlinked_count
+    return result
+
+
+@router.get("/growth-delivery-batches/{batch_id}", response_model=GrowthDeliveryBatchRead, tags=["classrooms"])
+def get_growth_delivery_batch(
+    batch_id: str,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> GrowthDeliveryBatchRead:
+    batch = require_entity(db, GrowthDeliveryBatch, batch_id, "Growth delivery batch")
+    assert_school_access(current_teacher, batch.school_id)
+    return growth_batch_read(db, batch, current_teacher)
+
+
+@router.post("/growth-delivery-batches/{batch_id}/refresh", response_model=GrowthDeliveryBatchRead, tags=["classrooms"])
+def refresh_growth_delivery_batch(
+    batch_id: str,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> GrowthDeliveryBatchRead:
+    batch = require_entity(db, GrowthDeliveryBatch, batch_id, "Growth delivery batch")
+    assert_school_access(current_teacher, batch.school_id)
+    assert_school_admin(current_teacher)
+    lock_school(db, batch.school_id)
+    db.refresh(batch)
+    if batch.status != "draft":
+        raise HTTPException(status_code=409, detail="Only draft candidates can be refreshed")
+    classroom_id = batch.classroom_id
+    delivery_date = batch.delivery_date
+    db.execute(delete(GrowthDeliveryEntry).where(GrowthDeliveryEntry.batch_id == batch.id))
+    db.delete(batch)
+    db.flush()
+    return propose_growth_delivery(
+        classroom_id=classroom_id,
+        payload=GrowthDeliveryPropose(delivery_date=delivery_date),
+        current_teacher=current_teacher,
+        db=db,
+    )
+
+
+@router.post("/growth-delivery-batches/{batch_id}/approve", response_model=GrowthDeliveryBatchRead, tags=["classrooms"])
+def approve_growth_delivery_batch(
+    batch_id: str,
+    payload: GrowthDeliveryApproval,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> GrowthDeliveryBatchRead:
+    batch = require_entity(db, GrowthDeliveryBatch, batch_id, "Growth delivery batch")
+    assert_school_access(current_teacher, batch.school_id)
+    if not payload.teacher_confirmed:
+        raise HTTPException(status_code=422, detail="Confirm today's individual deliveries")
+    school = lock_school(db, batch.school_id)
+    db.refresh(batch)
+    classroom = require_classroom(db, batch.classroom_id)
+    if batch.status != "draft" or not classroom.is_active or not classroom.delivery_enabled:
+        raise HTTPException(status_code=409, detail="This daily selection can no longer be approved")
+    if batch.delivery_date != datetime.now(ZoneInfo(school.timezone)).date().isoformat():
+        raise HTTPException(status_code=409, detail="Only today's selection can be approved")
+    if batch.is_trial or school.trial_mode:
+        raise HTTPException(status_code=409, detail="Trial classes cannot send guardian messages")
+    selected_ids = [as_id(value) for value in payload.selected_record_ids]
+    if len(set(selected_ids)) != len(selected_ids) or len(selected_ids) > classroom.daily_growth_limit:
+        raise HTTPException(status_code=422, detail="Selection exceeds the class daily limit")
+    batch.daily_limit = classroom.daily_growth_limit
+    entries = list(db.scalars(select(GrowthDeliveryEntry).where(GrowthDeliveryEntry.batch_id == batch.id)))
+    by_record = {entry.record_id: entry for entry in entries}
+    if any(record_id not in by_record for record_id in selected_ids):
+        raise HTTPException(status_code=422, detail="Selection contains a record outside today's candidates")
+    day = date.fromisoformat(batch.delivery_date)
+    start = datetime.combine(day, time.min, tzinfo=ZoneInfo(school.timezone)).astimezone(timezone.utc)
+    end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=ZoneInfo(school.timezone)).astimezone(timezone.utc)
+    for entry in entries:
+        entry.selected = entry.record_id in selected_ids
+    for record_id in selected_ids:
+        entry = by_record[record_id]
+        record = require_entity(db, Record, entry.record_id, "Record")
+        assert_record_access(current_teacher, record)
+        child = require_entity(db, Child, entry.child_id, "Child")
+        if (record.school_id != school.id or record.status != RecordStatus.approved
+                or record.category != RecordCategory.growth or record.is_trial
+                or as_utc_datetime(record.occurred_at) < start or as_utc_datetime(record.occurred_at) >= end
+                or child.school_id != school.id or not child.is_active
+                or child.classroom_id != classroom.id or not child.guardian_line_user_id):
+            raise HTTPException(status_code=409, detail="A selected candidate is no longer eligible")
+        if db.scalar(select(Notification.id).where(Notification.record_id == record.id)):
+            raise HTTPException(status_code=409, detail="A selected record already has a notification")
+        already_selected_today = db.scalar(
+            select(GrowthDeliveryEntry.id)
+            .join(GrowthDeliveryBatch, GrowthDeliveryBatch.id == GrowthDeliveryEntry.batch_id)
+            .join(Notification, Notification.growth_delivery_entry_id == GrowthDeliveryEntry.id)
+            .where(
+                GrowthDeliveryEntry.school_id == school.id,
+                GrowthDeliveryEntry.child_id == child.id,
+                GrowthDeliveryBatch.delivery_date == batch.delivery_date,
+                GrowthDeliveryBatch.status == "approved",
+                Notification.status.in_((NotificationStatus.pending, NotificationStatus.sent, NotificationStatus.failed)),
+            )
+            .limit(1)
+        )
+        if already_selected_today:
+            raise HTTPException(status_code=409, detail="This child already has an individual delivery today")
+        db.add(Notification(
+            record_id=record.id, growth_delivery_entry_id=entry.id,
+            recipient_line_user_id=child.guardian_line_user_id,
+            scheduled_for=batch.scheduled_for, status=NotificationStatus.pending,
+        ))
+    batch.status = "approved"
+    batch.approved_at = utc_now()
+    db.commit()
+    db.refresh(batch)
+    return growth_batch_read(db, batch, current_teacher)
+
+
+@router.post("/growth-delivery-batches/{batch_id}/cancel", response_model=GrowthDeliveryBatchRead, tags=["classrooms"])
+def cancel_growth_delivery_batch(
+    batch_id: str,
+    current_teacher: CurrentTeacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+) -> GrowthDeliveryBatchRead:
+    batch = require_entity(db, GrowthDeliveryBatch, batch_id, "Growth delivery batch")
+    assert_school_access(current_teacher, batch.school_id)
+    lock_school(db, batch.school_id)
+    db.refresh(batch)
+    if batch.status not in ("draft", "approved"):
+        raise HTTPException(status_code=409, detail="This daily selection can no longer be cancelled")
+    if not current_teacher.is_school_admin:
+        for entry in db.scalars(select(GrowthDeliveryEntry).where(
+            GrowthDeliveryEntry.batch_id == batch.id, GrowthDeliveryEntry.selected.is_(True)
+        )):
+            candidate_record = require_entity(db, Record, entry.record_id, "Record")
+            if candidate_record.teacher_id != current_teacher.teacher.id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="A school administrator must cancel a selection containing records outside your access",
+                )
+    batch.status = "cancelled"
+    batch.cancelled_at = utc_now()
+    for entry in db.scalars(select(GrowthDeliveryEntry).where(GrowthDeliveryEntry.batch_id == batch.id)):
+        notification = db.scalar(select(Notification).where(Notification.growth_delivery_entry_id == entry.id))
+        if notification and notification.status in (NotificationStatus.pending, NotificationStatus.waiting_guardian_link):
+            notification.status = NotificationStatus.cancelled
+    db.commit()
+    db.refresh(batch)
+    return growth_batch_read(db, batch, current_teacher)
 
 
 @router.get("/children", response_model=list[ChildRead], tags=["children"])
@@ -1876,8 +2505,10 @@ def archive_child(
     now = utc_now()
     child.is_active = False
     child.archived_at = now
+    child.classroom_id = None
     clear_child_suggestions(db, child.school_id)
     child.guardian_line_user_id = None
+    child.guardian_line_linked_at = None
     db.execute(
         update(LineLinkInvitation)
         .where(LineLinkInvitation.child_id == child.id)
@@ -1958,6 +2589,7 @@ def restore_child(
     child.archived_at = None
     clear_child_suggestions(db, child.school_id)
     child.guardian_line_user_id = None
+    child.guardian_line_linked_at = None
     add_audit_event(
         db,
         school_id=child.school_id,
@@ -1986,6 +2618,7 @@ def unlink_guardian_line_account(
     now = utc_now()
 
     child.guardian_line_user_id = None
+    child.guardian_line_linked_at = None
     db.execute(
         update(LineLinkInvitation)
         .where(LineLinkInvitation.child_id == child.id)
@@ -3118,18 +3751,26 @@ def approve_record(
         scheduled_for = get_next_digest_time(utc_now(), school.timezone or settings.timezone, school.digest_time)
 
     recipient_line_user_id = None if record.is_trial else child.guardian_line_user_id
-    notification = Notification(
-        record_id=record.id,
-        recipient_line_user_id=recipient_line_user_id,
-        status=(
-            NotificationStatus.trial if record.is_trial else (
-                NotificationStatus.pending if recipient_line_user_id
-                else NotificationStatus.waiting_guardian_link
-            )
-        ),
-        scheduled_for=scheduled_for,
+    classroom = db.get(Classroom, child.classroom_id) if child.classroom_id else None
+    use_class_delivery = (
+        record.category == RecordCategory.growth
+        and classroom is not None
+        and classroom.is_active
+        and classroom.delivery_enabled
     )
-    db.add(notification)
+    if not use_class_delivery:
+        notification = Notification(
+            record_id=record.id,
+            recipient_line_user_id=recipient_line_user_id,
+            status=(
+                NotificationStatus.trial if record.is_trial else (
+                    NotificationStatus.pending if recipient_line_user_id
+                    else NotificationStatus.waiting_guardian_link
+                )
+            ),
+            scheduled_for=scheduled_for,
+        )
+        db.add(notification)
     add_audit_event(
         db,
         school_id=record.school_id,

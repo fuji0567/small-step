@@ -14,7 +14,21 @@ from sqlalchemy import select
 from app.config import Settings, get_settings
 from app.database import create_database_engine, create_session_factory, initialise_database
 from app.line import LineMessagingError, build_notification_text, push_text_message
-from app.models import Notification, NotificationStatus, Record, RecordStatus, utc_now
+from app.models import (
+    Child,
+    ClassNewsletter,
+    ClassNewsletterRecipient,
+    Classroom,
+    GrowthDeliveryBatch,
+    GrowthDeliveryEntry,
+    Notification,
+    NotificationStatus,
+    Record,
+    RecordCategory,
+    RecordStatus,
+    School,
+    utc_now,
+)
 from app.worker_heartbeat import LINE_DELIVERY_WORKER_NAME, WorkerHeartbeatMonitor
 from app.trial import lock_school
 
@@ -86,6 +100,43 @@ def send_due_notifications(
                         notification.recipient_line_user_id = None
                         session.commit()
                         continue
+                    child = session.get(Child, record.child_id) if record.child_id else None
+                    classroom = session.get(Classroom, child.classroom_id) if child and child.classroom_id else None
+                    if record.category == RecordCategory.growth and classroom is not None:
+                        entry = session.get(GrowthDeliveryEntry, notification.growth_delivery_entry_id) if notification.growth_delivery_entry_id else None
+                        batch = session.get(GrowthDeliveryBatch, entry.batch_id) if entry else None
+                        if entry is not None:
+                            if (batch is None or not classroom.is_active or not classroom.delivery_enabled
+                                    or not entry.selected or batch.status != "approved" or batch.is_trial
+                                    or batch.school_id != record.school_id
+                                    or batch.classroom_id != classroom.id
+                                    or entry.school_id != record.school_id
+                                    or entry.classroom_id != classroom.id
+                                    or record.status != RecordStatus.approved
+                                    or not child.is_active or child.school_id != record.school_id
+                                    or child.classroom_id != classroom.id
+                                    or child.guardian_line_user_id != notification.recipient_line_user_id
+                                    or (child.guardian_line_linked_at is not None
+                                        and batch.approved_at is not None
+                                        and child.guardian_line_linked_at > batch.approved_at)):
+                                notification.status = NotificationStatus.cancelled
+                                notification.recipient_line_user_id = None
+                                session.commit()
+                                continue
+                        elif (classroom.is_active and classroom.delivery_enabled
+                              and classroom.delivery_enabled_since is not None
+                              and notification.created_at >= classroom.delivery_enabled_since):
+                            # Do not let a post-activation approval bypass today's teacher selection.
+                            notification.status = NotificationStatus.cancelled
+                            notification.recipient_line_user_id = None
+                            session.commit()
+                            continue
+                    elif record.category == RecordCategory.growth and notification.growth_delivery_entry_id:
+                        # A selected class-delivery notice must not fall back to legacy delivery after disablement.
+                        notification.status = NotificationStatus.cancelled
+                        notification.recipient_line_user_id = None
+                        session.commit()
+                        continue
                 if record is None or not notification.recipient_line_user_id:
                     notification.status = NotificationStatus.failed
                     notification.last_failure_kind = FAILURE_GUARDIAN_NOT_LINKED
@@ -127,10 +178,87 @@ def send_due_notifications(
                 record.status = RecordStatus.dispatched
                 session.commit()
                 sent_count += 1
+
+            class_sent, class_failed = _send_due_class_newsletters(
+                session=session,
+                settings=settings,
+                retry_failed=retry_failed,
+                dry_run=dry_run,
+            )
+            sent_count += class_sent
+            failed_count += class_failed
     finally:
         engine.dispose()
 
     return sent_count, failed_count
+
+
+def _send_due_class_newsletters(*, session, settings, retry_failed: bool, dry_run: bool) -> tuple[int, int]:
+    """Send each class newsletter to its snapshotted, deduplicated recipients."""
+    statuses = ["pending"] + (["failed"] if retry_failed else [])
+    rows = session.execute(
+        select(ClassNewsletterRecipient, ClassNewsletter, Classroom, School)
+        .join(ClassNewsletter, ClassNewsletter.id == ClassNewsletterRecipient.newsletter_id)
+        .join(Classroom, Classroom.id == ClassNewsletter.classroom_id)
+        .join(School, School.id == ClassNewsletter.school_id)
+        .where(ClassNewsletterRecipient.status.in_(statuses))
+        .where(ClassNewsletter.status == "approved")
+        .where(ClassNewsletter.scheduled_for <= utc_now())
+        .order_by(ClassNewsletter.scheduled_for, ClassNewsletterRecipient.id)
+    ).all()
+    sent = failed = 0
+    for recipient, newsletter, classroom, school in rows:
+        school = lock_school(session, newsletter.school_id)
+        session.refresh(newsletter)
+        session.refresh(classroom)
+        session.refresh(school)
+        session.refresh(recipient)
+        if recipient.status not in statuses:
+            continue
+        if (newsletter.is_trial or school.trial_mode or not classroom.is_active
+                or not classroom.delivery_enabled or newsletter.status != "approved"):
+            recipient.status = "trial" if newsletter.is_trial or school.trial_mode else "cancelled"
+            session.commit()
+            continue
+        still_linked = session.scalar(select(Child.id).where(
+            Child.school_id == school.id, Child.classroom_id == classroom.id,
+            Child.is_active.is_(True), Child.guardian_line_user_id == recipient.recipient_line_user_id,
+            Child.id.in_(recipient.child_ids or []),
+            Child.guardian_line_linked_at.is_(None)
+            | (Child.guardian_line_linked_at <= newsletter.approved_at),
+        ).limit(1))
+        if still_linked is None:
+            recipient.status = "cancelled"
+            recipient.last_failure_kind = "recipient_no_longer_linked"
+            session.commit()
+            continue
+        if dry_run:
+            sent += 1
+            continue
+        try:
+            request_id = push_text_message(
+                channel_access_token=settings.line_channel_access_token or "",
+                recipient_line_user_id=recipient.recipient_line_user_id,
+                text=newsletter.body,
+                retry_key=recipient.id,
+                timeout_seconds=settings.line_api_timeout_seconds,
+            )
+        except (httpx.HTTPError, LineMessagingError) as error:
+            recipient.delivery_attempts += 1
+            recipient.status = "failed"
+            recipient.last_failure_kind = line_failure_kind(error)
+            session.commit()
+            failed += 1
+            print(f"クラスお便りのLINE送信に失敗しました（{type(error).__name__}）。")
+            continue
+        recipient.delivery_attempts += 1
+        recipient.status = "sent"
+        recipient.provider_message_id = request_id
+        recipient.sent_at = utc_now()
+        recipient.last_failure_kind = None
+        session.commit()
+        sent += 1
+    return sent, failed
 
 
 def main() -> None:

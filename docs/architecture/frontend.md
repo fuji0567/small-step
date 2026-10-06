@@ -97,6 +97,7 @@ WebM/Opusを作ります。一時停止、停止、マイク中断、ブラウ�
 | `/teacher/notifications/` | `teacher/notifications/+page.svelte` | 通知状況、管理者操作 |
 | `/teacher/audio-jobs/` | `teacher/audio-jobs/+page.svelte` | 録音PWAの処理待ちとクラウド音声処理の安全なメタデータ |
 | `/teacher/children/` | `teacher/children/+page.svelte` | 園児・保護者 LINE 連携 |
+| `/teacher/daily-delivery/` | `teacher/daily-delivery/+page.svelte` | クラス設定、クラス便、記録閲覧権限内の個人成長候補の確認・承認 |
 | `/teacher/voice-consent/` | `teacher/voice-consent/+page.svelte` | 声紋利用への同意・登録・本人確認・削除 |
 | `/teacher/settings/` | `teacher/settings/+page.svelte` | 園設定（管理者） |
 | `/teacher/teachers/` | `teacher/teachers/+page.svelte` | 先生管理（管理者） |
@@ -228,6 +229,12 @@ Python runtime stageには `app/frontend_dist/` と `app/recorder_dist/` の生�
 候補取得の失敗や遅延は手動レビューを妨げず、手動選択・別日誌への移動後の遅い応答は選択を上書きしません。
 録音由来の承認には園児確認チェックを必須とし、園児変更や日誌再読込でチェックを解除します。
 実際の園児との紐付けは既存の承認APIだけで確定します。管理者用の園児表示名編集には録音で呼ぶ名前の入力を追加します。
+
+### クラス配信画面
+
+`/teacher/daily-delivery/` はクラス管理、園児の明示的な所属、クラス便の下書きと確認をまとめます。新方式は既定無効で、クラスごとの上限は管理者が1人または2人から設定します。先生は当日のクラス本文・宛先を確認して承認し、個人成長候補も閲覧可能な記録の範囲で確認・選択・取消します。閲覧権限外の候補が混在する場合は内容を隠して管理者確認を求め、一般先生の承認・取消を止めます。園管理者には全候補の閲覧、候補更新・取消を許可します。候補更新は選択をリセットするため確認ダイアログを出します。記録の既存閲覧権限は広げません。怪我記録はこの画面の公平選定対象ではありません。
+
+送信予定はLINEワーカーに委ね、画面上の「受付」はLINE APIの受付であり既読ではないと表示します。試用園ではクラス便・個人便とも送信されず、本番へ切り替えた後の遡及配信もありません。
 
 Node.js 24.19.0 を使用します。FastAPI をポート 8000 で起動し、別ターミナルで次を実行します。
 Vite 開発サーバーは `/api/v1` を FastAPI へ proxy します。

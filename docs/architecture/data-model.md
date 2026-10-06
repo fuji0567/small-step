@@ -24,6 +24,13 @@ SQLAlchemy 2.0 の宣言スタイル（`Mapped` / `mapped_column`）で `app/mod
 erDiagram
     School ||--o{ Teacher : "所属"
     School ||--o{ Child : "在籍"
+    School ||--o{ Classroom : "クラス"
+    Classroom ||--o{ Child : "所属（任意）"
+    Classroom ||--o{ ClassNewsletter : "クラス便"
+    ClassNewsletter ||--o{ ClassNewsletterRecipient : "宛先別送信状態"
+    Classroom ||--o{ GrowthDeliveryBatch : "日次選定"
+    GrowthDeliveryBatch ||--o{ GrowthDeliveryEntry : "候補・選択"
+    GrowthDeliveryEntry ||--o| Notification : "選択後のみ個人通知"
     School ||--o{ EdgeDevice : "設置"
     School ||--o{ AuditEvent : "記録"
     Teacher ||--o{ Record : "担当"
@@ -50,10 +57,15 @@ erDiagram
 | --- | --- | --- |
 | `schools` | 園 | `timezone` と `digest_time` を園ごとに保持 |
 | `teachers` | 先生 | `auth_user_id` で Supabase ユーザーと 1 対 1。無効化はソフトデリート |
-| `children` | 園児 | `guardian_line_user_id` が保護者の LINE 連携先。退園はアーカイブ扱い |
+| `children` | 園児 | `guardian_line_user_id` が保護者の LINE 連携先。`classroom_id` は手動所属でNULL可。`guardian_line_linked_at` は再連携時刻 |
+| `classrooms` | 園のクラス | 園内で名前一意。新方式は無効既定、個人日次上限1/2、明示有効化時刻 |
+| `class_newsletters` | 手入力クラス便 | 1クラス・対象日で1件。本文、当日配信予約、承認・取消・試用状態 |
+| `class_newsletter_recipients` | クラス便の宛先別送信状態 | 承認時のLINE IDと子どもIDスナップショット、送信・失敗・取消、冪等キー |
+| `growth_delivery_batches` | 個人成長便の日次選定 | 1クラス・対象日で1件。quota、下書き/承認/取消、予約・試用状態 |
+| `growth_delivery_entries` | 選定候補 | バッチ内の記録・園児を一意化。`selected=true`のみ通知候補になる |
 | `edge_devices` | 録音端末 | APIキーは `api_key_hash` のみ保存。`last_seen_at` で死活を表示 |
 | `records` | 匿名化済みの記録候補 | 本文は `summary` / `conversation_prompt` / `anonymized_context` |
-| `notifications` | 保護者への配信 | `record_id` に一意制約（1 記録 1 通知） |
+| `notifications` | 個人記録の保護者配信 | `record_id` に一意制約。日次個人便は承認選択後のみ `growth_delivery_entry_id` を付与 |
 | `line_link_invitations` | 保護者連携の招待コード | `code_hash` のみ保存。使用・失効を日時で記録 |
 | `guardian_archive_links` | 配信アーカイブの URL | `token_hash` のみ保存。期限つき・失効可能 |
 | `cloud_audio_jobs` | クラウド GPU 処理ジョブ | メタデータのみ。音声本体はファイルシステム上の短命保管 |
@@ -88,7 +100,7 @@ stateDiagram-v2
     direction LR
     [*] --> pending_review: エッジ処理 / 手入力で作成
     pending_review --> pending_review: 管理者が担当変更
-    pending_review --> approved: 先生が承認（notifications を作成）
+    pending_review --> approved: 先生が承認（旧方式/怪我では通知作成）
     pending_review --> rejected: 先生が却下
     approved --> dispatched: LINE 送信完了
     rejected --> [*]
@@ -122,6 +134,12 @@ stateDiagram-v2
 
 先生管理者は `PATCH /notifications/{id}/schedule` で予定時刻を後から変更できます。
 
+クラス配信が無効なクラスでは、この既存経路を変えません。有効なクラスの成長記録は承認で`records`だけを承認済みにし、`notifications`を作りません。日次バッチの候補に選ばれ、先生が対象日・園児・本文を確認して承認した時だけ通知を作ります。怪我記録はクラス設定に関係なく従来の承認後即時経路を維持します。
+
+クラス便は `draft -> approved -> cancelled` を持ち、実送信状況は宛先行ごとに `pending / sent / failed / cancelled / trial` を管理します。承認は本文確認フラグを要求し、当日以外を承認できません。同じ保護者LINE IDが複数園児に紐付く場合は1宛先に統合します。承認後に新しく紐付けられた園児や、承認後に再連携された園児だけを根拠として古いクラス便を送ることはありません。
+
+個人便の日次バッチは `draft -> approved / cancelled`。候補は承認済み成長記録・在籍・クラス・保護者連携・当日・試用外の条件を満たす場合に限ります。バッチの園児ごとに候補1件まで。quotaを超える選択、同一園児の複数通知、候補外記録はAPIとDB制約で拒否します。送信受付済み回数は選択エントリに結びつく通知の`sent`数で数え、失敗・予約・承認・試用・クラス便は含めません。
+
 ---
 
 ## 重複と競合の防止
@@ -131,6 +149,10 @@ stateDiagram-v2
 | 同じ音声から記録が二重に作られる | `records` に `(school_id, source_event_id)` の一意制約 |
 | 同じ音声が二重にアップロードされる | `cloud_audio_jobs` の `(device_id, edge_upload_id)` を照合して既存ジョブを返す |
 | 1 記録に通知が二重に作られる | `notifications.record_id` に一意制約 |
+| 1個人選定で同じ園児を重ねる | `growth_delivery_entries(batch_id, child_id)` 一意制約 |
+| 同じクラス便の同一LINE宛先が重複 | `class_newsletter_recipients(newsletter_id, recipient_line_user_id)` 一意制約 |
+| 個人配信エントリから通知を複数生成する | `notifications.growth_delivery_entry_id` 一意制約 |
+| 同日同クラスの便/選定が競合する | クラス・対象日の一意制約、園行ロック、トランザクション |
 | 複数の GPU ワーカーが同じジョブを取る | `claim_token` による排他取得 |
 | 同じ録音セッションを二重に作る | `recording_sessions(teacher_id, client_session_id)` の一意制約 |
 | 同じ録音から記録を二重生成する | queued→processingの原子的UPDATEと最終確定のclaim token照合 |

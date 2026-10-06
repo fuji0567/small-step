@@ -43,6 +43,22 @@ def test_trial_postgresql_migration_adds_safe_defaults_without_access_changes():
     assert "GRANT" not in sql and "DISABLE ROW LEVEL SECURITY" not in sql
 
 
+def test_class_delivery_postgresql_migration_is_additive_and_keeps_opt_in_defaults():
+    output = io.StringIO()
+    config = build_alembic_config("postgresql://example:unused@localhost/example")
+    config.output_buffer = output
+    command.upgrade(config, "0028_teacher_invitations:0029_class_digest_delivery", sql=True)
+    sql = output.getvalue()
+
+    assert "CREATE TABLE classrooms" in sql
+    assert "delivery_enabled BOOLEAN DEFAULT false NOT NULL" in sql
+    assert "daily_growth_limit INTEGER DEFAULT '1' NOT NULL" in sql
+    assert "ADD COLUMN classroom_id VARCHAR(36)" in sql
+    assert "ADD COLUMN guardian_line_linked_at TIMESTAMP WITH TIME ZONE" in sql
+    assert "ADD COLUMN growth_delivery_entry_id VARCHAR(36)" in sql
+    assert "GRANT" not in sql and "DISABLE ROW LEVEL SECURITY" not in sql
+
+
 def test_revision_identifiers_fit_the_postgresql_version_column():
     script = ScriptDirectory.from_config(build_alembic_config("sqlite://"))
 
@@ -86,6 +102,11 @@ def test_initial_migration_creates_the_current_schema(tmp_path):
         "voiceprint_jobs",
         "recording_sessions",
         "recording_segments",
+        "classrooms",
+        "class_newsletters",
+        "class_newsletter_recipients",
+        "growth_delivery_batches",
+        "growth_delivery_entries",
     } <= tables
     assert {"detected_speaker_count", "used_low_volume_retry", "candidate_category"} <= columns
     assert {
@@ -125,7 +146,7 @@ def test_initial_migration_creates_the_current_schema(tmp_path):
     assert "audio_processing_incomplete" in record_columns
     assert {"voiceprint_candidate_teacher_id", "voiceprint_matching_checked"} <= record_columns
     assert "candidate_child_id" in record_columns
-    assert migration_revision(database_url) == "0028_teacher_invitations"
+    assert migration_revision(database_url) == "0029_class_digest_delivery"
 
 
 def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_path):
@@ -139,7 +160,7 @@ def test_existing_local_sqlite_database_is_adopted_without_deleting_data(tmp_pat
     message = prepare_database(database_url)
 
     assert "登録しました" in message
-    assert migration_revision(database_url) == "0028_teacher_invitations"
+    assert migration_revision(database_url) == "0029_class_digest_delivery"
 
 
 def test_both_0022_branches_upgrade_to_the_merged_head(tmp_path):
@@ -161,7 +182,7 @@ def test_both_0022_branches_upgrade_to_the_merged_head(tmp_path):
             }
         finally:
             engine.dispose()
-        assert migration_revision(database_url) == "0028_teacher_invitations"
+        assert migration_revision(database_url) == "0029_class_digest_delivery"
 
 
 def test_recorder_worker_migration_preserves_existing_session_metadata(tmp_path):

@@ -271,6 +271,7 @@ class ChildUpdate(BaseModel):
 class ChildRead(APIModel):
     id: UUID
     school_id: UUID
+    classroom_id: UUID | None = None
     display_name: str
     recording_names: list[str] = Field(default_factory=list)
     guardian_line_user_id: str | None
@@ -284,6 +285,96 @@ class ChildRead(APIModel):
         if value is None:
             return None
         return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+class ClassroomCreate(BaseModel):
+    school_id: UUID
+    name: str = Field(min_length=1, max_length=120)
+
+
+class ClassroomUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    is_active: bool = Field(strict=True)
+    delivery_enabled: bool = Field(strict=True)
+    daily_growth_limit: int = Field(ge=1, le=2)
+
+
+class ClassroomRead(APIModel):
+    id: UUID
+    school_id: UUID
+    name: str
+    is_active: bool
+    delivery_enabled: bool
+    daily_growth_limit: int
+    created_at: datetime
+
+
+class ChildClassroomUpdate(BaseModel):
+    classroom_id: UUID | None = None
+
+
+class ClassNewsletterDraft(BaseModel):
+    delivery_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    body: str = Field(min_length=1, max_length=3000)
+
+
+class ClassNewsletterEdit(BaseModel):
+    body: str = Field(min_length=1, max_length=3000)
+
+
+class ClassNewsletterApproval(BaseModel):
+    content_checked: bool = Field(strict=True)
+
+
+class ClassNewsletterRead(APIModel):
+    id: UUID
+    school_id: UUID
+    classroom_id: UUID
+    delivery_date: str
+    body: str
+    status: str
+    scheduled_for: datetime
+    approved_at: datetime | None
+    cancelled_at: datetime | None
+    is_trial: bool
+    recipient_count: int = 0
+    sent_count: int = 0
+    failed_count: int = 0
+    created_at: datetime
+
+
+class GrowthDeliveryPropose(BaseModel):
+    delivery_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+class GrowthDeliveryApproval(BaseModel):
+    selected_record_ids: list[UUID] = Field(max_length=2)
+    teacher_confirmed: bool = Field(strict=True)
+
+
+class GrowthDeliveryEntryRead(BaseModel):
+    record_id: UUID
+    child_id: UUID
+    child_name: str
+    summary: str
+    selected: bool
+    last_sent_at: datetime | None = None
+    accepted_delivery_count: int = Field(ge=0)
+
+
+class GrowthDeliveryBatchRead(APIModel):
+    id: UUID
+    classroom_id: UUID
+    delivery_date: str
+    daily_limit: int
+    status: str
+    scheduled_for: datetime
+    approved_at: datetime | None
+    cancelled_at: datetime | None
+    is_trial: bool
+    requires_admin_review: bool = False
+    candidates_without_guardian_link: int = 0
+    entries: list[GrowthDeliveryEntryRead] = Field(default_factory=list)
 
 
 class LineLinkInvitationCreate(BaseModel):
