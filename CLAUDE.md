@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 This file provides guidance to coding agents (Claude Code, Codex) when working with code in this repository.
-`AGENTS.md` points here, so add or change instructions in this file only.
+`AGENTS.md` points here for detailed working instructions. Git rules are defined separately through `AGENTS.md`; read it before working.
 
 Small Step（お便りAI）は、園で生まれた子どもの小さな成長を保護者へ届け、
 家庭でもその成長を具体的に褒めてもらえる機会を増やすためのサービスです。

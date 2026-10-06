@@ -284,11 +284,106 @@ class Child(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_text)
     school_id: Mapped[str] = mapped_column(ForeignKey("schools.id"), index=True)
+    classroom_id: Mapped[str | None] = mapped_column(ForeignKey("classrooms.id"), nullable=True, index=True)
     display_name: Mapped[str] = mapped_column(String(120))
     recording_names: Mapped[list[str]] = mapped_column(JSON, default=list)
     guardian_line_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    guardian_line_linked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class Classroom(Base):
+    """A manually managed class; existing children remain unassigned by default."""
+
+    __tablename__ = "classrooms"
+    __table_args__ = (UniqueConstraint("school_id", "name", name="uq_classroom_school_name"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_text)
+    school_id: Mapped[str] = mapped_column(ForeignKey("schools.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    delivery_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    delivery_enabled_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    daily_growth_limit: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ClassNewsletter(Base):
+    """Teacher-authored class-wide message, separate from individual records."""
+
+    __tablename__ = "class_newsletters"
+    __table_args__ = (UniqueConstraint("classroom_id", "delivery_date", name="uq_class_newsletter_day"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_text)
+    school_id: Mapped[str] = mapped_column(ForeignKey("schools.id"), index=True)
+    classroom_id: Mapped[str] = mapped_column(ForeignKey("classrooms.id"), index=True)
+    delivery_date: Mapped[str] = mapped_column(String(10), index=True)
+    body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="draft", index=True)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_trial: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by_teacher_id: Mapped[str | None] = mapped_column(ForeignKey("teachers.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ClassNewsletterRecipient(Base):
+    """One deduplicated LINE recipient and its retry-safe delivery state."""
+
+    __tablename__ = "class_newsletter_recipients"
+    __table_args__ = (UniqueConstraint("newsletter_id", "recipient_line_user_id", name="uq_class_newsletter_recipient"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_text)
+    newsletter_id: Mapped[str] = mapped_column(ForeignKey("class_newsletters.id"), index=True)
+    recipient_line_user_id: Mapped[str] = mapped_column(String(255))
+    child_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    delivery_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_failure_kind: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    provider_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class GrowthDeliveryBatch(Base):
+    """One teacher-approved daily quota for a class, with stable fair suggestions."""
+
+    __tablename__ = "growth_delivery_batches"
+    __table_args__ = (UniqueConstraint("classroom_id", "delivery_date", name="uq_growth_delivery_batch_day"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_text)
+    school_id: Mapped[str] = mapped_column(ForeignKey("schools.id"), index=True)
+    classroom_id: Mapped[str] = mapped_column(ForeignKey("classrooms.id"), index=True)
+    delivery_date: Mapped[str] = mapped_column(String(10), index=True)
+    daily_limit: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="draft", index=True)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_trial: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by_teacher_id: Mapped[str | None] = mapped_column(ForeignKey("teachers.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class GrowthDeliveryEntry(Base):
+    """Proposed/selected approved record for one child in one daily batch."""
+
+    __tablename__ = "growth_delivery_entries"
+    __table_args__ = (
+        UniqueConstraint("batch_id", "record_id", name="uq_growth_delivery_batch_record"),
+        UniqueConstraint("batch_id", "child_id", name="uq_growth_delivery_batch_child"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_text)
+    batch_id: Mapped[str] = mapped_column(ForeignKey("growth_delivery_batches.id"), index=True)
+    school_id: Mapped[str] = mapped_column(ForeignKey("schools.id"), index=True)
+    classroom_id: Mapped[str] = mapped_column(ForeignKey("classrooms.id"), index=True)
+    record_id: Mapped[str] = mapped_column(ForeignKey("records.id"), index=True)
+    child_id: Mapped[str] = mapped_column(ForeignKey("children.id"), index=True)
+    selected: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
@@ -427,6 +522,9 @@ class Notification(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_text)
     record_id: Mapped[str] = mapped_column(ForeignKey("records.id"), unique=True, index=True)
+    growth_delivery_entry_id: Mapped[str | None] = mapped_column(
+        ForeignKey("growth_delivery_entries.id"), unique=True, nullable=True
+    )
     channel: Mapped[str] = mapped_column(String(32), default="line")
     recipient_line_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

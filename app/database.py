@@ -41,6 +41,11 @@ def initialise_database(engine: Engine) -> None:
             ("recording_sessions", "is_trial", "BOOLEAN NOT NULL DEFAULT 0"),
             ("cloud_audio_jobs", "is_trial", "BOOLEAN NOT NULL DEFAULT 0"),
             ("children", "recording_names", "JSON NOT NULL DEFAULT '[]'"),
+            ("children", "classroom_id", "VARCHAR(36)"),
+            ("children", "guardian_line_linked_at", "DATETIME"),
+            ("notifications", "growth_delivery_entry_id", "VARCHAR(36)"),
+            ("classrooms", "delivery_enabled_since", "DATETIME"),
+            ("class_newsletter_recipients", "child_ids", "JSON NOT NULL DEFAULT '[]'"),
             ("records", "candidate_child_id", "VARCHAR(36)"),
             ("voice_enrollment_consents", "allows_recorder_identification", "BOOLEAN NOT NULL DEFAULT 0"),
             ("records", "voiceprint_candidate_teacher_id", "VARCHAR(36)"),
@@ -52,6 +57,10 @@ def initialise_database(engine: Engine) -> None:
     # Keep local developer databases usable without forcing a destructive reset.
     columns = {column["name"] for column in inspect(engine).get_columns("teachers")}
     with engine.begin() as connection:
+        connection.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_notifications_growth_delivery_entry "
+            "ON notifications (growth_delivery_entry_id)"
+        ))
         if "auth_user_id" not in columns:
             connection.execute(text("ALTER TABLE teachers ADD COLUMN auth_user_id VARCHAR(36)"))
             connection.execute(

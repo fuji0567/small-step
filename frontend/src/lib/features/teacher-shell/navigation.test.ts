@@ -99,9 +99,9 @@ describe('teacher shell navigation', () => {
     });
   });
 
-  it('全12項目に用途を説明するガイドを持つ', () => {
+  it('全13項目に用途を説明するガイドを持つ', () => {
     const items = teacherNavItems(true);
-    expect(items).toHaveLength(12);
+    expect(items).toHaveLength(13);
     for (const item of items) {
       expect(item.guide).toBeTruthy();
     }

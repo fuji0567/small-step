@@ -79,13 +79,14 @@ create_app(settings)
 成功は通常の先生メタデータと `invitation_sent_at` を返し、メール・トークンを含むSupabase応答は返しません。
 `GET /auth/config` の `teacher_invitations_enabled` は公開可否フラグだけです。
 
-タグごとのエンドポイント数です（`/api/v1` 配下、合計 70 本）。
+主なエンドポイントの代表例です（完全な契約とvalidationの正本は`app/api/routes.py`、`app/schemas.py`です）。
 
 | タグ | 数 | 代表的なエンドポイント |
 | --- | --- | --- |
 | `records` | 8 | `GET /records/{id}`, `PATCH /records/{id}/assignee`, `POST /records/{id}/approve`, `POST /records/manual` |
 | `notifications` | 6 | `GET /notifications`, `POST /notifications/{id}/retry`, `PATCH /notifications/{id}/schedule` |
 | `children` | 6 | `POST /children`, `POST /children/{id}/archive`, `DELETE /children/{id}/guardian-line-link` |
+| `classrooms` | 新規 | クラス、クラス便、個人成長選定 |
 | `teachers` | 6 | `GET /teachers`, `POST /teachers/{id}/invite`, `PATCH /teachers/{id}/role`, `POST /teachers/{id}/disable` |
 | `auth` | 5 | `GET /auth/config`, `GET /auth/me`, `POST /auth/link-teacher`, `POST /auth/bootstrap/teacher` |
 | `edge devices` | 4 | `POST /edge-devices`, `POST /edge-devices/{id}/rotate-key` |
@@ -116,6 +117,19 @@ falseでの更新は既存の担当候補も削除します。`GET /records/{rec
 呼び名や生の文字起こし、参照対応表は応答へ含めません。通常のRecordReadに候補IDは追加しません。
 録音由来の `POST /records/{id}/approve` は `child_confirmed=true` を必須とし、園児は既存の
 在籍・園スコープ検証を通した明示選択だけを使います。候補を配信先へ自動昇格させません。
+
+### クラス配信API
+
+| 用途 | 代表エンドポイント | 権限と重要条件 |
+| --- | --- | --- |
+| クラス管理 | `POST/GET /classrooms`, `PATCH /classrooms/{id}` | 読み取りは同じ園の先生、作成・変更は管理者。新方式は無効既定、quotaは1/2 |
+| 園児所属 | `PUT /children/{id}/classroom` | 管理者のみ。同じ園の在籍中クラスまたは`null`だけ |
+| クラス便 | `POST /classrooms/{id}/class-newsletters`, `PATCH/POST /class-newsletters/{id}...` | 同じ園の先生。対象日1日・本文確認・承認後だけ送信。宛先別再送は失敗分だけ |
+| 個人候補 | `POST /classrooms/{id}/growth-delivery/propose`, `GET /growth-delivery-batches/{id}` | 同じ園の先生。当日限定、公平順位はクラス全体から計算し、レスポンスは既存の記録閲覧認可で秘匿。非表示の選定候補があれば管理者確認フラグを返す |
+| 個人便承認 | `POST /growth-delivery-batches/{id}/approve` | 同じ園の先生。明示確認、承認時点の最新人数上限、在籍・クラス・LINE連携・同日重複を再検証。閲覧権限外の記録選択は拒否 |
+| 候補更新・取消 | `POST /growth-delivery-batches/{id}/refresh`, `/cancel` | 更新は園管理者のみ。取消は同じ園の先生が閲覧権限内の記録だけを含むバッチで可能 |
+
+有効クラスでは承認済み成長記録の通常通知を作らず、個人バッチで選択された記録だけが通知になります。無効クラスと怪我記録は既存承認経路を維持します。送信時の状態検証と宛先別再試行はAPIではなくLINEワーカーでも再度行います。
 
 利用者別の入口:
 

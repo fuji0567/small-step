@@ -18,7 +18,11 @@ from app.database import create_database_engine, initialise_database
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-APPLICATION_TABLES = ("schools", "teachers", "records", "notifications")
+APPLICATION_TABLES = (
+    "schools", "teachers", "records", "notifications", "classrooms",
+    "class_newsletters", "class_newsletter_recipients",
+    "growth_delivery_batches", "growth_delivery_entries",
+)
 
 
 class DatabaseMigrationError(RuntimeError):

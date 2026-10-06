@@ -50,6 +50,7 @@ flowchart TD
     JOBS["音声処理状況<br/>/teacher/audio-jobs/"]
     CHILDREN["園児・保護者<br/>/teacher/children/"]
     VOICE["声紋設定<br/>/teacher/voice-consent/"]
+    DELIVERY["今日の配信<br/>/teacher/daily-delivery/"]
 
     SETTINGS["園の設定<br/>/teacher/settings/"]
     TEACHERS["先生管理<br/>/teacher/teachers/"]
@@ -57,7 +58,7 @@ flowchart TD
     READY["稼働準備チェック<br/>/teacher/readiness/"]
     AUDIT["操作履歴<br/>/teacher/audit/"]
 
-    SHELL --> HOME & REVIEW & HISTORY & NOTIF & JOBS & CHILDREN & VOICE
+    SHELL --> HOME & REVIEW & HISTORY & NOTIF & JOBS & CHILDREN & VOICE & DELIVERY
     SHELL -. "先生管理者のみ" .-> SETTINGS & TEACHERS & DEVICES & READY & AUDIT
 
     HOME -->|"レビュー待ちを確認"| REVIEW

@@ -31,6 +31,12 @@ export const TEACHER_NAV_ITEMS = [
     guide: 'LINE通知の送信予定・結果・失敗を確認します。'
   },
   {
+    href: '/teacher/daily-delivery/',
+    label: '今日の配信',
+    icon: 'notifications',
+    guide: 'クラスのお便りと、先生が確認する個人成長の配信対象を管理します。'
+  },
+  {
     href: '/teacher/audio-jobs/',
     label: '音声処理状況',
     icon: 'audio',
@@ -185,6 +191,7 @@ export function teacherPageTitle(pathname: string): string {
       review: 'レビュー待ち',
       records: '記録履歴',
       notifications: '通知状況',
+      'daily-delivery': '今日の配信',
       'audio-jobs': '音声処理状況',
       children: '園児・保護者',
       'voice-consent': '声紋設定',

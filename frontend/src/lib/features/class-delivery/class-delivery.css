@@ -1,0 +1,142 @@
+.class-delivery {
+  display: grid;
+  gap: var(--ss-space-3);
+  max-width: 68rem;
+  margin-inline: auto;
+}
+.class-delivery__heading,
+.class-delivery__card,
+.class-delivery__section,
+.class-delivery__settings,
+.class-delivery__roster {
+  display: grid;
+  gap: var(--ss-space-2);
+}
+.class-delivery__heading h1,
+.class-delivery__heading p,
+.class-delivery__card h2,
+.class-delivery__card h3,
+.class-delivery__section p {
+  margin: 0;
+}
+.class-delivery__heading > p:last-child,
+.class-delivery__card > div > p,
+.class-delivery__section > p {
+  color: var(--ss-color-text-muted);
+}
+.class-delivery__eyebrow {
+  margin: 0;
+  color: var(--ss-color-action-hover);
+  font-weight: 700;
+}
+.class-delivery__card {
+  border: 2px solid var(--ss-color-border);
+  border-radius: var(--ss-radius-large);
+  padding: var(--ss-space-3);
+  background: var(--ss-color-surface);
+}
+.class-delivery__create,
+.class-delivery__settings,
+.class-delivery__daily-controls {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) minmax(12rem, 2fr) auto;
+  align-items: end;
+  gap: var(--ss-space-2);
+}
+.class-delivery__settings {
+  grid-template-columns: 1fr 2fr;
+  max-width: 42rem;
+}
+.class-delivery__daily-controls {
+  grid-template-columns: auto minmax(10rem, 1fr) auto minmax(10rem, 1fr);
+  max-width: 44rem;
+}
+.class-delivery__check {
+  grid-column: 1/-1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.class-delivery__roster {
+  border-top: 2px solid var(--ss-color-border);
+  padding-top: var(--ss-space-2);
+}
+.class-delivery__roster-row {
+  display: grid;
+  grid-template-columns: 1fr minmax(12rem, 18rem);
+  align-items: center;
+  gap: var(--ss-space-2);
+}
+.class-delivery__section {
+  border-top: 2px solid var(--ss-color-border);
+  padding-top: var(--ss-space-3);
+}
+.class-delivery label,
+.class-delivery legend {
+  font-weight: 700;
+}
+.class-delivery input:not([type='checkbox']),
+.class-delivery select,
+.class-delivery textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 2.75rem;
+  border: 2px solid var(--ss-color-border);
+  border-radius: var(--ss-radius-medium);
+  padding: 0.5rem 0.75rem;
+  background: var(--ss-color-surface);
+  color: var(--ss-color-text);
+  font: inherit;
+}
+.class-delivery textarea {
+  resize: vertical;
+  min-height: 9rem;
+}
+.class-delivery__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+}
+.class-delivery__candidates {
+  display: grid;
+  gap: var(--ss-space-2);
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.class-delivery__candidate {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--ss-space-2);
+  align-items: start;
+  border: 2px solid var(--ss-color-border);
+  border-radius: var(--ss-radius-medium);
+  padding: var(--ss-space-2);
+}
+.class-delivery__candidate > span {
+  display: grid;
+  gap: 0.25rem;
+}
+.class-delivery__candidate small {
+  color: var(--ss-color-text-muted);
+}
+.class-delivery input:focus-visible,
+.class-delivery select:focus-visible,
+.class-delivery textarea:focus-visible {
+  outline: 4px solid var(--ss-color-focus-outer);
+  outline-offset: 2px;
+}
+@media (max-width: 767px) {
+  .class-delivery__create,
+  .class-delivery__settings,
+  .class-delivery__daily-controls,
+  .class-delivery__roster-row {
+    grid-template-columns: 1fr;
+  }
+  .class-delivery__check {
+    grid-column: auto;
+  }
+  .class-delivery__card {
+    padding: var(--ss-space-2);
+  }
+}
