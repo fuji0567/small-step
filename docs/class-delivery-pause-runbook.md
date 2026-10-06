@@ -16,7 +16,7 @@
 
 ## 初回に休止対応版を反映
 
-レビュー済みの休止対応コードを `feature/class-delivery-pause` へpushした後の手順です。通常の `ubuntu` ユーザーで操作します。
+レビュー済みの休止対応コードを `develop` へ統合・pushした後の手順です。通常の `ubuntu` ユーザーで操作します。
 既存の `.env` は維持し、追跡ファイルに未コミット変更があれば取得前に確認します。
 
 ```bash
@@ -37,10 +37,10 @@ sudo docker compose -f compose.yaml -f compose.vrt.yaml --profile operations \
   run --rm --no-deps database-tools python scripts/upload_latest_database_backup.py
 ```
 
-成功した場合だけ、休止対応ブランチを取得して、案内されたコミットと一致することを確認します。
+成功した場合だけ、統合ブランチを取得して、案内されたコミットと一致することを確認します。
 
 ```bash
-git fetch https://github.com/fuji0567/small-step.git feature/class-delivery-pause
+git fetch https://github.com/fuji0567/small-step.git develop
 git show -s --oneline FETCH_HEAD
 git switch --detach FETCH_HEAD
 ```
