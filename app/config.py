@@ -52,6 +52,7 @@ class Settings(BaseSettings):
 
     digest_time: str = Field(default="17:00", pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
     timezone: str = "Asia/Tokyo"
+    class_delivery_enabled: bool = False
     line_channel_secret: str | None = None
     line_channel_access_token: str | None = None
     line_api_timeout_seconds: float = 10.0

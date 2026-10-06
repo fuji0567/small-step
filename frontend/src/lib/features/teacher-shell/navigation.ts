@@ -154,16 +154,21 @@ function badgeFor(
 
 export function teacherNavItems(
   isSchoolAdmin: boolean,
-  counts: NavigationBadgeCounts = EMPTY_NAVIGATION_BADGES
+  counts: NavigationBadgeCounts = EMPTY_NAVIGATION_BADGES,
+  classDeliveryEnabled = false
 ): AppShellNavItem[] {
   const items = [
     ...TEACHER_NAV_ITEMS,
     ...(isSchoolAdmin ? ADMIN_NAV_ITEMS : [])
   ];
-  return items.map((item) => {
-    const badge = badgeFor(item.href, counts, isSchoolAdmin);
-    return badge ? { ...item, ...badge } : { ...item };
-  });
+  return items
+    .filter(
+      (item) => classDeliveryEnabled || item.href !== '/teacher/daily-delivery/'
+    )
+    .map((item) => {
+      const badge = badgeFor(item.href, counts, isSchoolAdmin);
+      return badge ? { ...item, ...badge } : { ...item };
+    });
 }
 
 const ADMIN_ROUTE_PATTERN =
@@ -175,8 +180,14 @@ export function isAdminRoute(pathname: string): boolean {
 
 export function canAccessTeacherRoute(
   pathname: string,
-  isSchoolAdmin: boolean
+  isSchoolAdmin: boolean,
+  classDeliveryEnabled = false
 ): boolean {
+  if (
+    !classDeliveryEnabled &&
+    /^\/teacher\/daily-delivery(?:\/|$)/.test(pathname)
+  )
+    return false;
   return isSchoolAdmin || !isAdminRoute(pathname);
 }
 

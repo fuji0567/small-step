@@ -7,8 +7,9 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
 from app.config import Settings, get_settings
+from app.class_delivery import sync_class_delivery_mode
 from app.database import create_database_engine, create_session_factory
-from app.database_migrations import prepare_database
+from app.database_migrations import latest_migration_revision, migration_revision, prepare_database
 
 FRONTEND_DIST = Path(__file__).parent / "frontend_dist"
 RECORDER_DIST = Path(__file__).parent / "recorder_dist"
@@ -74,6 +75,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # checked-in migrations here also keeps local prototypes current.
         if engine.dialect.name == "sqlite":
             prepare_database(runtime_settings.database_url)
+        if migration_revision(runtime_settings.database_url) == latest_migration_revision():
+            with application.state.session_factory() as db:
+                sync_class_delivery_mode(db, enabled=runtime_settings.class_delivery_enabled)
+                db.commit()
         yield
         engine.dispose()
 

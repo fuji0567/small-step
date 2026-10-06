@@ -120,6 +120,11 @@ falseでの更新は既存の担当候補も削除します。`GET /records/{rec
 
 ### クラス配信API
 
+`CLASS_DELIVERY_ENABLED=false`（既定）では以下の全API（園児のクラス所属変更を含む）を共通依存で404にします。
+公開 `GET /auth/config` の `class_delivery_enabled` は秘密情報を含まず、画面のナビと直接URLの制御に使います。
+全体休止中は `POST /records/{id}/approve` がクラス別の有効設定に関わらず従来の通知を作成します。
+API起動時に適用済みDB版を確認してモードを同期し、新方式の予約を取り消します。DB版の巻き戻しはしません。
+
 | 用途 | 代表エンドポイント | 権限と重要条件 |
 | --- | --- | --- |
 | クラス管理 | `POST/GET /classrooms`, `PATCH /classrooms/{id}` | 読み取りは同じ園の先生、作成・変更は管理者。新方式は無効既定、quotaは1/2 |

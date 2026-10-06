@@ -142,6 +142,7 @@ vLLMは初回起動にモデル読込とGPU最適化で数分かかるため、�
 | `DATABASE_URL` | `sqlite:///./data/otayori.db` | 非 SQLite を強制 |
 | `EDGE_AUDIO_PROCESSING_MODE` | `local` | `local` / `cloud` |
 | `CLOUD_AUDIO_ENABLED` | `false` | 必要なときだけ `true` |
+| `CLASS_DELIVERY_ENABLED` | `false` | クラス便・公平な個人便の全体切替。APIとLINEワーカーで同じ値 |
 | `RECORDER_ENABLED` | `false` | 既存GPUワーカー・HTTPS・実機試験が揃った後だけ `true` |
 | `RECORDER_WORKER_HEARTBEAT_REQUIRED` | `true` | 録音有効時は `true` を強制 |
 | `RECORDER_PROCESSING_TIMEOUT_MINUTES` | `10` | 区間間の進捗更新が途絶えた処理を失敗にする |
@@ -155,6 +156,10 @@ vLLMは初回起動にモデル読込とGPU最適化で数分かかるため、�
 詳細は [api.md](api.md) の「設定」を参照してください。
 
 設定項目の一覧は `.env.example` にあります。
+
+クラス配信の一時休止・再開は [運用手順](../class-delivery-pause-runbook.md) に従います。
+DB `0029` とコードを維持して切り替え、旧ワーカーを停止してからAPIを再作成し、同じ設定の新版LINEワーカーを起動します。
+API起動とワーカーでモードを同期し、新方式の未来の予約・失敗通知も取り消します。通常の通知と送信済み履歴は保持します。
 
 録音セッションは既存GPUワーカーが通常音声・声紋ジョブと順番に処理します。
 APIとGPUワーカーの両方へ同じ `RECORDER_ENABLED` を渡し、共有ディレクトリは

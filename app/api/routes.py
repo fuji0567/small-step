@@ -140,6 +140,14 @@ from app.worker_heartbeat import (
 
 router = APIRouter(prefix="/api/v1")
 
+
+def require_class_delivery_enabled(request: Request) -> None:
+    if not request.app.state.settings.class_delivery_enabled:
+        raise HTTPException(status_code=404, detail="Class delivery is paused")
+
+
+class_delivery_router = APIRouter(dependencies=[Depends(require_class_delivery_enabled)])
+
 VOICE_ENROLLMENT_PURPOSE = "teacher_voiceprint_enrollment"
 VOICE_ENROLLMENT_POLICY_VERSION = "2026-09-17"
 GUARDIAN_NOT_LINKED_FAILURE_KIND = "guardian_not_linked"
@@ -1095,7 +1103,10 @@ def get_auth_client_config(request: Request) -> AuthClientConfig:
 
     settings = request.app.state.settings
     if settings.auth_mode == "development":
-        return AuthClientConfig(auth_mode="development", voiceprint_enabled=False)
+        return AuthClientConfig(
+            auth_mode="development", voiceprint_enabled=False,
+            class_delivery_enabled=settings.class_delivery_enabled,
+        )
     return AuthClientConfig(
         auth_mode="supabase",
         supabase_url=settings.supabase_url,
@@ -1103,6 +1114,7 @@ def get_auth_client_config(request: Request) -> AuthClientConfig:
         voiceprint_enabled=settings.voiceprint_enabled,
         recorder_demo_trace_enabled=settings.recorder_demo_trace_enabled,
         teacher_invitations_enabled=settings.teacher_invitations_enabled,
+        class_delivery_enabled=settings.class_delivery_enabled,
     )
 
 
@@ -1918,7 +1930,7 @@ def growth_batch_read(
     )
 
 
-@router.post("/classrooms", response_model=ClassroomRead, status_code=status.HTTP_201_CREATED, tags=["classrooms"])
+@class_delivery_router.post("/classrooms", response_model=ClassroomRead, status_code=status.HTTP_201_CREATED, tags=["classrooms"])
 def create_classroom(
     payload: ClassroomCreate,
     current_teacher: CurrentTeacher = Depends(get_current_teacher),
@@ -1939,7 +1951,7 @@ def create_classroom(
     return classroom
 
 
-@router.get("/classrooms", response_model=list[ClassroomRead], tags=["classrooms"])
+@class_delivery_router.get("/classrooms", response_model=list[ClassroomRead], tags=["classrooms"])
 def list_classrooms(
     school_id: str,
     include_inactive: bool = False,
@@ -1953,7 +1965,7 @@ def list_classrooms(
     return list(db.scalars(query.order_by(Classroom.name, Classroom.id)))
 
 
-@router.patch("/classrooms/{classroom_id}", response_model=ClassroomRead, tags=["classrooms"])
+@class_delivery_router.patch("/classrooms/{classroom_id}", response_model=ClassroomRead, tags=["classrooms"])
 def update_classroom(
     classroom_id: str,
     payload: ClassroomUpdate,
@@ -2008,7 +2020,7 @@ def update_classroom(
     return classroom
 
 
-@router.put("/children/{child_id}/classroom", response_model=ChildRead, tags=["children"])
+@class_delivery_router.put("/children/{child_id}/classroom", response_model=ChildRead, tags=["children"])
 def assign_child_classroom(
     child_id: str,
     payload: ChildClassroomUpdate,
@@ -2034,7 +2046,7 @@ def assign_child_classroom(
     return child
 
 
-@router.get("/class-newsletters", response_model=list[ClassNewsletterRead], tags=["classrooms"])
+@class_delivery_router.get("/class-newsletters", response_model=list[ClassNewsletterRead], tags=["classrooms"])
 def list_class_newsletters(
     school_id: str,
     classroom_id: str | None = None,
@@ -2054,7 +2066,7 @@ def list_class_newsletters(
     return [newsletter_read(db, row) for row in db.scalars(query.order_by(ClassNewsletter.delivery_date.desc()))]
 
 
-@router.post("/classrooms/{classroom_id}/class-newsletters", response_model=ClassNewsletterRead, status_code=status.HTTP_201_CREATED, tags=["classrooms"])
+@class_delivery_router.post("/classrooms/{classroom_id}/class-newsletters", response_model=ClassNewsletterRead, status_code=status.HTTP_201_CREATED, tags=["classrooms"])
 def save_class_newsletter_draft(
     classroom_id: str,
     payload: ClassNewsletterDraft,
@@ -2094,7 +2106,7 @@ def save_class_newsletter_draft(
     return newsletter_read(db, newsletter)
 
 
-@router.patch("/class-newsletters/{newsletter_id}", response_model=ClassNewsletterRead, tags=["classrooms"])
+@class_delivery_router.patch("/class-newsletters/{newsletter_id}", response_model=ClassNewsletterRead, tags=["classrooms"])
 def edit_class_newsletter(
     newsletter_id: str,
     payload: ClassNewsletterEdit,
@@ -2111,7 +2123,7 @@ def edit_class_newsletter(
     return newsletter_read(db, newsletter)
 
 
-@router.post("/class-newsletters/{newsletter_id}/approve", response_model=ClassNewsletterRead, tags=["classrooms"])
+@class_delivery_router.post("/class-newsletters/{newsletter_id}/approve", response_model=ClassNewsletterRead, tags=["classrooms"])
 def approve_class_newsletter(
     newsletter_id: str,
     payload: ClassNewsletterApproval,
@@ -2151,7 +2163,7 @@ def approve_class_newsletter(
     return newsletter_read(db, newsletter)
 
 
-@router.post("/class-newsletters/{newsletter_id}/cancel", response_model=ClassNewsletterRead, tags=["classrooms"])
+@class_delivery_router.post("/class-newsletters/{newsletter_id}/cancel", response_model=ClassNewsletterRead, tags=["classrooms"])
 def cancel_class_newsletter(
     newsletter_id: str,
     current_teacher: CurrentTeacher = Depends(get_current_teacher),
@@ -2174,7 +2186,7 @@ def cancel_class_newsletter(
     return newsletter_read(db, newsletter)
 
 
-@router.post("/class-newsletters/{newsletter_id}/retry", response_model=ClassNewsletterRead, tags=["classrooms"])
+@class_delivery_router.post("/class-newsletters/{newsletter_id}/retry", response_model=ClassNewsletterRead, tags=["classrooms"])
 def retry_class_newsletter_failures(
     newsletter_id: str,
     current_teacher: CurrentTeacher = Depends(get_current_teacher),
@@ -2211,7 +2223,7 @@ def retry_class_newsletter_failures(
     return newsletter_read(db, newsletter)
 
 
-@router.post("/classrooms/{classroom_id}/growth-delivery/propose", response_model=GrowthDeliveryBatchRead, tags=["classrooms"])
+@class_delivery_router.post("/classrooms/{classroom_id}/growth-delivery/propose", response_model=GrowthDeliveryBatchRead, tags=["classrooms"])
 def propose_growth_delivery(
     classroom_id: str,
     payload: GrowthDeliveryPropose,
@@ -2299,7 +2311,7 @@ def propose_growth_delivery(
     return result
 
 
-@router.get("/growth-delivery-batches/{batch_id}", response_model=GrowthDeliveryBatchRead, tags=["classrooms"])
+@class_delivery_router.get("/growth-delivery-batches/{batch_id}", response_model=GrowthDeliveryBatchRead, tags=["classrooms"])
 def get_growth_delivery_batch(
     batch_id: str,
     current_teacher: CurrentTeacher = Depends(get_current_teacher),
@@ -2310,7 +2322,7 @@ def get_growth_delivery_batch(
     return growth_batch_read(db, batch, current_teacher)
 
 
-@router.post("/growth-delivery-batches/{batch_id}/refresh", response_model=GrowthDeliveryBatchRead, tags=["classrooms"])
+@class_delivery_router.post("/growth-delivery-batches/{batch_id}/refresh", response_model=GrowthDeliveryBatchRead, tags=["classrooms"])
 def refresh_growth_delivery_batch(
     batch_id: str,
     current_teacher: CurrentTeacher = Depends(get_current_teacher),
@@ -2336,7 +2348,7 @@ def refresh_growth_delivery_batch(
     )
 
 
-@router.post("/growth-delivery-batches/{batch_id}/approve", response_model=GrowthDeliveryBatchRead, tags=["classrooms"])
+@class_delivery_router.post("/growth-delivery-batches/{batch_id}/approve", response_model=GrowthDeliveryBatchRead, tags=["classrooms"])
 def approve_growth_delivery_batch(
     batch_id: str,
     payload: GrowthDeliveryApproval,
@@ -2409,7 +2421,7 @@ def approve_growth_delivery_batch(
     return growth_batch_read(db, batch, current_teacher)
 
 
-@router.post("/growth-delivery-batches/{batch_id}/cancel", response_model=GrowthDeliveryBatchRead, tags=["classrooms"])
+@class_delivery_router.post("/growth-delivery-batches/{batch_id}/cancel", response_model=GrowthDeliveryBatchRead, tags=["classrooms"])
 def cancel_growth_delivery_batch(
     batch_id: str,
     current_teacher: CurrentTeacher = Depends(get_current_teacher),
@@ -2440,6 +2452,9 @@ def cancel_growth_delivery_batch(
     db.commit()
     db.refresh(batch)
     return growth_batch_read(db, batch, current_teacher)
+
+
+router.include_router(class_delivery_router)
 
 
 @router.get("/children", response_model=list[ChildRead], tags=["children"])
@@ -3753,7 +3768,8 @@ def approve_record(
     recipient_line_user_id = None if record.is_trial else child.guardian_line_user_id
     classroom = db.get(Classroom, child.classroom_id) if child.classroom_id else None
     use_class_delivery = (
-        record.category == RecordCategory.growth
+        request.app.state.settings.class_delivery_enabled
+        and record.category == RecordCategory.growth
         and classroom is not None
         and classroom.is_active
         and classroom.delivery_enabled

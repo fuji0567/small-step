@@ -21,6 +21,23 @@ function school(id = 'school-1') {
 }
 
 describe('TeacherShellState', () => {
+  it.each([false, true])(
+    'サーバーの配信切替 %s を画面へ渡す',
+    async (enabled) => {
+      const fetchMock = vi.fn<typeof fetch>(async (input) =>
+        String(input).endsWith('/auth/config')
+          ? jsonResponse({
+              auth_mode: 'development',
+              class_delivery_enabled: enabled
+            })
+          : jsonResponse([school()])
+      );
+      const shell = new TeacherShellState(fetchMock);
+      expect(shell.classDeliveryEnabled).toBe(false);
+      await shell.initialize(null);
+      expect(shell.classDeliveryEnabled).toBe(enabled);
+    }
+  );
   it('招待URLでは既存セッションを消し、パスワード設定後にだけ本人を紐付ける', async () => {
     const storage = {
       getItem: vi.fn(() => 'old-admin-token'),
