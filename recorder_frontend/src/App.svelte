@@ -78,6 +78,7 @@
   let recorder: RecorderController | null = null;
   let currentSession: LocalRecordingSession | null = null;
   let wakeLock: WakeLockSentinel | null = null;
+  let wakeLockRequestInFlight = false;
   let activeStream: MediaStream | null = null;
   let displayTimer: ReturnType<typeof setInterval> | null = null;
   let cleanupTimer: ReturnType<typeof setTimeout> | null = null;
@@ -120,8 +121,19 @@
       if (teacher) void retryOwned(false);
     };
     const visibility = () => {
-      if (document.visibilityState === "hidden") recorder?.visibilityHidden();
       updateStatusAvailability();
+      if (document.visibilityState !== "visible") {
+        void releaseWakeLock();
+        return;
+      }
+      if (recorder?.phase === "recording") {
+        const usableTrack = activeStream
+          ?.getAudioTracks()
+          .some((track) => track.readyState === "live" && !track.muted);
+        if (!usableTrack) recorder.microphoneInterrupted();
+        else void requestWakeLock();
+      }
+      void continuousQueue?.retry();
     };
     window.addEventListener("online", online);
     window.addEventListener("offline", updateStatusAvailability);
@@ -278,8 +290,7 @@
             api,
             beforeUpload: refreshCredentials,
             isCurrent: () => mounted && teacher?.id === ownerId,
-            isOnline: () =>
-              navigator.onLine && document.visibilityState === "visible",
+            isOnline: () => navigator.onLine,
             onPending: (count) => {
               pendingCount = count;
               void scheduleLocalCleanup();
@@ -790,15 +801,30 @@
   }
 
   async function requestWakeLock(): Promise<void> {
+    if (
+      !mounted ||
+      recorder?.phase !== "recording" ||
+      document.visibilityState !== "visible" ||
+      wakeLockRequestInFlight ||
+      (wakeLock && !wakeLock.released)
+    )
+      return;
+    wakeLockRequestInFlight = true;
     try {
       const lock = await navigator.wakeLock?.request("screen");
-      if (!mounted || recorder?.phase !== "recording") {
+      if (
+        !mounted ||
+        recorder?.phase !== "recording" ||
+        document.visibilityState !== "visible"
+      ) {
         await lock?.release();
         return;
       }
       wakeLock = lock ?? null;
     } catch {
       wakeLock = null;
+    } finally {
+      wakeLockRequestInFlight = false;
     }
   }
 

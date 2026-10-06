@@ -41,6 +41,7 @@ describe("App continuous recording", () => {
   let fetchFn: ReturnType<typeof vi.fn>;
   let unauthorized: boolean;
   let trialDemo: boolean;
+  let audioTrack: EventTarget & { readyState: string; muted: boolean };
   const servers = new Map<
     string,
     {
@@ -71,18 +72,21 @@ describe("App continuous recording", () => {
       configurable: true,
     });
     stopTrack = vi.fn();
-    const track = {
+    audioTrack = Object.assign(new EventTarget(), {
       stop: stopTrack,
       readyState: "live",
       muted: false,
-      addEventListener: vi.fn(),
-    };
+    });
     getUserMedia = vi.fn(async () => ({
-      getTracks: () => [track],
-      getAudioTracks: () => [track],
+      getTracks: () => [audioTrack],
+      getAudioTracks: () => [audioTrack],
     }));
     Object.defineProperty(navigator, "mediaDevices", {
       value: { getUserMedia },
+      configurable: true,
+    });
+    Object.defineProperty(navigator, "wakeLock", {
+      value: undefined,
       configurable: true,
     });
     vi.stubGlobal(
@@ -253,7 +257,7 @@ describe("App continuous recording", () => {
     unmount();
   });
 
-  it("画面が背面になれば端数を確定し前面復帰しても再開しない", async () => {
+  it("背面でも60秒ごとの録音と自動送信を続ける", async () => {
     const { unmount } = render(App);
     await settle();
     await fireEvent.click(
@@ -267,7 +271,73 @@ describe("App continuous recording", () => {
     });
     document.dispatchEvent(new Event("visibilitychange"));
     await settle();
+    expect(screen.getByText("録音中")).toBeInTheDocument();
+    expect(fixtures.sessions.size).toBe(0);
+    await vi.advanceTimersByTimeAsync(120_000);
+    await vi.waitFor(() => {
+      expect(servers.size).toBe(2);
+      expect(fixtures.sessions.size).toBe(0);
+      expect(
+        screen.getByText("サーバー受付: 2区間 / 未送信: 0区間"),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByText("録音中")).toBeInTheDocument();
+    Object.defineProperty(document, "visibilityState", {
+      value: "visible",
+      configurable: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await settle();
+    expect(screen.getByText("録音中")).toBeInTheDocument();
+    unmount();
+  });
+
+  it("背面でマイクが中断した場合は一時停止し復帰しても自動再開しない", async () => {
+    const { unmount } = render(App);
+    await settle();
+    await fireEvent.click(
+      screen.getByRole("button", { name: "連続録音・自動送信を開始" }),
+    );
+    await settle();
+    await vi.advanceTimersByTimeAsync(10_000);
+    Object.defineProperty(document, "visibilityState", {
+      value: "hidden",
+      configurable: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    audioTrack.muted = true;
+    audioTrack.dispatchEvent(new Event("mute"));
+    await settle();
     expect(screen.getByText("一時停止中")).toBeInTheDocument();
+    expect(screen.getByText(/マイクが中断/)).toBeInTheDocument();
+    Object.defineProperty(document, "visibilityState", {
+      value: "visible",
+      configurable: true,
+    });
+    audioTrack.muted = false;
+    document.dispatchEvent(new Event("visibilitychange"));
+    await settle();
+    expect(screen.getByText("一時停止中")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "録音を再開" }));
+    await settle();
+    expect(screen.getByText("録音中")).toBeInTheDocument();
+    unmount();
+  });
+
+  it("前面復帰時に中断イベントがなくても失われたマイクを検知する", async () => {
+    const { unmount } = render(App);
+    await settle();
+    await fireEvent.click(
+      screen.getByRole("button", { name: "連続録音・自動送信を開始" }),
+    );
+    await settle();
+    await vi.advanceTimersByTimeAsync(10_000);
+    Object.defineProperty(document, "visibilityState", {
+      value: "hidden",
+      configurable: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    audioTrack.readyState = "ended";
     Object.defineProperty(document, "visibilityState", {
       value: "visible",
       configurable: true,
@@ -275,9 +345,57 @@ describe("App continuous recording", () => {
     document.dispatchEvent(new Event("visibilitychange"));
     await settle();
     expect(screen.getByText("一時停止中")).toBeInTheDocument();
-    await fireEvent.click(screen.getByRole("button", { name: "録音を再開" }));
+    unmount();
+  });
+
+  it("手動モードも背面で録音を続けるが自動送信しない", async () => {
+    const { unmount } = render(App);
+    await settle();
+    await fireEvent.click(screen.getByRole("checkbox", { name: /連続録音/ }));
+    await fireEvent.click(screen.getByRole("button", { name: "録音開始" }));
+    await settle();
+    Object.defineProperty(document, "visibilityState", {
+      value: "hidden",
+      configurable: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(65_000);
     await settle();
     expect(screen.getByText("録音中")).toBeInTheDocument();
+    expect(fixtures.sessions.size).toBe(1);
+    expect(servers.size).toBe(0);
+    unmount();
+  });
+
+  it("前面復帰で画面点灯維持を再取得する", async () => {
+    const release = vi.fn(async () => undefined);
+    const request = vi.fn(async () => ({ released: false, release }));
+    Object.defineProperty(navigator, "wakeLock", {
+      value: { request },
+      configurable: true,
+    });
+    const { unmount } = render(App);
+    await settle();
+    await fireEvent.click(
+      screen.getByRole("button", { name: "連続録音・自動送信を開始" }),
+    );
+    await settle();
+    expect(request).toHaveBeenCalledTimes(1);
+    Object.defineProperty(document, "visibilityState", {
+      value: "hidden",
+      configurable: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await settle();
+    expect(release).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledTimes(1);
+    Object.defineProperty(document, "visibilityState", {
+      value: "visible",
+      configurable: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await settle();
+    expect(request).toHaveBeenCalledTimes(2);
     unmount();
   });
 

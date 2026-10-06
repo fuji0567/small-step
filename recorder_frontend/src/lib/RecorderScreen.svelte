@@ -93,7 +93,9 @@
 {#if view === "ready"}
   <section aria-labelledby="ready-title">
     <h2 id="ready-title">録音を始める</h2>
-    <p>録音中は画面を点灯したまま、ブラウザを前面に表示してください。</p>
+    <p>
+      ほかの画面へ切り替えても録音の継続を試みます。iPhone・iPadでは画面ロックやアプリ切り替えでブラウザが録音を中断する場合があります。確実に録音するには画面を開いたままにしてください。
+    </p>
     <label>
       <input
         type="checkbox"
@@ -117,7 +119,9 @@
         <ul>
           <li>録音することを周囲の方へ伝えてください。</li>
           <li>園の共用端末と安全な園内ネットワークを使用してください。</li>
-          <li>録音中はほかのアプリへ切り替えないでください。</li>
+          <li>
+            画面を戻したら録音状態と未送信件数を確認してください。マイクが中断された場合は「録音を再開」を押してください。
+          </li>
         </ul>
         <button class="primary" onclick={onConfirmCaution}>確認しました</button>
       </div>
@@ -139,7 +143,9 @@
     <p class="timer" aria-label={`録音時間 ${duration(elapsedMs)}`}>
       {duration(elapsedMs)}
     </p>
-    <p>画面を点灯したまま、ブラウザを前面に表示してください。</p>
+    <p>
+      ほかの画面へ切り替えても録音の継続を試みます。画面ロック中の録音・自動送信は端末やブラウザによって中断される場合があります。戻ったら録音状態と未送信件数を確認してください。
+    </p>
     <div class="actions">
       <button class="secondary" onclick={onPause}>一時停止</button>
       <button class="danger" onclick={onStop}>録音を停止</button>
