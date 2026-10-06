@@ -469,6 +469,8 @@ class OpenAICompatibleSummarizer:
                 "summary等には園児参照を含めず『園児』と表記してください。"
                 f"許可される参照: {json.dumps(references, ensure_ascii=False)}"
             )
+            if self.guidance_enabled and len(references) > 1:
+                subject_instruction += "現在の入力には異なる園児参照が複数あるためsubject_referenceは必ずnullです。"
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -511,6 +513,11 @@ class OpenAICompatibleSummarizer:
                 {
                     "role": "user",
                     "content": (
+                        json.dumps({
+                            "現在の文字起こし": safe_transcript,
+                            "同じ園児の過去の承認済み記録": safe_prior_context,
+                        }, ensure_ascii=False)
+                        if self.guidance_enabled else
                         f"現在の文字起こし:\n{safe_transcript}"
                         + (
                             f"\n\n同じ園児の過去の承認済み記録:\n{safe_prior_context}"
@@ -551,6 +558,11 @@ class OpenAICompatibleSummarizer:
             if demo_observer is not None:
                 demo_observer("validation", "JSON形式・候補形式の検証に失敗しました。記録には採用しません。")
             raise
+        # A model suggestion never overrides the single-child safety boundary.
+        if candidate.subject_reference is not None and (
+            len(references) != 1 or candidate.subject_reference not in references
+        ):
+            candidate = candidate.model_copy(update={"subject_reference": None})
         if demo_observer is not None:
             demo_observer("validation", candidate.model_dump(mode="json"))
         return candidate
