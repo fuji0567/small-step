@@ -12,7 +12,7 @@
 | COMP-02 | ESP端末 | 30秒WAV、低音量抑制、認証付き送信、待避1件。AI推論は行わない | `firmware/esp32-s3-recorder/` |
 | COMP-03 | FastAPI | 認証・認可、入力検証、短命保管受付、レビュー、運用API | `app/api/routes.py`, `app/api/dependencies.py` |
 | COMP-04 | GPUワーカー | 排他取得、音声解析、人物候補、候補作成、期限切れ清掃 | `app/recorder_worker.py`, `app/cloud_audio_worker.py`, `app/voiceprint_worker.py` |
-| COMP-05 | 音声/LLM | Whisper、匿名話者区間、構造化候補。人物や出来事の最終確定はしない | `app/edge_audio.py`, `app/speaker_diarization.py` |
+| COMP-05 | 音声/LLM | Whisper、匿名話者区間、構造化候補、版付きヒアリング指示。人物や出来事の最終確定はしない | `app/edge_audio.py`, `app/speaker_diarization.py`, `app/llm_guidance.py` |
 | COMP-06 | 業務DB | 園・先生・園児、加工済み記録、状態、通知。生音声/生文字起こしは保存しない | `app/models.py`, `migrations/` |
 | COMP-07 | 短命保管 | 音声をランダムキーで保管し削除。デモ表示は別の暗号化・短期限領域 | `app/recorder.py`, `app/cloud_audio.py`, `app/recorder_demo.py` |
 | COMP-08 | 先生用UI | 園児・本文・担当の確認、承認、却下、管理、任意声紋登録 | `frontend/src/lib/features/` |
@@ -105,6 +105,13 @@ PWA専用の園児・声紋候補機能をESPにも使えるとは扱いませ�
 | UI -> 個人便候補 | `/classrooms/{id}/growth-delivery/propose`, `/growth-delivery-batches/{id}` | 同じ園の先生。各記録の既存閲覧権限を適用し、上限はサーバー検証 |
 | ワーカー -> LLM | OpenAI互換ローカル推論API | 実モデル/指示文は設定・コードを正とし、JSON形式を検証 |
 | 管理UI -> 招待 | `POST /teachers/{id}/invite` | 管理者のみ。秘密キーはサーバー内のみ |
+
+COMP-05の指示調整は `app/llm_guidance.py` の共通指示と架空例8件を毎回systemへ渡す方式です。
+`guidance_enabled=False` は比較用CLIのbaselineに限って使い、通常アプリでは有効です。
+DB・LINEを使わない架空テキスト32件の試験は `app/llm_guidance_evaluation.py` と
+`scripts/evaluate_llm_guidance.py` が担当します。集計には入力・返答・例外本文を入れず、
+分類・人物候補の自動判定と文章の人手確認を区別します。追加学習や資料検索は追加しません。
+詳細は [LLM調整手順](docs/llm-kindergarten-tuning.md) を参照してください。
 
 ## 4. データと境界
 

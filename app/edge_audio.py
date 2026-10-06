@@ -25,6 +25,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from app.config import Settings
+from app.llm_guidance import kindergarten_guidance
 if TYPE_CHECKING:
     from app.recorder_children import RecorderChildMatcher
 from app.models import RecordCategory
@@ -424,6 +425,7 @@ class OpenAICompatibleSummarizer:
         allow_external: bool,
         timeout_seconds: float,
         backend: Literal["ollama", "vllm"] = "ollama",
+        guidance_enabled: bool = True,
     ) -> None:
         self.base_url = base_url.rstrip("/") if base_url else None
         self.api_key = api_key
@@ -431,6 +433,7 @@ class OpenAICompatibleSummarizer:
         self.allow_external = allow_external
         self.timeout_seconds = timeout_seconds
         self.backend = backend
+        self.guidance_enabled = guidance_enabled
 
     def _validate_endpoint(self) -> str:
         if not self.base_url or not self.model:
@@ -494,9 +497,15 @@ class OpenAICompatibleSummarizer:
                         "無音や判別不能な音声、園児の具体的な出来事がない技術テスト、雑談、設定確認、"
                         "先生だけの事務的な会話は recordable を false にし、category、summary、"
                         "conversation_prompt、anonymized_context をすべて null にします。"
-                        "内容が不確かな場合は推測で記録を作らず recordable を false にします。"
+                        + (
+                            "具体的な出来事も申告も確認できず内容が不確かな場合は"
+                            "推測で記録を作らず recordable を false にします。"
+                            if self.guidance_enabled else
+                            "内容が不確かな場合は推測で記録を作らず recordable を false にします。"
+                        ) +
                         "園児名、先生名、直接の発言、住所、連絡先、その他の識別子は含めません。"
                         "recordable が true の場合、けがの可能性があれば injury、それ以外は growth に分類します。"
+                        + (kindergarten_guidance() if self.guidance_enabled else "")
                     ),
                 },
                 {
