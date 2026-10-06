@@ -1,11 +1,5 @@
 # フロントエンド
 
-先生管理は公開認証設定の `teacher_invitations_enabled` がtrueなら登録後に招待APIを呼び、
-未連携の先生に送信・再送ボタンを表示します。登録成功と送信失敗を区別し、登録を二重に作りません。
-招待リンクの `type=invite` は先生layoutのマウント時に取り出してURLから削除し、ログイン画面を
-パスワード設定画面へ切り替えます。パスワード確認後、公開キーと本人トークンでSupabase `/auth/v1/user`
-へ直接PUTします。API用のsecret keyはfrontendへ渡しません。
-
 - 索引: [../architecture.md](../architecture.md)
 - 画面一覧と遷移図: [../transition.md](../transition.md)
 - 移行時の判断と履歴: [../svelte-migration-runbook.md](../svelte-migration-runbook.md)
@@ -76,8 +70,6 @@ WebM/Opusを作ります。一時停止、停止、画面の非表示、マイ�
 
 ---
 
----
-
 ## route 構成
 
 先生用は `frontend/src/routes/teacher/+layout.svelte` が認証、園選択、ナビゲーション、権限確認を共通で担当し、
@@ -138,7 +130,8 @@ route は薄く保ち、巨大な global store や DOM の手組み、`{@html}` 
 - JSON、text、Blob、204 を型ごとに処理します。
 - caller の cancel と 15 秒 timeout を区別します。
 - 想定外のレスポンス本文や秘密情報をそのままエラー表示しません。
-- 先生用画面から外部 CDN、外部フォント、テレメトリへ通信しません。
+- 外部CDN・フォント・テレメトリは使いません。業務APIは同一オリジンです。
+  認証・パスワード設定はブラウザからSupabaseへ直接通信し、録音PWAのtoken更新も同様です。
 
 選択園は `SchoolContext` が持ち、園を切り替えると画面固有の選択・編集中状態を消して再取得します。
 更新後の横断的な再取得は `AppController` と `InvalidationScope` で接続します。
@@ -171,6 +164,17 @@ effect の依存は入力となる状態だけに限定し、非同期読み込�
 ---
 
 ## 認証と認可
+
+
+### 先生招待
+
+先生管理は公開認証設定の `teacher_invitations_enabled` がtrueなら登録後に招待APIを呼び、
+未連携の先生に送信・再送ボタンを表示します。登録成功と送信失敗を区別し、登録を二重に作りません。
+招待リンクの `type=invite` は先生layoutのマウント時に取り出してURLから削除し、ログイン画面を
+パスワード設定画面へ切り替えます。パスワード確認後、公開キーと本人トークンでSupabase `/auth/v1/user`
+へ直接PUTします。API用のsecret keyはfrontendへ渡しません。
+
+### 記録候補と認証フロー
 
 記録詳細では任意の声紋照合の担当候補を専用APIから追加取得します。取得障害で通常のレビューを
 妨げません。候補が存在しても担当セレクトの初期値を変更せず、管理者だけに「候補を引き継ぎ先に選択」を
@@ -258,7 +262,8 @@ npm run test:unit
 npm run build
 ```
 
-2026-09-12 の切り替え確認では、Vitest 149 件、Playwright 7 件、format、lint、Svelte check、build が成功しました。
+過去の切り替え結果は [Svelte移行履歴](../svelte-migration-runbook.md)を参照してください。
+現在の変更では、上記コマンドを必要な範囲で実行して結果を記録します。
 Playwright は API をブラウザで intercept し、次を検査します。
 
 - ホームから各 route への URL 遷移

@@ -1,9 +1,8 @@
 # 画面遷移図
 
-> **状態: Svelte 切り替え実装済み（2026-09-14）**
->
-> この文書の前半は現在の Svelte 画面と canonical URL を示します。実運用環境へのデプロイ確認は未完了です。
-> 後半の「参考: 移行前の現行実装」はロールバック判断のために残す履歴であり、現在はマウントされていません。
+現在の画面遷移を示します。構成は [フロントエンド仕様](architecture/frontend.md)、
+利用者の操作は [使い方](usage.md)を参照してください。過去のHTML/JS画面は
+[旧画面遷移](history/legacy-screen-transitions.md)へ分離しています。
 
 ## 1. 移行後の全体構成
 
@@ -217,10 +216,12 @@ flowchart LR
     ARCHIVE -->|"コピー"| LIST
     INVITE --> OTHER
     ARCHIVE --> OTHER
-    OTHER -->|"秘密を状態とDOMから消去"| LIST
+    OTHER -->|"戻った画面では再表示不可"| LIST
 ```
 
-端末 API キー、招待コード、保護者 URL は URL、永続 store、ログへ入れません。現行と同じ園変更・ログアウト・次回の発行／再発行時の消去を必須とし、route 離脱時の消去を追加する場合は独立したセキュリティ改善として実装・テストします。
+端末APIキー、招待コード、発行した保護者URLは先生画面のroute URL・永続store・ログへ入れません。
+発行時の画面状態だけに保持し、園変更・ログアウト・次回の発行／再発行で消去します。
+保護者が受け取るURLのフラグメントと、保護者ページのsessionStorageは下記の別契約です。
 
 ## 8. 保護者用アーカイブ
 
@@ -242,283 +243,23 @@ stateDiagram-v2
     アーカイブ取得 --> エラー画面: 4xx / 5xx
 ```
 
-hash は API 呼び出し前にアドレスバーから消し、失敗時は sessionStorage の token も消去します。`no-referrer` の指定を維持します。
+hashはAPI呼び出し前にアドレスバーから消し、無効なtokenはsessionStorageからも消去します。`no-referrer` の指定を維持します。
 
-## 9. 実装・検証状況
+## 録音PWAの画面遷移
+
+`/rec/` はSvelteKitとは別の録音アプリです。本人ログイン→待機→録音／一時停止→送信／受付→処理結果の順で進みます。
+連続モードは60秒区間を確定・自動送信しながら録音画面を維持し、手動モードは停止後に送信または破棄を選びます。
+受付済みの記録ができたときだけ `/teacher/review/{recordId}/` へのリンクを表示し、先生による確認へ進みます。
+離脱後・再読み込み後の結果は先生用の音声処理状況で確認します。
+詳細は [録音の使い方](recorder-usage.md)、[録音画面仕様](architecture/frontend.md#独立録音pwa)を参照します。
+
+## 9. 検証する範囲
 
 - route ごとの取得、園切り替え、共有 invalidation、一般先生と管理者の DOM 差分を実装済みです。
 - 401、403、404、readiness 503、timeout と空状態を日本語で表示します。
-- 日誌の直接 URL、reload、Back、Forward、保護者 hash 除去を Playwright で確認しています。
-- keyboard、フォーカス、mobile reflow、重大な axe 違反がないことを自動確認しています。
-- サイドパネルとモバイルナビのバッジ表示、0 件の非表示、権限差分を自動確認しています。
-- 実運用環境へのデプロイ、実サービスを使う smoke test、ロールバック image tag の記録は未完了です。
+- 日誌の直接URL、reload、Back、Forward、保護者hash除去はPlaywrightの確認対象です。
+- keyboard、フォーカス、mobile reflow、重大なaxe違反を自動検査します。
+- バッジ表示、0件の非表示、権限差分を自動検査します。
+- 配備先のデプロイ・実サービスの確認・復旧は [実機・外部サービス確認](operations/acceptance.md)で別途記録します。
 
 ---
-
-## 参考: 移行前の現行実装
-
-移行前のフロントエンドは、ビルド工程を持たない素の HTML/CSS/JavaScript で構成された 2 つの静的アプリでした。
-ファイルは `app/web/` と `app/guardian/` にロールバック用として保持していますが、現在はマウントされていません。
-
-マウント先とディレクトリの対応は [architecture/frontend.md](architecture/frontend.md) にあります。
-
-先生用アプリは単一ページ内で `hidden` 属性を切り替える SPA で、URL ルーティング（History API / ハッシュ）は使っていません。
-そのため「画面遷移」はすべて `state.activeView` の変化と、それに紐づく DOM の表示切り替えを指します（`app/web/app.js` の `changeView()`）。
-
----
-
-### 1. 起動から認証までの遷移
-
-`start()` が `GET /api/v1/auth/config` を呼び、`auth_mode` によって初期状態が分岐します。
-
-```mermaid
-stateDiagram-v2
-    [*] --> 設定取得
-
-    設定取得: GET /auth/config
-    設定取得 --> アプリ本体: auth_mode = development<br/>（isSchoolAdmin = true で素通し）
-    設定取得 --> ログイン画面: auth_mode = supabase
-
-    state ログイン画面 {
-        [*] --> ログインフォーム
-        ログインフォーム --> 初回設定パネル: POST /auth/link-teacher が 404<br/>（未登録の管理者）
-        初回設定パネル --> ログインフォーム: エラー表示
-    }
-
-    ログイン画面 --> セッション確立: sessionStorage にトークンあり
-    ログインフォーム --> セッション確立: Supabase /auth/v1/token で<br/>access_token 取得
-
-    state セッション確立 {
-        [*] --> Me取得
-        Me取得: GET /auth/me
-        Me取得 --> 教員紐付け: 403
-        教員紐付け: POST /auth/link-teacher
-    }
-
-    セッション確立 --> アプリ本体: 教員レコード取得成功
-    セッション確立 --> ログイン画面: トークン失効<br/>（sessionStorage をクリア）
-    初回設定パネル --> アプリ本体: POST /auth/bootstrap/teacher
-
-    アプリ本体 --> ログイン画面: ログアウト<br/>（state 全消去 + sessionStorage 削除）
-    アプリ本体: 初期ロード loadApp()
-```
-
-#### 認証まわりの要点
-
-- アクセストークンの保持場所は [architecture/auth.md](architecture/auth.md) の「先生の認証」にあります。
-- ログインはブラウザから Supabase の `POST /auth/v1/token?grant_type=password` を直接叩き、
-  取得した JWT を `Authorization: Bearer` で自前 API に渡します。API 側は Supabase にトークン検証を委譲します。
-- `auth_mode=development` ではログイン画面自体を表示せず、`isSchoolAdmin = true` で全機能が開きます（ローカル開発専用）。
-- 初回設定パネル（bootstrap）は、Supabase 上のユーザーは存在するが `teachers` に行がない場合だけ表示されます。
-
-#### アプリ本体を開いた直後の初期ロード
-
-```
-loadApp()
-  └ GET /schools            … 園が 0 件なら「園がまだ登録されていません」で中断
-     ├ 並列取得
-     │   ├ GET /records                        （レビュー待ち）
-     │   ├ GET /notifications                  （通知状況）
-     │   ├ GET /audio-jobs                     （音声処理状況）
-     │   ├ GET /teachers                       （先生管理）
-     │   ├ GET /voice-consent/me               （声紋同意）
-     │   ├ GET /voiceprint/me                   （登録済み声紋）
-     │   └ GET /line/link-invitations/active   （招待コード）
-     └ GET /edge-devices                       （録音端末）
-```
-
----
-
-### 2. 先生用アプリのビュー遷移
-
-サイドバーのナビゲーションボタン（`data-view`）がハブになっており、
-どのビューからでも他のすべてのビューへ 1 ホップで移動できます。
-
-```mermaid
-flowchart TD
-    NAV{{"サイドバー<br/>.nav-button[data-view]"}}
-
-    HOME["ホーム<br/>#home-view"]
-    REVIEW["レビュー待ち記録<br/>#review-view"]
-    HISTORY["記録履歴<br/>#record-history-view"]
-    NOTIF["通知状況<br/>#notifications-view"]
-    JOBS["音声処理状況<br/>#audio-jobs-view"]
-    CHILDREN["園児・保護者<br/>#children-view"]
-    VOICE["声紋設定<br/>#voice-consent-view"]
-
-    SETTINGS["園の設定<br/>#school-settings-view"]
-    TEACHERS["先生管理<br/>#teachers-view"]
-    DEVICES["録音端末<br/>#edge-devices-view"]
-    RUNTIME["稼働準備チェック<br/>#runtime-view"]
-    AUDIT["操作履歴<br/>#audit-events-view"]
-
-    NAV --> HOME & REVIEW & HISTORY & NOTIF & JOBS & CHILDREN & VOICE
-    NAV -.先生管理者のみ表示.-> SETTINGS & TEACHERS & DEVICES & RUNTIME & AUDIT
-
-    HOME -- "「レビュー待ちを確認」" --> REVIEW
-    HOME -- "「通知状況を確認」" --> NOTIF
-
-    subgraph GLOBAL["全ビュー共通のヘッダー操作"]
-        SCHOOL["園セレクタ<br/>#school-select"]
-        RELOAD["再読み込み<br/>#reload-button"]
-        LOGOUT["ログアウト<br/>#logout-button"]
-    end
-
-    SCHOOL -. "選択中ビューを保ったまま再取得" .-> NAV
-    RELOAD -. "loadApp() を再実行" .-> NAV
-```
-
-#### ホームのサマリー
-
-ホームは 4 つのカウンタ（レビュー待ち / 送信待ち / 送信済み / LINE連携待ち）と、
-レビュー・通知への導線ボタンだけを持つダッシュボードです。独自のデータ取得は行わず、
-`loadApp()` が取得済みの `state` を描画します。
-
-#### ビューに入ったときの再取得
-
-`changeView()` はビュー表示の切り替えに加えて、ビューごとに最新データを取り直します。
-
-| ビュー | 入場時の処理 |
-| --- | --- |
-| ホーム | なし（`loadApp()` の結果を描画） |
-| レビュー待ち記録 | なし（同上） |
-| 園児・保護者 | なし（同上） |
-| 通知状況 | `GET /notifications` |
-| 記録履歴 | `GET /records`（履歴条件つき） |
-| 音声処理状況 | `GET /audio-jobs` と `GET /recorder/sessions` |
-| 声紋設定 | `GET /voice-consent/me` と `GET /voiceprint/me` |
-| 録音端末 | `GET /edge-devices` |
-| 園の設定 | 再描画のみ（フェッチなし） |
-| 稼働準備チェック | `GET /readiness` |
-| 操作履歴 | `GET /audit-events` |
-
-取得中は `#loading-indicator` が `aria-live="polite"` で表示され、失敗時は `#notice` にエラーが出ます。
-
-#### 権限による表示差分
-
-`state.isSchoolAdmin`（`teachers.role === "school_admin"`）で表示が変わります。
-
-| 項目 | 先生 (`teacher`) | 先生管理者 (`school_admin`) |
-| --- | --- | --- |
-| 園の設定・先生管理・録音端末・稼働準備チェック・操作履歴 | ナビ・ビューごと DOM から除去 | 表示 |
-| 園児の新規登録フォーム | 非表示（案内文のみ） | 表示 |
-| 招待コード発行 / LINE連携解除 / 園児の編集・アーカイブ・復帰 | 不可 | 可 |
-| 記録履歴・操作履歴の CSV 書き出し | 非表示 | 表示 |
-| 通知の再送 / 取り消し / 再スケジュール / Notion 同期 | 不可 | 可 |
-| 先生の権限変更 / 無効化 / 復帰 | 不可 | 可（自分自身は除く） |
-
-先生管理者専用の 5 ビューは `applySchoolAdminVisibility()` が一括で扱います。
-一般の先生では `hidden` を立てるだけでなく、ナビボタンとビュー本体をコメントノードと差し替えて
-DOM から外すため、開発者ツールで属性を消しても現れません（`state.isSchoolAdmin` が真になれば元の位置へ戻します）。
-`changeView()` も一般の先生からの専用ビュー要求をホームへ倒すので、
-管理者がログアウトした直後に別の先生がログインしても、前の画面が残りません。
-
----
-
-### 3. レビュー待ち記録ビューの内部遷移
-
-このビューだけは左のリストと右のフォームで状態が分かれます。
-
-```mermaid
-stateDiagram-v2
-    [*] --> 記録なし: レビュー待ちが 0 件
-
-    記録なし: #empty-state を表示
-    記録選択済: #review-form を表示
-    手入力: #manual-record-form を表示
-
-    記録なし --> 記録選択済: リストの項目をクリック
-    記録選択済 --> 記録選択済: 別の記録を選択
-    記録なし --> 手入力: 「手入力で追加」
-    記録選択済 --> 手入力: 「手入力で追加」
-    手入力 --> 記録選択済: キャンセル（先頭の記録に戻る）
-    手入力 --> 記録選択済: POST /records/manual 成功<br/>（作成した記録を選択）
-
-    記録選択済 --> 確認ダイアログ: 承認 / 却下
-    確認ダイアログ --> 記録選択済: キャンセル
-    確認ダイアログ --> 記録なし: POST /records/{id}/approve<br/>POST /records/{id}/reject<br/>（リストから消え次の記録へ）
-```
-
-- 承認時は本文・会話のきっかけ・園児・配信予定時刻を編集したうえで送信します。
-- 承認すると API 側で `notifications` 行が作られます。保護者の LINE 未連携なら `waiting_guardian_link`、
-  連携済みなら `pending` になり、送信ワーカーが配信します。
-- けがの記録は即時配信、成長の記録は園の `digest_time` に合わせた次回配信時刻が既定値になります。
-
----
-
-### 4. 確認ダイアログ
-
-破壊的・不可逆な操作は `<dialog id="confirmation-dialog">` のモーダルを挟みます（`showModal()`）。
-`Promise` を返す `confirmAction()` で実装され、キャンセル・ESC・背景クリックはすべて「実行しない」に倒れます。
-
-対象となる主な操作:
-
-- 記録の承認・却下
-- 園児のアーカイブ・復帰、LINE 連携の解除
-- 先生の権限変更・無効化・復帰
-- 通知の再送・取り消し・再スケジュール
-- 録音端末の APIキー再発行・無効化
-- 記録履歴 / 操作履歴の CSV 書き出し
-
----
-
-### 5. 園児・保護者ビューの資格情報表示
-
-一度しか表示できない資格情報は、専用の結果パネルに出したあとクリアされます。
-
-```mermaid
-flowchart LR
-    LIST["園児一覧"]
-    INVITE["#invite-result<br/>招待コード"]
-    ARCHIVE["#guardian-archive-result<br/>アーカイブURL"]
-
-    LIST -- "POST /line/link-invitations" --> INVITE
-    LIST -- "POST /guardian-archive-links" --> ARCHIVE
-    INVITE -- "コピー / 画面離脱" --> LIST
-    ARCHIVE -- "コピー / 画面離脱" --> LIST
-```
-
-- 招待コードは発行のたびに以前の未使用コードが失効します。再表示はできません。
-- アーカイブ URL も同様に一度きりの表示で、`#ssa_...` のフラグメントを含みます。
-
----
-
-### 6. 保護者用アーカイブ画面（`/guardian`）
-
-ログインを持たない単一画面です。園から配布された URL のフラグメントがそのまま資格情報になります。
-
-```mermaid
-stateDiagram-v2
-    [*] --> トークン解決
-
-    トークン解決 --> URL保存: location.hash が ssa_ で始まる
-    トークン解決 --> セッション復元: hash なし
-
-    URL保存: sessionStorage へ格納し<br/>history.replaceState で URL から除去
-    セッション復元: sessionStorage のトークンを読み出す
-
-    URL保存 --> 取得中
-    セッション復元 --> 取得中: トークンあり
-    セッション復元 --> エラー画面: トークンなし
-
-    取得中: GET /api/v1/guardian/archive<br/>Authorization: Bearer ssa_...
-    取得中 --> 一覧表示: 200
-    取得中 --> 空表示: 200 かつ notifications が 0 件
-    取得中 --> エラー画面: 4xx / 5xx<br/>（sessionStorage を破棄）
-
-    エラー画面: 「このアーカイブは開けません」
-```
-
-表示できる範囲・有効期限・`no-referrer` の指定は、トークンの性質として
-[architecture/auth.md](architecture/auth.md) の「保護者アーカイブのトークン」にまとめています。
-
----
-
-### 参照
-
-- 先生用アプリ: `app/web/index.html`, `app/web/app.js`, `app/web/styles.css`
-- 保護者用アプリ: `app/guardian/index.html`, `app/guardian/app.js`, `app/guardian/styles.css`
-- 現行の Svelte 静的配信: `app/main.py`, `app/frontend_dist/`
-- フロントエンドの実装方針: [architecture/frontend.md](architecture/frontend.md)
-- 認証の分岐: [architecture/auth.md](architecture/auth.md)
-- 技術構成の索引: [architecture.md](architecture.md)

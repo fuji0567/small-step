@@ -36,7 +36,9 @@ sudo docker compose -f compose.yaml -f compose.vrt.yaml build api migrate gpu-wo
 sudo docker compose -f compose.yaml -f compose.vrt.yaml run --rm --no-deps migrate
 ```
 
-各処理の成功を確認してから次へ進みます。移行は `0024_recorder_worker` まで適用します。
+各処理の成功を確認してから次へ進みます。`prepare_database.py` は配備revisionの移行headまで適用します。
+`0024_recorder_worker` は録音ワーカー導入時の移行で、そこで止める指定ではありません。
+園児候補・試用・先生招待など後続の移行も含めて、APIとワーカーのrevisionを揃えます。
 既存テーブルの保護を維持したまま、排他処理と内容を持たない進捗カウンターを追加します。
 障害時は録音無効化を優先します。APIだけ旧版へ戻すと移行番号不一致でreadinessが失敗します。
 
