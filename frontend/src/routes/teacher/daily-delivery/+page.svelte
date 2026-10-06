@@ -6,10 +6,12 @@
 </script>
 
 <svelte:head><title>今日の配信 | Small Step</title></svelte:head>
-<ClassDeliveryView
-  api={shell.api}
-  schoolId={shell.schools.schoolId}
-  schoolTimezone={shell.schools.selectedSchool?.timezone ?? 'Asia/Tokyo'}
-  schoolTrialMode={shell.schools.selectedSchool?.trial_mode === true}
-  isSchoolAdmin={shell.isSchoolAdmin}
-/>
+{#if shell.classDeliveryEnabled}
+  <ClassDeliveryView
+    api={shell.api}
+    schoolId={shell.schools.schoolId}
+    schoolTimezone={shell.schools.selectedSchool?.timezone ?? 'Asia/Tokyo'}
+    schoolTrialMode={shell.schools.selectedSchool?.trial_mode === true}
+    isSchoolAdmin={shell.isSchoolAdmin}
+  />
+{/if}

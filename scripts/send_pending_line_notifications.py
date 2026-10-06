@@ -12,6 +12,7 @@ import httpx
 from sqlalchemy import select
 
 from app.config import Settings, get_settings
+from app.class_delivery import sync_class_delivery_mode
 from app.database import create_database_engine, create_session_factory, initialise_database
 from app.line import LineMessagingError, build_notification_text, push_text_message
 from app.models import (
@@ -61,10 +62,6 @@ def send_due_notifications(
     """Send due notifications once, without exposing guardian IDs in logs."""
 
     settings = settings or get_settings()
-    if not dry_run and not settings.line_channel_access_token:
-        # A deployment without LINE credentials must not change queued notices.
-        return 0, 0
-
     engine = create_database_engine(settings.database_url)
     initialise_database(engine)
     session_factory = create_session_factory(engine)
@@ -73,6 +70,12 @@ def send_due_notifications(
 
     try:
         with session_factory() as session:
+            if not dry_run:
+                sync_class_delivery_mode(session, enabled=settings.class_delivery_enabled)
+                session.commit()
+            if not dry_run and not settings.line_channel_access_token:
+                # Pausing class work needs no credentials; ordinary notices remain queued.
+                return 0, 0
             eligible_statuses = [NotificationStatus.pending]
             if retry_failed:
                 eligible_statuses.append(NotificationStatus.failed)
@@ -86,6 +89,8 @@ def send_due_notifications(
             )
 
             for notification in notifications:
+                if not settings.class_delivery_enabled and notification.growth_delivery_entry_id:
+                    continue
                 record = session.get(Record, notification.record_id)
                 if record is not None:
                     school = lock_school(session, record.school_id)
@@ -102,7 +107,8 @@ def send_due_notifications(
                         continue
                     child = session.get(Child, record.child_id) if record.child_id else None
                     classroom = session.get(Classroom, child.classroom_id) if child and child.classroom_id else None
-                    if record.category == RecordCategory.growth and classroom is not None:
+                    if (settings.class_delivery_enabled
+                            and record.category == RecordCategory.growth and classroom is not None):
                         entry = session.get(GrowthDeliveryEntry, notification.growth_delivery_entry_id) if notification.growth_delivery_entry_id else None
                         batch = session.get(GrowthDeliveryBatch, entry.batch_id) if entry else None
                         if entry is not None:
@@ -179,14 +185,15 @@ def send_due_notifications(
                 session.commit()
                 sent_count += 1
 
-            class_sent, class_failed = _send_due_class_newsletters(
-                session=session,
-                settings=settings,
-                retry_failed=retry_failed,
-                dry_run=dry_run,
-            )
-            sent_count += class_sent
-            failed_count += class_failed
+            if settings.class_delivery_enabled:
+                class_sent, class_failed = _send_due_class_newsletters(
+                    session=session,
+                    settings=settings,
+                    retry_failed=retry_failed,
+                    dry_run=dry_run,
+                )
+                sent_count += class_sent
+                failed_count += class_failed
     finally:
         engine.dispose()
 

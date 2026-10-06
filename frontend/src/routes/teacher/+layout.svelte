@@ -25,15 +25,24 @@
 
   let session = $state<ReturnType<typeof initializeTeacherSession>>(null);
   let redirectedFromAdmin = $state(false);
+  let redirectedFromPausedDelivery = $state(false);
   let previousPath: string | null = null;
   const currentPath = $derived(page.url.pathname);
   const title = $derived(teacherPageTitle(currentPath));
   const navItems = $derived(
-    teacherNavItems(shell.isSchoolAdmin, shell.navigationBadges.counts)
+    teacherNavItems(
+      shell.isSchoolAdmin,
+      shell.navigationBadges.counts,
+      shell.classDeliveryEnabled
+    )
   );
   const adminRouteDenied = $derived(
     shell.phase === 'ready' &&
-      !canAccessTeacherRoute(currentPath, shell.isSchoolAdmin)
+      !canAccessTeacherRoute(
+        currentPath,
+        shell.isSchoolAdmin,
+        shell.classDeliveryEnabled
+      )
   );
 
   onMount(() => {
@@ -44,7 +53,10 @@
 
   $effect(() => {
     if (!adminRouteDenied) return;
-    redirectedFromAdmin = true;
+    redirectedFromPausedDelivery =
+      /^\/teacher\/daily-delivery(?:\/|$)/.test(currentPath) &&
+      !shell.classDeliveryEnabled;
+    redirectedFromAdmin = !redirectedFromPausedDelivery;
     void goto(resolve('/teacher/'), { replaceState: true });
   });
 
@@ -83,6 +95,7 @@
   function logout(): void {
     shell.logout();
     redirectedFromAdmin = false;
+    redirectedFromPausedDelivery = false;
     void goto(resolve('/teacher/'), { replaceState: true });
   }
 </script>
@@ -148,7 +161,12 @@
         </p>
       </Notice>
     {/if}
-    {#if redirectedFromAdmin}
+    {#if redirectedFromPausedDelivery}
+      <Notice tone="warning" title="この機能は休止中です">
+        <p>今日の配信画面は休止中のため、ホームへ移動しました。</p>
+      </Notice>
+      {@render children()}
+    {:else if redirectedFromAdmin}
       <Notice tone="warning" title="権限がありません">
         <p>先生管理者専用の画面からホームへ移動しました。</p>
       </Notice>

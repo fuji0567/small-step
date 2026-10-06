@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -12,9 +13,14 @@ from app.models import (
     ClassNewsletterRecipient,
     GrowthDeliveryBatch,
     GrowthDeliveryEntry,
+    Classroom,
+    ClassNewsletter,
+    Child,
     Notification,
     NotificationStatus,
     Record,
+    RecordCategory,
+    RecordStatus,
     Teacher,
     TeacherRole,
 )
@@ -80,7 +86,7 @@ def _growth_record(client: TestClient, school_id: str, teacher_id: str, child_id
 
 
 def test_class_mode_approval_waits_for_daily_selection_and_enforces_quota(tmp_path):
-    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/classes.db", auth_mode="development"))
+    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/classes.db", auth_mode="development", class_delivery_enabled=True))
     with TestClient(app) as client:
         school_id, classroom_id = _setup(client)
         teacher_id = client.get("/api/v1/teachers", params={"school_id": school_id}).json()[0]["id"]
@@ -124,7 +130,7 @@ def test_class_mode_approval_waits_for_daily_selection_and_enforces_quota(tmp_pa
 
 
 def test_approval_uses_the_latest_admin_configured_daily_limit(tmp_path):
-    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/quota-change.db", auth_mode="development"))
+    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/quota-change.db", auth_mode="development", class_delivery_enabled=True))
     with TestClient(app) as client:
         school_id, classroom_id = _setup(client, "Quota change test")
         teacher_id = client.get("/api/v1/teachers", params={"school_id": school_id}).json()[0]["id"]
@@ -172,7 +178,7 @@ def test_approval_uses_the_latest_admin_configured_daily_limit(tmp_path):
 
 
 def test_empty_class_day_can_be_confirmed_with_zero_individual_messages(tmp_path):
-    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/empty-class-day.db", auth_mode="development"))
+    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/empty-class-day.db", auth_mode="development", class_delivery_enabled=True))
     with TestClient(app) as client:
         school_id, classroom_id = _setup(client, "Empty class day test")
         unassigned = client.post(
@@ -198,7 +204,7 @@ def test_empty_class_day_can_be_confirmed_with_zero_individual_messages(tmp_path
 
 
 def test_draft_candidates_can_be_refreshed_after_more_records_are_approved(tmp_path):
-    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/refresh.db", auth_mode="development"))
+    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/refresh.db", auth_mode="development", class_delivery_enabled=True))
     with TestClient(app) as client:
         school_id, classroom_id = _setup(client, "Candidate refresh test")
         teacher_id = client.get("/api/v1/teachers", params={"school_id": school_id}).json()[0]["id"]
@@ -227,7 +233,7 @@ def test_draft_candidates_can_be_refreshed_after_more_records_are_approved(tmp_p
 
 
 def test_fair_order_uses_accepted_count_then_oldest_delivery_then_child_id(tmp_path):
-    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/fair-order.db", auth_mode="development"))
+    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/fair-order.db", auth_mode="development", class_delivery_enabled=True))
     with TestClient(app) as client:
         school_id, classroom_id = _setup(client, "Fair order test")
         teacher_id = client.get("/api/v1/teachers", params={"school_id": school_id}).json()[0]["id"]
@@ -319,7 +325,7 @@ def test_fair_order_uses_accepted_count_then_oldest_delivery_then_child_id(tmp_p
 
 
 def test_child_cannot_be_selected_twice_after_moving_classes_on_same_day(tmp_path):
-    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/one-per-child.db", auth_mode="development"))
+    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/one-per-child.db", auth_mode="development", class_delivery_enabled=True))
     with TestClient(app) as client:
         school_id, first_classroom_id = _setup(client, "One per child test")
         teacher_id = client.get("/api/v1/teachers", params={"school_id": school_id}).json()[0]["id"]
@@ -365,6 +371,7 @@ def test_personal_notice_is_cancelled_after_guardian_relinks_same_account(tmp_pa
 
     settings = Settings(
         database_url=f"sqlite:///{tmp_path}/personal-relink.db",
+        class_delivery_enabled=True,
         auth_mode="development",
         line_channel_access_token="mock-line-token",
     )
@@ -403,8 +410,182 @@ def test_personal_notice_is_cancelled_after_guardian_relinks_same_account(tmp_pa
         assert notices[0]["status"] == "cancelled"
 
 
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/classrooms?school_id=test"),
+    ("POST", "/classrooms"),
+    ("PATCH", "/classrooms/test"),
+    ("PUT", "/children/test/classroom"),
+    ("GET", "/class-newsletters?school_id=test"),
+    ("POST", "/classrooms/test/class-newsletters"),
+    ("PATCH", "/class-newsletters/test"),
+    ("POST", "/class-newsletters/test/approve"),
+    ("POST", "/class-newsletters/test/cancel"),
+    ("POST", "/class-newsletters/test/retry"),
+    ("POST", "/classrooms/test/growth-delivery/propose"),
+    ("GET", "/growth-delivery-batches/test"),
+    ("POST", "/growth-delivery-batches/test/refresh"),
+    ("POST", "/growth-delivery-batches/test/approve"),
+    ("POST", "/growth-delivery-batches/test/cancel"),
+])
+def test_class_delivery_defaults_to_paused_and_blocks_all_feature_apis(tmp_path, method, path):
+    settings = Settings(database_url=f"sqlite:///{tmp_path}/paused.db", auth_mode="development")
+    assert settings.class_delivery_enabled is False
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/api/v1/auth/config").json()["class_delivery_enabled"] is False
+        response = client.request(method, f"/api/v1{path}", json={} if method != "GET" else None)
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Class delivery is paused"
+
+
+def _queued_class_work(settings):
+    app = create_app(settings)
+    with TestClient(app) as client:
+        school_id, classroom_id = _setup(client, "Pause resume test")
+        teacher_id = client.get("/api/v1/teachers", params={"school_id": school_id}).json()[0]["id"]
+        child_id = _child(client, school_id, classroom_id, "テスト園児", "U-local-test")
+        _child(client, school_id, classroom_id, "送信済み宛先の園児", "U-history")
+        records = [_growth_record(client, school_id, teacher_id, child_id, label)
+                   for label in ("選定済み", "未選定")]
+        for record_id in records:
+            assert client.post(f"/api/v1/records/{record_id}/approve", json={}).status_code == 200
+        today = datetime.now(ZoneInfo("Asia/Tokyo")).date().isoformat()
+        batch = client.post(f"/api/v1/classrooms/{classroom_id}/growth-delivery/propose",
+                            json={"delivery_date": today}).json()
+        assert client.post(f"/api/v1/growth-delivery-batches/{batch['id']}/approve", json={
+            "selected_record_ids": records[:1], "teacher_confirmed": True,
+        }).status_code == 200
+        newsletter = client.post(f"/api/v1/classrooms/{classroom_id}/class-newsletters", json={
+            "delivery_date": today, "body": "テストのお便りです。",
+        }).json()
+        assert client.post(f"/api/v1/class-newsletters/{newsletter['id']}/approve",
+                           json={"content_checked": True}).status_code == 200
+        old_record_id = _growth_record(client, school_id, teacher_id, child_id, "過去の送信済み記録")
+        with app.state.session_factory() as db:
+            notice = db.scalar(select(Notification).where(Notification.record_id == records[0]))
+            notice.status = NotificationStatus.failed
+            notice.scheduled_for = datetime.now(timezone.utc) + timedelta(days=60)
+            recipient = db.scalar(select(ClassNewsletterRecipient).where(
+                ClassNewsletterRecipient.recipient_line_user_id == "U-local-test"
+            ))
+            recipient.status = "failed"
+            sent_recipient = db.scalar(select(ClassNewsletterRecipient).where(
+                ClassNewsletterRecipient.recipient_line_user_id == "U-history"
+            ))
+            sent_recipient.status = "sent"
+            sent_recipient.sent_at = datetime.now(timezone.utc)
+            db.get(ClassNewsletter, newsletter["id"]).scheduled_for = notice.scheduled_for
+            # A historical accepted message contributes to fairness after resumption.
+            old_batch = GrowthDeliveryBatch(
+                school_id=school_id, classroom_id=classroom_id, delivery_date="2020-01-01",
+                daily_limit=1, status="approved", scheduled_for=datetime.now(timezone.utc),
+            )
+            db.add(old_batch)
+            db.flush()
+            old_entry = GrowthDeliveryEntry(
+                school_id=school_id, classroom_id=classroom_id, batch_id=old_batch.id,
+                record_id=old_record_id, child_id=child_id, selected=True,
+            )
+            db.add(old_entry)
+            db.flush()
+            db.add(Notification(
+                record_id=old_record_id, growth_delivery_entry_id=old_entry.id,
+                status=NotificationStatus.sent, sent_at=datetime.now(timezone.utc),
+                scheduled_for=datetime.now(timezone.utc), recipient_line_user_id="U-local-test",
+            ))
+            db.get(Record, old_record_id).status = RecordStatus.dispatched
+            db.commit()
+    return school_id, classroom_id, teacher_id, child_id, records, batch["id"], newsletter["id"]
+
+
+def test_pause_resume_preserves_settings_and_history_without_releasing_old_work(tmp_path, monkeypatch):
+    from scripts.send_pending_line_notifications import send_due_notifications
+
+    settings = Settings(database_url=f"sqlite:///{tmp_path}/resume.db", auth_mode="development",
+                        class_delivery_enabled=True, line_channel_access_token="mock-line-token")
+    school_id, classroom_id, teacher_id, child_id, records, batch_id, newsletter_id = _queued_class_work(settings)
+    sent = []
+    monkeypatch.setattr("scripts.send_pending_line_notifications.push_text_message",
+                        lambda **kwargs: sent.append(kwargs["text"]) or "mock-request")
+    paused = settings.model_copy(update={"class_delivery_enabled": False})
+    paused_app = create_app(paused)
+    with TestClient(paused_app) as client:
+        assert client.get("/api/v1/readiness").json()["database_migration_current"] is True
+        assert client.get("/api/v1/classrooms", params={"school_id": school_id}).status_code == 404
+        with paused_app.state.session_factory() as db:
+            classroom = db.get(Classroom, classroom_id)
+            assert classroom.delivery_enabled is True
+            assert classroom.daily_growth_limit == 1
+            assert classroom.delivery_enabled_since is None
+            assert db.get(Child, child_id).classroom_id == classroom_id
+            assert db.get(GrowthDeliveryBatch, batch_id).status == "cancelled"
+            assert db.get(ClassNewsletter, newsletter_id).status == "cancelled"
+            assert db.scalar(select(Notification).where(Notification.record_id == records[0])).status == NotificationStatus.cancelled
+            recipient_states = [row.status for row in db.scalars(select(ClassNewsletterRecipient))]
+            assert sorted(recipient_states) == ["cancelled", "sent"]
+            assert db.scalar(select(Notification).where(Notification.status == NotificationStatus.sent)) is not None
+            assert db.scalar(select(Notification).where(Notification.record_id == records[1])) is None
+        legacy_record = _growth_record(client, school_id, teacher_id, child_id, "休止中の成長")
+        assert client.post(f"/api/v1/records/{legacy_record}/approve", json={}).status_code == 200
+        injury_record = _growth_record(client, school_id, teacher_id, child_id, "休止中のけが")
+        with paused_app.state.session_factory() as db:
+            db.get(Record, injury_record).category = RecordCategory.injury
+            db.commit()
+        assert client.post(f"/api/v1/records/{injury_record}/approve", json={}).status_code == 200
+        with paused_app.state.session_factory() as db:
+            notice = db.scalar(select(Notification).where(Notification.record_id == legacy_record))
+            assert notice.growth_delivery_entry_id is None
+            notice.scheduled_for = datetime.now(timezone.utc) - timedelta(days=1)
+            db.commit()
+    resumed_app = create_app(settings)
+    with TestClient(resumed_app) as client:
+        assert client.get("/api/v1/auth/config").json()["class_delivery_enabled"] is True
+        assert client.get("/api/v1/classrooms", params={"school_id": school_id}).json()[0]["delivery_enabled"] is True
+        assert send_due_notifications(settings=settings, retry_failed=True) == (2, 0)
+        assert len(sent) == 2
+        with resumed_app.state.session_factory() as db:
+            assert db.get(Classroom, classroom_id).delivery_enabled_since is not None
+            assert db.get(GrowthDeliveryBatch, batch_id).status == "cancelled"
+            assert db.get(ClassNewsletter, newsletter_id).status == "cancelled"
+            assert db.scalar(select(Notification).where(Notification.record_id == legacy_record)).status == NotificationStatus.sent
+            assert len(db.scalars(select(Notification).where(Notification.status == NotificationStatus.sent)).all()) == 3
+            history_batch = db.scalar(select(GrowthDeliveryBatch).where(
+                GrowthDeliveryBatch.delivery_date == "2020-01-01"
+            ))
+            history_id = history_batch.id
+        history = client.get(f"/api/v1/growth-delivery-batches/{history_id}").json()
+        assert history["entries"][0]["accepted_delivery_count"] == 1
+        later_record = _growth_record(client, school_id, teacher_id, child_id, "再開後の成長")
+        assert client.post(f"/api/v1/records/{later_record}/approve", json={}).status_code == 200
+        assert not any(row["record_id"] == later_record for row in client.get(
+            "/api/v1/notifications", params={"school_id": school_id}
+        ).json())
+
+
+def test_paused_worker_cancels_future_and_failed_work_without_line_credentials(tmp_path, monkeypatch):
+    from scripts.send_pending_line_notifications import send_due_notifications
+
+    settings = Settings(database_url=f"sqlite:///{tmp_path}/paused-worker.db", auth_mode="development",
+                        class_delivery_enabled=True)
+    _, classroom_id, _, _, _, batch_id, newsletter_id = _queued_class_work(settings)
+    monkeypatch.setattr("scripts.send_pending_line_notifications.push_text_message",
+                        lambda **kwargs: pytest.fail("Pausing must not call LINE"))
+    paused = settings.model_copy(update={"class_delivery_enabled": False})
+    assert send_due_notifications(settings=paused, dry_run=True) == (0, 0)
+    engine = create_app(settings).state.engine
+    from app.database import create_session_factory
+
+    with create_session_factory(engine)() as db:
+        assert db.get(GrowthDeliveryBatch, batch_id).status == "approved"
+    assert send_due_notifications(settings=paused) == (0, 0)
+    with create_session_factory(engine)() as db:
+        assert db.get(Classroom, classroom_id).delivery_enabled is True
+        assert db.get(GrowthDeliveryBatch, batch_id).status == "cancelled"
+        assert db.get(ClassNewsletter, newsletter_id).status == "cancelled"
+    engine.dispose()
+
+
 def test_class_assignment_rejects_a_class_from_another_school(tmp_path):
-    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/school-boundary.db", auth_mode="development"))
+    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/school-boundary.db", auth_mode="development", class_delivery_enabled=True))
     with TestClient(app) as client:
         first_school_id, first_classroom_id = _setup(client, "Assignment school one")
         child_id = _child(client, first_school_id, first_classroom_id, "園児", None)
@@ -420,7 +601,7 @@ def test_class_assignment_rejects_a_class_from_another_school(tmp_path):
 
 
 def test_regular_teacher_can_select_owned_growth_but_cannot_change_class_settings(tmp_path):
-    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/teacher-permissions.db", auth_mode="development"))
+    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/teacher-permissions.db", auth_mode="development", class_delivery_enabled=True))
     with TestClient(app) as client:
         school_id, classroom_id = _setup(client, "Teacher permission test")
         teacher_id = client.get("/api/v1/teachers", params={"school_id": school_id}).json()[0]["id"]
@@ -457,7 +638,7 @@ def test_regular_teacher_can_select_owned_growth_but_cannot_change_class_setting
 
 
 def test_teacher_cannot_approve_hidden_candidates_from_other_teachers(tmp_path):
-    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/mixed-teachers.db", auth_mode="development"))
+    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/mixed-teachers.db", auth_mode="development", class_delivery_enabled=True))
     with TestClient(app) as client:
         school_id, classroom_id = _setup(client, "Mixed teacher test")
         teachers = client.get("/api/v1/teachers", params={"school_id": school_id}).json()
@@ -519,7 +700,7 @@ def test_teacher_cannot_approve_hidden_candidates_from_other_teachers(tmp_path):
 
 
 def test_injury_approval_keeps_its_existing_notification_path_when_class_mode_is_on(tmp_path):
-    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/injury-path.db", auth_mode="development"))
+    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/injury-path.db", auth_mode="development", class_delivery_enabled=True))
     with TestClient(app) as client:
         school_id, classroom_id = _setup(client, "Injury path test")
         teacher_id = client.get("/api/v1/teachers", params={"school_id": school_id}).json()[0]["id"]
@@ -542,6 +723,7 @@ def test_trial_class_newsletter_is_never_queued_for_delivery(tmp_path, monkeypat
 
     settings = Settings(
         database_url=f"sqlite:///{tmp_path}/trial-newsletter.db",
+        class_delivery_enabled=True,
         auth_mode="development",
         line_channel_access_token="mock-line-token",
     )
@@ -578,7 +760,7 @@ def test_trial_class_newsletter_is_never_queued_for_delivery(tmp_path, monkeypat
 
 
 def test_legacy_delivery_stays_enabled_for_classes_that_have_not_opted_in(tmp_path):
-    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/legacy-mode.db", auth_mode="development"))
+    app = create_app(Settings(database_url=f"sqlite:///{tmp_path}/legacy-mode.db", auth_mode="development", class_delivery_enabled=True))
     with TestClient(app) as client:
         school_response = client.post("/api/v1/schools", json={"name": "Legacy delivery test"})
         school_id = school_response.json()["id"]
@@ -606,6 +788,7 @@ def test_class_newsletter_deduplicates_guardians_and_retries_only_failed_recipie
 
     settings = Settings(
         database_url=f"sqlite:///{tmp_path}/newsletter.db",
+        class_delivery_enabled=True,
         auth_mode="development",
         line_channel_access_token="mock-line-token",
     )
@@ -667,6 +850,7 @@ def test_approved_newsletter_is_not_sent_to_a_newly_linked_guardian(tmp_path, mo
 
     settings = Settings(
         database_url=f"sqlite:///{tmp_path}/late-guardian.db",
+        class_delivery_enabled=True,
         auth_mode="development",
         line_channel_access_token="mock-line-token",
     )

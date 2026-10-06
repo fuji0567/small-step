@@ -20,6 +20,7 @@ export interface AuthClientConfig {
   supabase_publishable_key: string | null;
   voiceprint_enabled: boolean;
   teacher_invitations_enabled?: boolean;
+  class_delivery_enabled?: boolean;
 }
 
 export type TeacherShellPhase =

@@ -109,6 +109,10 @@ export class TeacherShellState {
     return this.#config?.teacher_invitations_enabled === true;
   }
 
+  get classDeliveryEnabled(): boolean {
+    return this.#config?.class_delivery_enabled === true;
+  }
+
   get snapshot(): TeacherShellSnapshot {
     return {
       phase: this.#phase,

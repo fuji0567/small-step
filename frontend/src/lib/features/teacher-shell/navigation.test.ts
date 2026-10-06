@@ -99,12 +99,36 @@ describe('teacher shell navigation', () => {
     });
   });
 
-  it('全13項目に用途を説明するガイドを持つ', () => {
+  it('休止中は従来の12項目に用途を説明するガイドを持つ', () => {
     const items = teacherNavItems(true);
-    expect(items).toHaveLength(13);
+    expect(items).toHaveLength(12);
     for (const item of items) {
       expect(item.guide).toBeTruthy();
     }
+  });
+
+  it('休止中は配信ナビと直接URLを閉じ、再開時に戻す', () => {
+    expect(
+      teacherNavItems(true).some(
+        (item) => item.href === '/teacher/daily-delivery/'
+      )
+    ).toBe(false);
+    expect(canAccessTeacherRoute('/teacher/daily-delivery/', true)).toBe(false);
+    expect(canAccessTeacherRoute('/teacher/daily-delivery/', false, true)).toBe(
+      true
+    );
+    expect(
+      teacherNavItems(false, undefined, true).some(
+        (item) => item.href === '/teacher/daily-delivery/'
+      )
+    ).toBe(true);
+  });
+
+  it.each([false, true])('配信ナビのDOMは全体設定 %s に従う', (enabled) => {
+    render(NavigationFixture, { classDeliveryEnabled: enabled });
+    expect(screen.queryByRole('link', { name: '今日の配信' }) !== null).toBe(
+      enabled
+    );
   });
 
   it('バッジ合成後もガイドを保持する', () => {

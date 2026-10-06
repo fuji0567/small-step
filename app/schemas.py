@@ -92,6 +92,7 @@ class AuthClientConfig(BaseModel):
     voiceprint_enabled: bool = False
     recorder_demo_trace_enabled: bool = False
     teacher_invitations_enabled: bool = False
+    class_delivery_enabled: bool = False
 
 
 class TeacherProfileRead(TeacherRead):
