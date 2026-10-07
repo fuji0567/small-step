@@ -135,6 +135,30 @@ describe("RecorderController", () => {
     expect(segments).toHaveLength(60);
   });
 
+  it("背面でタイマーが遅れても上限を過ぎたら停止しマイクを解放する", async () => {
+    const stopTrack = vi.fn();
+    const segments: RecorderSegment[] = [];
+    const now = vi.fn(() => 0);
+    const controller = new RecorderController({
+      stream: {
+        getTracks: () => [{ stop: stopTrack }],
+      } as unknown as MediaStream,
+      mimeType: "audio/mp4",
+      createRecorder: () => new FakeRecorder(),
+      now,
+      onSegment: (segment) => {
+        segments.push(segment);
+      },
+    });
+    controller.start();
+    now.mockReturnValue(MAX_RECORDING_DURATION_MS + 10_000);
+    await vi.advanceTimersByTimeAsync(SEGMENT_DURATION_MS);
+
+    expect(controller.phase).toBe("stopped");
+    expect(segments[0]?.durationMs).toBe(MAX_RECORDING_DURATION_MS);
+    expect(stopTrack).toHaveBeenCalledOnce();
+  });
+
   it("連続モードは60分を超えて録音し12時間で停止する", async () => {
     const { controller, segments } = setup(
       MAX_CONTINUOUS_RECORDING_DURATION_MS,
@@ -149,15 +173,28 @@ describe("RecorderController", () => {
     expect(segments).toHaveLength(720);
   });
 
-  it("画面非表示で端数を確定して明示再開待ちにする", async () => {
+  it("マイク中断で端数を確定して明示再開待ちにする", async () => {
     const { controller, segments, interruptions } = setup();
     controller.start();
     await vi.advanceTimersByTimeAsync(8_000);
-    controller.visibilityHidden();
+    controller.microphoneInterrupted();
 
     expect(controller.phase).toBe("paused");
     expect(segments[0]?.durationMs).toBe(8_000);
-    expect(interruptions[0]).toContain("画面が背面");
+    expect(interruptions[0]).toContain("マイクが中断");
+  });
+
+  it("ブラウザによる予期しない停止でも端数を保存し自動再開しない", async () => {
+    const { controller, recorders, segments, interruptions } = setup();
+    controller.start();
+    await vi.advanceTimersByTimeAsync(8_000);
+    recorders[0].stop();
+    await controller.whenSettled();
+
+    expect(controller.phase).toBe("paused");
+    expect(segments[0]?.durationMs).toBe(8_000);
+    expect(interruptions[0]).toContain("マイクが中断");
+    expect(recorders).toHaveLength(1);
   });
 
   it("1分境界の保存中に停止しても次のRecorderを開始しない", async () => {

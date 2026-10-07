@@ -1,12 +1,13 @@
 # Svelte 移行作業手順書
 
-> **実施状況（2026-09-12）:** `ChangeToSvelte` ブランチで Svelte 5 / SvelteKit の実装と
-> canonical URL への切り替えは完了しています。
-> 本文に残る `/teacher-next/`、`/guardian-next/`、preview の記述は段階移行時の履歴です。現在の URL は
-> `/teacher/*` と `/guardian/` です。未完了なのは実運用環境へのデプロイ確認、実サービスを使う smoke test、
-> ロールバック手順の実地確認と image tag の記録です。ローカル実測は unit 149 件、E2E 7 件、
-> Python 57 件成功・1 件 skip、FastAPI 配信契約 5 件成功です。現行構成は [フロントエンド](architecture/frontend.md)、
-> 現行の画面遷移は [画面遷移図](transition.md) を正とします。
+> **移行履歴（2026-09-12の記録）**
+>
+> 以下は当時の移行計画・分担・検証結果です。現在の開発指示や配備状況を示す文書ではありません。
+> 当時の未確認項目とテスト件数は過去の記録として読みます。現在の構成は
+> [共通仕様](specification.md)、[フロントエンド](architecture/frontend.md)、[画面遷移](transition.md)を参照します。
+> 旧UIへ戻す節は当時の手順です。現在の試用ガードを含むAPI・ワーカー・DBを旧版へ戻す手順には使えません。
+> 試用移行後の障害対応は [園別試用モード](school-trial-runbook.md#制限と公開前の確認)に従います。
+> `/teacher-next/` と `/guardian-next/` は当時のpreview URLです。現在のURLは `/teacher/*` と `/guardian/` です。
 
 ## 目的
 

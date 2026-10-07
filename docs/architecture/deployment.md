@@ -11,7 +11,7 @@
 - 索引: [../architecture.md](../architecture.md)
 
 ローカル開発は SQLite + 単一プロセス、本番は PostgreSQL + Docker Compose です。
-GPU が必要なのはクラウド音声処理モードのワーカーだけで、API 自体は CPU イメージで動きます。
+GPUは音声ワーカーとVRT構成のvLLMに使います。APIとLINEワーカーはCPUイメージです。
 
 ---
 
@@ -78,7 +78,9 @@ flowchart LR
 | `gpu-worker` | 短命ジョブの音声を処理（`gpus: all`） | `unless-stopped` |
 | `line-worker` | 配信予定を過ぎた通知を LINE へ送信 | `unless-stopped` |
 | `database-tools` | `public`スキーマのバックアップ・検証・復元確認。`operations`プロファイルで一度だけ実行 | `no` |
-| `restore-db` | 復元リハーサル専用。非公開ネットワークとtmpfs上でのみ起動 | `no` |
+| `restore-db` | `recovery`プロファイルの復元リハーサル専用。非公開ネットワークとtmpfs | `no` |
+| `backup-worker` | `backup`プロファイルの日次バックアップ・外部退避 | `unless-stopped` |
+| `operations-monitor` | `monitoring`プロファイルの内部障害監視 | `unless-stopped` |
 
 依存関係は `condition: service_healthy` / `service_completed_successfully` で表現しています。
 移行が終わる前に API が立ち上がったり、API が応答する前にワーカーがポーリングを始めたりしません。
@@ -87,7 +89,7 @@ flowchart LR
 
 | ボリューム | 内容 | 共有するサービス |
 | --- | --- | --- |
-| `api_data` | SQLite ファイル、エッジ音声インボックス | 全サービス |
+| `api_data` | SQLite、録音PWAの短命セッション保管 | `api`, `migrate`, `gpu-worker`, `line-worker` |
 | `cloud_audio_jobs` | 短命の音声ジョブ | `api`, `gpu-worker` |
 | `gpu_model_cache` | Hugging Face のモデルキャッシュ | `gpu-worker` |
 
@@ -126,7 +128,9 @@ APIのホスト側ポートは `127.0.0.1:8000` に限定します。外部端�
 `gpu-worker` とCompose管理の `small-step-vllm` は外部ネットワーク `small-step-ai` に参加し、
 `LLM_BASE_URL=http://small-step-vllm:8000/v1` で参照します。
 ホスト側の公開は `127.0.0.1:8001:8000` に限定し、LLMをインターネットへ公開しません。
-MacのOllamaを使う場合は、従来どおり `host.docker.internal:host-gateway` も利用できます。
+ホスト側LLMを参照する場合は `host.docker.internal:host-gateway` も利用できます。
+サービス名・ホスト名はループバックではないため `LLM_ALLOW_EXTERNAL=true` の明示が必要です。
+これは許可先への通信を認めるガードで、LLMを公開する設定ではありません。
 
 vLLMは初回起動にモデル読込とGPU最適化で数分かかるため、ヘルスチェックには5分の起動猶予を
 設けています。`gpu-worker` はvLLMとAPIの両方がHealthyになってから起動します。
@@ -200,8 +204,8 @@ uvicorn app.main:app --reload
 `/_app/immutable/*` は content hash 付き asset です。HTML は `no-cache`、immutable asset は 1 年 cache で配信します。
 API、欠損 asset、`/guardian/` 配下の不明なパスを SPA fallback へ渡してはいけません。
 
-この構成のローカル build と配信契約テストは確認済みですが、実運用環境へのデプロイとロールバックは
-まだ確認していません。実施手順と判定条件は [Svelte 移行作業手順書](../svelte-migration-runbook.md) を参照してください。
+現在の配備先の結果は [実機・外部サービス確認](../operations/acceptance.md)で別途記録します。
+[Svelte移行手順](../svelte-migration-runbook.md)は過去の記録で、現在の試用ガードを含む全機能の復旧手順には使いません。
 
 SQLite の移行は起動時に自動適用されるため、事前準備は不要です。
 テストは `pytest`（`testpaths = ["tests"]`）で実行します。
@@ -210,7 +214,8 @@ SQLite の移行は起動時に自動適用されるため、事前準備は不�
 
 ## 運用スクリプト
 
-どんなコマンドがあるかは `scripts/` を直接見てください。使い方の手順は `README.md` にあります。
+コマンドは `scripts/`、初期設定は [初期設定手順](../operations/setup.md)、音声・MCPは
+[音声手順](../operations/audio.md)、バックアップ・監視は [運用手順](../operations/backup-monitoring.md)を参照します。
 ここに挙げるのは、**ファイル名からは分からない「常駐させるもの」だけ**です。
 
 | スクリプト | 用途 |
@@ -247,14 +252,15 @@ Issue番号から決まる同一の再試行キーで初回障害を送り、復
 
 新しい環境を立ち上げるときの順序です。
 
-1. `.env` を用意する（`.env.example` を基に）
-2. `prepare_database.py` で移行を適用する
-3. 園を作る（`POST /api/v1/schools`）
-4. `bootstrap_admin.py`、または画面の初回設定パネルで最初の先生管理者を作る
-5. `register_edge_device.py` で録音端末を登録し、APIキーを端末へ設定する
-6. LINE のチャネル設定と Webhook URL を登録する
-7. `check_runtime_readiness.py` で不足している設定を確認する
-8. 画面の「稼働準備チェック」がすべて緑になったら運用開始
-9. `backup-worker`と`operations-monitor`を各プロファイルで起動する
+1. `.env`に本番認証・DB・HTTPSと必要な機能設定を用意する。
+2. 静的ビルドを含むイメージを作り、移行をAPI起動前に適用する。Composeのmigrate完了を確認する。
+3. APIを起動し、APIとDBのhealthを確認する。VRTのvLLM・GPU・LINEワーカーの起動を確認する。
+4. bootstrap_admin.py、または認証済みAPI／画面の初回設定で園と最初の管理者を作る。
+5. 園児・先生・端末を登録し、LINE設定と連携を準備する。新規園は試用のままテストする。
+6. バックアップ・復元確認と監視を準備し、各プロファイルのワーカーを起動する。
+7. APIコンテナでcheck_runtime_readiness.pyを実行し、移行・設定・必要なheartbeatを確認する。
+8. 対象端末と外部サービスで試験する。運用開始の確認後、管理者が園を本番へ切り替える。
 
-手順の詳細は `README.md` に記載しています。
+既存環境の更新では録音停止・バックアップ・全旧ワーカー停止を含む
+[試用導入手順](../school-trial-runbook.md)を確認します。
+初期設定のコマンドは [初期設定](../operations/setup.md)、実機の合否は [確認一覧](../operations/acceptance.md)にあります。

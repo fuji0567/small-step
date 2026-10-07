@@ -4,13 +4,6 @@
 
 ## 園別試用モード
 
-プロコン用の処理表示は `POST /recorder/sessions` の厳密な真偽値 `demo_trace_requested`（既定false）で
-明示同意した試用録音に限定します。DBへ本文を保存せず、内容を含まない暗号化済み一時同意ファイルを使います。
-`GET /recorder/sessions/{id}/demo` は本人ログイン・録音所有者・現在の園の試用モードを毎回確認し、
-専用キーで復号した5分以内の結果だけを `Cache-Control: no-store, private` で返します。
-管理者への例外許可やdevelopment認証の素通しはありません。通常のセッションGETや一覧には内容を混ぜません。
-公開認証設定には有効フラグだけを追加し、暗号化キーやLLM接続情報は公開しません。
-
 `POST /schools` は `trial_mode=true` で作成します。`SchoolRead` と `GET /auth/me` は現在の園の
 `trial_mode`、記録と録音セッションの応答は永久保持する `is_trial` を返します。
 `PATCH /schools/{id}/trial-mode` はその園の先生管理者限定です。本番への切り替えは
@@ -21,8 +14,8 @@
 試用通知は配信キューから除外し、再送・日時変更・送信済み変更・Notion同期を409で拒否します。
 LINEワーカーもAPIを経由せず同じDBの試用フラグを確認します。詳細は [試用導入手順](../school-trial-runbook.md)。
 
-FastAPI 製の単一プロセスです。全エンドポイントは `/api/v1` 配下にあり、
-先生用・保護者用の静的アプリも同じプロセスから配信します。
+FastAPIのAPIエンドポイントは `/api/v1` 配下にあり、先生用・保護者用・録音用の静的アプリも
+APIプロセスから配信します。GPU処理とLINE配信は別プロセスです。
 
 ---
 
@@ -47,7 +40,8 @@ create_app(settings)
       └ mount("/rec", StaticFiles(recorder_dist, html=True))
 ```
 
-- 設定を引数で差し替えられるため、テストは本番用の環境変数を読まずにアプリを組み立てられます。
+- 設定を引数で差し替えられます。ただし `Settings` の未指定項目は `.env`／環境変数から読むため、
+  テストは必要な設定を明示し、本番設定が混ざらないことを確認します。
 - SQLite のときだけ起動時に移行を適用します。PostgreSQL では Alembic を明示的に実行する運用です
   （[data-model.md](data-model.md) を参照）。
 - `app/frontend_dist/` がない場合、開発では UI をマウントせずに API だけで起動し、`APP_ENV=production` では起動を止めます。
@@ -79,27 +73,27 @@ create_app(settings)
 成功は通常の先生メタデータと `invitation_sent_at` を返し、メール・トークンを含むSupabase応答は返しません。
 `GET /auth/config` の `teacher_invitations_enabled` は公開可否フラグだけです。
 
-タグごとのエンドポイント数です（`/api/v1` 配下、合計 70 本）。
+タグごとの機能分類です。正確なエンドポイント・入出力は起動中の `/docs`（OpenAPI）で確認します。
 
-| タグ | 数 | 代表的なエンドポイント |
-| --- | --- | --- |
-| `records` | 8 | `GET /records/{id}`, `PATCH /records/{id}/assignee`, `POST /records/{id}/approve`, `POST /records/manual` |
-| `notifications` | 6 | `GET /notifications`, `POST /notifications/{id}/retry`, `PATCH /notifications/{id}/schedule` |
-| `children` | 6 | `POST /children`, `POST /children/{id}/archive`, `DELETE /children/{id}/guardian-line-link` |
-| `teachers` | 6 | `GET /teachers`, `POST /teachers/{id}/invite`, `PATCH /teachers/{id}/role`, `POST /teachers/{id}/disable` |
-| `auth` | 5 | `GET /auth/config`, `GET /auth/me`, `POST /auth/link-teacher`, `POST /auth/bootstrap/teacher` |
-| `edge devices` | 4 | `POST /edge-devices`, `POST /edge-devices/{id}/rotate-key` |
-| `voice consent` | 3 | `GET /voice-consent/me`, `POST /voice-consent/me/revoke` |
-| `voiceprint` | 5 | `GET /voiceprint/me`, `POST /voiceprint/me/enroll`, `POST /voiceprint/me/verify` |
-| `schools` | 3 | `POST /schools`, `PATCH /schools/{id}/digest-time` |
-| `line` | 3 | `POST /line/webhook`, `POST /line/link-invitations` |
-| `guardian archive` | 3 | `POST /guardian-archive-links`, `GET /guardian/archive` |
-| `edge` | 3 | `POST /edge/records`, `POST /edge/heartbeat`, `GET /edge/me` |
-| `cloud audio` | 3 | `POST /edge/audio-jobs`, `GET /audio-jobs` |
-| `recorder` | 6 | `POST /recorder/sessions`, `PUT /recorder/sessions/{id}/segments/{sequence}`, `POST /recorder/sessions/{id}/finalize` |
-| `system` | 3 | `GET /health`, `GET /readiness`, `GET /navigation-badges` |
-| `audit` | 2 | `GET /audit-events`, `GET /audit-events/export.csv` |
-| `notion` | 1 | `POST /records/{id}/notion-sync` |
+| タグ | 代表的なエンドポイント |
+| --- | --- |
+| `records` | `GET /records/{id}`, `PATCH /records/{id}/assignee`, `POST /records/{id}/approve`, `POST /records/manual` |
+| `notifications` | `GET /notifications`, `POST /notifications/{id}/retry`, `PATCH /notifications/{id}/schedule` |
+| `children` | `POST /children`, `POST /children/{id}/archive`, `DELETE /children/{id}/guardian-line-link` |
+| `teachers` | `GET /teachers`, `POST /teachers/{id}/invite`, `PATCH /teachers/{id}/role`, `POST /teachers/{id}/disable` |
+| `auth` | `GET /auth/config`, `GET /auth/me`, `POST /auth/link-teacher`, `POST /auth/bootstrap/teacher` |
+| `edge devices` | `POST /edge-devices`, `POST /edge-devices/{id}/rotate-key` |
+| `voice consent` | `GET /voice-consent/me`, `POST /voice-consent/me/revoke` |
+| `voiceprint` | `GET /voiceprint/me`, `POST /voiceprint/me/enroll`, `POST /voiceprint/me/verify` |
+| `schools` | `POST /schools`, `PATCH /schools/{id}/digest-time`, `PATCH /schools/{id}/trial-mode` |
+| `line` | `POST /line/webhook`, `POST /line/link-invitations` |
+| `guardian archive` | `POST /guardian-archive-links`, `GET /guardian/archive` |
+| `edge` | `POST /edge/records`, `POST /edge/heartbeat`, `GET /edge/me` |
+| `cloud audio` | `POST /edge/audio-jobs`, `GET /audio-jobs` |
+| `recorder` | `POST /recorder/sessions`, `PUT /recorder/sessions/{id}/segments/{sequence}`, `POST /recorder/sessions/{id}/finalize`, `GET /recorder/sessions/{id}/demo` |
+| `system` | `GET /health`, `GET /readiness`, `GET /navigation-badges` |
+| `audit` | `GET /audit-events`, `GET /audit-events/export.csv` |
+| `notion` | `POST /records/{id}/notion-sync` |
 
 `POST /voiceprint/me/enroll` は同名の `audio` フィールドを3件受け取り、`POST /voiceprint/me/verify` は1件だけ受け取ります。声紋ジョブの応答は品質不合格時に理由と1始まりの録音番号を返しますが、保存先、元音声、特徴量は返しません。
 
@@ -143,6 +137,15 @@ API を経由せず、API と同じデータベースを直接読み書きしま
 `failed_segment_count`、`record_id`、`audio_processing_incomplete` を返します。内部のclaim tokenや保存キーは返しません。
 通常の記録APIにも `audio_processing_incomplete` を返し、部分失敗した録音を承認前に確認できるようにします。
 録音有効時のreadinessは通常音声と録音処理の両方の生存確認を要求します。
+
+### 試用録音の処理表示
+
+プロコン用の処理表示は `POST /recorder/sessions` の厳密な真偽値 `demo_trace_requested`（既定false）で
+明示同意した試用録音に限定します。DBへ本文を保存せず、内容を含まない暗号化済み一時同意ファイルを使います。
+`GET /recorder/sessions/{id}/demo` は本人ログイン・録音所有者・現在の園の試用モードを毎回確認し、
+専用キーで復号した5分以内の結果だけを `Cache-Control: no-store, private` で返します。
+管理者への例外許可やdevelopment認証の素通しはありません。通常のセッションGETや一覧には内容を混ぜません。
+公開認証設定には有効フラグだけを追加し、暗号化キーやLLM接続情報は公開しません。
 
 ---
 
@@ -201,17 +204,24 @@ Bearer token による先生認証と `assert_school_access` を必須とし、�
 `get_settings()` は `lru_cache` 付きで、プロセス内で一度だけ評価されます。
 
 設定キーの一覧と既定値は `.env.example` にあります。
-`Settings` が読むのはそこにあるキーで、本文で名前を挙げるのは、ふるまいの説明に必要なものだけです。
+設定の定義・型・検証は `app/config.py`、Compose専用の変数はComposeファイルを正とします。
+`.env.example` は設定例です。本文には、ふるまいの説明に必要なキーだけを挙げます。
 
 ### 本番構成の検証
 
-`reject_unsafe_production_configuration()` が `APP_ENV=production` のときだけ働き、
-次のいずれかに当てはまると起動を止めます。
+`reject_unsafe_production_configuration()` は全環境で機能間の設定を検証します。
+`APP_ENV=production` では追加で次の構成を拒否します。
 
 - `AUTH_MODE` が `supabase` でない
 - `SUPABASE_URL` または `SUPABASE_PUBLISHABLE_KEY` が未設定
 - `DATABASE_URL` が SQLite
-- 保護者アーカイブが有効なのに `GUARDIAN_ARCHIVE_BASE_URL` が HTTPS でない
+- 保護者アーカイブが有効なのに `GUARDIAN_ARCHIVE_BASE_URL` がホスト付きHTTPS URLでない
+- 録音有効時に `CLOUD_AUDIO_ENABLED=true` または `RECORDER_WORKER_HEARTBEAT_REQUIRED=true` が欠けている
+
+同じvalidatorには開発・本番共通の検証もあります。heartbeatの間隔と失効秒数、
+外部バックアップの暗号化・接続先、処理表示のFernetキー、任意の園児／先生照合の依存フラグ、
+声紋の暗号化キー・GPU有効化・話者分離トークンを検証します。先生招待の設定検証は
+招待処理でも行います（[先生招待](../teacher-invitations.md)）。静的ビルドの完全性は `app/main.py` が検証します。
 
 ローカル開発用の既定値をそのまま公開デプロイに持ち込む事故を、起動時点で防ぐための仕組みです。
 
@@ -227,8 +237,8 @@ Bearer token による先生認証と `assert_school_access` を必須とし、�
 | コード | 用途 |
 | --- | --- |
 | 401 | Bearer トークンがない、または無効 |
-| 403 | 園が違う、`school_admin` でない、機能が無効 |
-| 404 | 対象が存在しない、教員として未登録（初回設定へ誘導） |
+| 403 | 園が違う、`school_admin` でない、先生未紐付け／停止中、録音者本人でない |
+| 404 | 対象が存在しない、先生紐付け先のメールに該当する先生がない |
 | 409 | 状態が合わない（レビュー済みの記録を再承認、アーカイブ済みの園児を指定など） |
 | 422 | 入力値の検証エラー |
-| 503 | 必要な外部設定が未構成（`LINE_CHANNEL_SECRET` 未設定など） |
+| 503 | 機能が無効、必要な設定が未構成、外部認証へ到達不可、readiness未達など |
