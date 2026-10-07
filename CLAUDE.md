@@ -32,7 +32,9 @@ UI・ドキュメント・ユーザー向け文言はすべて日本語です。
 - 記録件数を増やすことより、本人の尊厳とプライバシーを守ること
 
 中心にある制約は **生音声と生の文字起こしを API のデータベースへ持ち込まない** こと。
-匿名化は園内のエッジ端末で済ませ、`POST /api/v1/edge/records` には加工済みテキストだけが届きます。
+既定のlocal経路は園内で匿名化し、`POST /api/v1/edge/records` には加工済みテキストだけが届きます。
+明示的に有効化するcloud・録音PWA・声紋はAPIで生音声を受け、DBとは別の短命ファイルへ一時保管します。
+プロコン用処理表示は同意・試用・本人認証付きの短命表示という例外です（`docs/specification.md`）。
 機能を足すときは、まずこの前提を壊していないか確認してください。
 
 ## コマンド
@@ -90,7 +92,7 @@ npm run build               # ../app/frontend_dist を生成
 [デプロイ設計](docs/architecture/deployment.md) を正とします。
 
 音声系の extras（`edge-audio` / `speaker-diarization`）は依存が重いため、
-README では別の venv（`.venv313`）へ入れる運用になっています。
+`docs/operations/audio.md` では別のvenv（`.venv313`）へ入れる運用を説明しています。
 
 ## アーキテクチャ
 
@@ -107,9 +109,9 @@ README では別の venv（`.venv313`）へ入れる運用になっています�
 
 ### 記録から配信まで
 
-`records.status` は `pending_review` → `approved` / `rejected` → `dispatched`。
+`records.status` は `pending_review` → `approved` → `dispatched`、または `pending_review` → `rejected`。
 `POST /records/{id}/approve` が `notifications` を 1 行作り（`record_id` に一意制約）、
-園児の LINE 連携状況で初期状態が `pending` か `waiting_guardian_link` に分かれます。
+在籍園児の確認は必須で、本番はLINE連携状況で `pending` / `waiting_guardian_link`、試用は終端状態 `trial` になります。
 配信予定時刻の既定は、けがの記録が即時、成長の記録が園ごとの `digest_time`（既定 17:00 / Asia/Tokyo）。
 実際の送信は API ではなく `send_pending_line_notifications.py` が行います。
 
@@ -121,7 +123,7 @@ README では別の venv（`.venv313`）へ入れる運用になっています�
 
 ### 単一ルーターと明示的なスコープ検証
 
-全 57 エンドポイントが `app/api/routes.py`（2,300 行超）に入っています。
+APIのルーターは `app/api/routes.py` に集約しています。正確なエンドポイントはOpenAPIで確認します。
 園スコープと管理者判定は、ミドルウェアに隠さず **各ハンドラの冒頭で明示的に呼ぶ** のがこのリポジトリの慣習です
 （`assert_school_access` / `assert_school_admin`）。新しいハンドラでも同じ形を踏襲してください。
 
@@ -143,7 +145,7 @@ prerender 済みページと `/_app/*` を静的配信し、`/teacher/*` だけ�
   `sessionStorage` へ保存して URL から消してから API を呼びます。
 - API は同一オリジンの `/api/v1` を呼び、認可の本体は引き続き FastAPI です。
 - 先生用のアクセストークンは `sessionStorage`（`small-step.access-token`）にのみ保持します。
-- 外部フォントや CDN は使わず、アイコンはローカル SVG です。先生用画面は外部オリジンへ通信しません。
+- 外部フォントや CDN は使わず、アイコンはローカル SVG です。業務APIは同一オリジン、認証・パスワード設定はSupabaseへ直接通信します。
 
 `app/web/` と `app/guardian/` はロールバック用にファイルを保持していますが、現在の URL にはマウントされません。
 構成とテスト責務の詳細は `docs/architecture/frontend.md` を参照してください。
@@ -162,7 +164,7 @@ prerender 済みページと `/_app/*` を静的配信し、`/teacher/*` だけ�
 
 - **資格情報は一度きりの表示。** 端末 APIキー・招待コード・アーカイブ URL はハッシュだけを保存し、
   再表示できません。紛失時は再発行して以前のものを失効させる、が既定の流れです。
-- **`audit_events` に秘密情報を入れない。** 記録するのは操作の種類・日時・実行者の表示名だけ。
+- **`audit_events` に秘密情報を入れない。** DB行は園・実行先生の参照、操作種別・対象種別・日時等を持ち、画面／CSVは操作・日時・実行者表示名を示します。
   園児名、通知文、LINE ユーザーID、対象の内部 ID は入れません。
 - **`AUTH_MODE=development` は常に管理者扱い。** 認証を素通しし `isSchoolAdmin` も `true` 固定なので、
   一般の先生の画面はこのモードでは再現できません。外部公開も不可です。
@@ -205,7 +207,7 @@ prerender 済みページと `/_app/*` を静的配信し、`/teacher/*` だけ�
 ## ドキュメント
 
 機能を実装するときは、実装箇所を推測してコードから直接探索し始めないでください。
-まず `docs/architecture.md` と該当領域の設計文書を読み、機能の責務、処理の流れ、関連モジュール、
+まず `docs/README.md`、`docs/specification.md`、`docs/architecture.md` と該当領域の設計文書を読み、機能の責務、処理の流れ、関連モジュール、
 既存の判断を把握して、変更候補を大まかに絞ります。その見当を付けてから実コードを確認し、実装に入ります。
 
 | 領域 | ファイル |
@@ -221,7 +223,9 @@ prerender 済みページと `/_app/*` を静的配信し、`/teacher/*` だけ�
 | 画面遷移 | `docs/transition.md` |
 | 参考デザインシステム | `docs/design-system-digital-agency.md` / `docs/reference/dads/` |
 
-運用手順とセットアップの詳細は `README.md`、設定項目の一覧は `.env.example` にあります。
+READMEは人間向けの概要・使い方・起動と技術構成への入口です。操作は `docs/usage.md`、
+運用・セットアップの詳細は `docs/operations/` と領域別runbookに置きます。
+設定例は `.env.example`、定義・制約は `app/config.py` とComposeを確認します。
 
 ### コミット時のドキュメント整合
 

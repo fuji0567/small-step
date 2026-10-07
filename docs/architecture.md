@@ -1,7 +1,10 @@
 # 技術構成
 
-Small Step（お便りAI）は、園内の音声を **園内で匿名化してから** クラウドへ渡すことを前提にした構成です。
-生音声と生の文字起こしは API のデータベースに入りません。
+Small Step（お便りAI）の構成図と領域別仕様の索引です。既定のローカル処理は園内で匿名化し、
+加工済みテキストを送ります。明示的に有効化したクラウド音声処理・録音PWAは生音声をAPI経由で
+短命ファイルへ一時保管します。音声と生の文字起こしは業務DBへ保存しません。
+
+横断する機能・権限・保存境界は [共通仕様](specification.md)、文書の役割は [文書一覧](README.md)を参照してください。
 
 このファイルは索引です。詳細は領域ごとのドキュメントを参照してください。
 
@@ -13,7 +16,7 @@ Small Step（お便りAI）は、園内の音声を **園内で匿名化して�
 | 認証・認可 | [architecture/auth.md](architecture/auth.md) | Supabase JWT、端末 APIキー、アーカイブトークン、園スコープ |
 | 外部連携 | [architecture/integrations.md](architecture/integrations.md) | LINE、Notion、保護者アーカイブ |
 | フロントエンド | [architecture/frontend.md](architecture/frontend.md) | SvelteKit の route、状態、静的配信、テスト |
-| Svelte 移行手順 | [svelte-migration-runbook.md](svelte-migration-runbook.md) | 実装履歴、並列分担、テスト、切り替え、ロールバック |
+| Svelte 移行履歴 | [svelte-migration-runbook.md](svelte-migration-runbook.md) | 過去の移行計画と検証記録。現行の作業指示とは区別 |
 | デプロイ・運用 | [architecture/deployment.md](architecture/deployment.md) | Docker、Compose、環境変数、運用スクリプト |
 | 画面遷移 | [transition.md](transition.md) | 画面一覧と遷移図 |
 | 参考デザインシステム | [design-system-digital-agency.md](design-system-digital-agency.md) | デジタル庁デザインシステムへの案内とトークンの値。考え方の原文は [reference/dads/](reference/dads/ABOUT-THIS-COPY.md) に無改変で複製 |
@@ -52,6 +55,9 @@ flowchart TB
         NOTION["Notion API"]
     end
 
+    RECWEB["/rec/ 独立録音PWA<br/>明示的有効化"]
+    RECSTORE[("短命録音セッション保管")]
+
     subgraph USERS["利用者"]
         TEACHER["先生 / 先生管理者"]
         GUARDIAN["保護者"]
@@ -68,6 +74,9 @@ flowchart TB
     JOBS <-.-> WORKER
 
     TEACHER --> WEB --> API
+    TEACHER --> RECWEB -->|分割生音声| API
+    API --> RECSTORE
+    RECSTORE <-.-> WORKER
     TEACHER -->|パスワードログイン| SUPA
     API -->|トークン検証| SUPA
     API <--> DB
@@ -86,13 +95,12 @@ flowchart TB
 
 ## 設計上の前提
 
-1. **生音声と生の文字起こしを API に持ち込まない。** エッジ端末で匿名化を済ませてから送信します。
-   クラウド GPU 処理モードでも、音声バイトは短命ジョブ保管に置かれ、処理後に削除されます。
-2. **保護者に届く文面は必ず先生が承認する。** 記録は `pending_review` で作られ、承認しない限り配信されません。
-3. **資格情報は一度だけ表示する。** 端末 APIキー、招待コード、アーカイブ URL はハッシュ／不透明トークンで保存し、
-   再表示はできません。紛失時は再発行し、以前のものを失効させます。
-4. **監査ログに秘密情報を残さない。** `audit_events` には操作の種類と対象だけを記録します。
-5. **ローカルの既定値のまま本番起動できないようにする。** `app/config.py` が起動時に構成を検証します。
+共通の契約は [共通仕様](specification.md)に集約します。
+
+- 先生の承認と在籍園児の確認を配信の前提にし、試用記録は永久に配信対象外にします。
+- 生音声と生の文字起こしの業務DBへの保存を禁止し、クラウド経路の短命ファイルを区別します。
+- 発行時だけ資格情報を表示し、監査には本文・秘密情報・対象の内部IDを保存しません。
+- 本番設定、DB移行、静的ビルドとワーカーのreadinessを運用前に確認します。
 
 ---
 
@@ -103,7 +111,7 @@ flowchart TB
 | API | Python 3.11+, FastAPI, Uvicorn, Pydantic v2 |
 | ORM / マイグレーション | SQLAlchemy 2.0, Alembic |
 | データベース | SQLite（ローカル） / PostgreSQL・Supabase（本番） |
-| フロントエンド | Svelte 5 runes、TypeScript、SvelteKit、adapter-static |
+| フロントエンド | Svelte 5 runes、TypeScript、SvelteKit、adapter-static。録音PWAは独立したVite package |
 | 認証 | Supabase Auth（パスワード） |
 | 音声 | faster-whisper, pyannote.audio |
 | LLM | OpenAI 互換ローカルサーバー（Ollama / vLLM） |
@@ -111,4 +119,4 @@ flowchart TB
 | 実行基盤 | Docker Compose、さくらの高火力 VRT（GPU） |
 
 依存は `pyproject.toml` に定義され、用途ごとに extras で分かれています
-（`postgres` / `edge-audio` / `speaker-diarization` / `dev`）。
+（`postgres` / `backup-s3` / `edge-audio` / `speaker-diarization` / `dev`）。

@@ -57,7 +57,8 @@ LLM出力から既知の名前・参照を除去し、名前辞書と対応表�
 [録音デモ導入手順](../recorder-vrt-runbook.md)で試験します。担当はログインした先生のままで、任意の声紋照合は担当候補だけを追加します。
 
 園内のマイクから記録候補が生まれるまでの流れです。
-このパイプラインの目的は「**API に生音声と生の文字起こしを渡さないこと**」の一点に尽きます。
+全経路で音声と生の文字起こしを業務DBへ保存しません。ローカルは加工済みテキストだけをAPIへ送り、
+クラウド・録音PWAは生音声をAPIの短命ファイルへ一時送信します。保存境界は [共通仕様](../specification.md)を参照します。
 
 ---
 
@@ -145,7 +146,7 @@ sequenceDiagram
         GPU->>DB: record_idなしで completed に更新
     end
     GPU->>Store: 成否にかかわらず音声を削除
-    Note over API,Store: 成否にかかわらず保持期限（既定 15 分）で失効
+    Note over API,Store: 保持期限（既定15分）で失効。物理削除はワーカーが実行
 ```
 
 GPU ワーカーは API を呼ばず、API と同じデータベースとジョブ保管ディレクトリを直接使います。
@@ -156,7 +157,7 @@ GPU ワーカーは API を呼ばず、API と同じデータベースとジョ�
 | 排他取得 | `app/cloud_audio_worker.py` の `claim_token` | 複数ワーカーが同じジョブを処理しない |
 | 重複排除 | `X-Edge-Upload-Id`（UUID） | 再送されても同じジョブを返す |
 | 連続区間の統合 | `app/cloud_audio_worker.py` | 同じ園児・端末・種別で2分以内の未承認候補がほぼ同文なら、既存記録へまとめる |
-| 期限切れ | `CLOUD_AUDIO_JOB_RETENTION_MINUTES`（既定 15 分） | 処理されなかった音声も必ず消える |
+| 期限切れ | `CLOUD_AUDIO_JOB_RETENTION_MINUTES`（既定 15 分） | 期限を超えたジョブを失効させ、稼働中ワーカーが音声を削除する |
 | 処理タイムアウト | `CLOUD_AUDIO_PROCESSING_TIMEOUT_MINUTES`（既定 10 分） | 落ちたワーカーが掴んだジョブを解放 |
 | 稼働確認 | `worker_heartbeats`（既定 30 秒ごと、90 秒で停止判定） | 長時間のGPU処理中もバックグラウンドで生存を通知 |
 

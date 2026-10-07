@@ -14,7 +14,8 @@ APIの新規園はtrueです。直接SQLで作成する管理処理は既定fals
 配信防止列の削除で誤送信を起こさないよう、この移行のdowngradeは拒否します。
 
 SQLAlchemy 2.0 の宣言スタイル（`Mapped` / `mapped_column`）で `app/models.py` に定義しています。
-主キーはすべて UUID の文字列（`String(36)`）、日時はタイムゾーン付きで UTC 保存です。
+業務エンティティの主キーはUUIDの文字列（`String(36)`）です。`worker_heartbeats` は固定ワーカー名を主キーにします。
+日時はUTCを基準に扱い、SQLiteでタイムゾーンが失われる場合はAPIでUTCへ正規化します。
 
 ---
 
@@ -63,7 +64,8 @@ erDiagram
 | `teacher_voiceprints` | 先生の声紋 | 暗号化した特徴量だけを先生ごとに1件保存。元音声は保存しない |
 | `voiceprint_jobs` | 声紋登録・本人確認ジョブ | 一時音声のランダムキーと処理結果。本人以外には返さない |
 | `notion_syncs` | Notion 同期の結果 | `record_id` に一意制約。ページ ID と URL |
-| `audit_events` | 操作履歴 | 音声・文字起こし・秘密情報を含めない |
+| `audit_events` | 操作履歴 | 園・実行先生への参照と操作種別・対象種別・日時。本文・対象ID・秘密情報を含めない |
+| `worker_heartbeats` | ワーカー生存確認 | 固定ワーカー名と最終確認日時だけ |
 
 先生招待の移行 `0028_teacher_invitations` は `teachers.invitation_attempted_at`（送信予約・60秒制限）と
 `invitation_sent_at`（Supabase送信受付時刻）を追加します。既存行はNULLです。キーや招待トークンは保存しません。
@@ -97,8 +99,8 @@ stateDiagram-v2
 
 | テーブル | カラム | 状態 |
 | --- | --- | --- |
-| `records` | `status` | `pending_review` → `approved` / `rejected` → `dispatched` |
-| `notifications` | `status` | `waiting_guardian_link` → `pending`（保護者連携）→ `sent` / `failed`。`failed` → `pending`（再送予約）。`pending` / `waiting_guardian_link` → `cancelled` |
+| `records` | `status` | `pending_review` → `approved` → `dispatched`、または `pending_review` → `rejected` |
+| `notifications` | `status` | `waiting_guardian_link` → `pending`（保護者連携）→ `sent` / `failed`。`failed` → `pending`（再送予約）。`pending` / `waiting_guardian_link` → `cancelled`。試用承認・試用切替による `trial` は終端 |
 | `cloud_audio_jobs` | `status` | `queued` → `processing` → `completed` / `failed` / `expired` |
 | `voiceprint_jobs` | `status` | `queued` → `processing` → `completed` / `failed` / `expired` |
 | `recording_sessions` | `status` | `draft` → `queued` → `processing` → `completed` / `failed`。別経路は `discarded` / `expired` |
@@ -111,11 +113,14 @@ stateDiagram-v2
 
 | 条件 | 初期状態 |
 | --- | --- |
-| 園児に `guardian_line_user_id` がある | `pending`（送信ワーカーが配信） |
-| 園児はいるが LINE 未連携 | `waiting_guardian_link` |
-| 園児が未指定 | `pending` |
+| 園または記録が試用（在籍園児の選択は必須） | `trial`（送信先なし、配信対象外） |
+| 本番で園児に `guardian_line_user_id` がある | `pending`（送信ワーカーが配信） |
+| 本番で在籍園児はいるが LINE 未連携 | `waiting_guardian_link` |
+| 園児が未指定 | 承認を422で拒否し、通知は作成しない |
 
 配信予定時刻（`scheduled_for`）の既定値:
+
+先生が `scheduled_for` を指定した場合はそれを優先します。未指定の場合:
 
 - **けがの記録** … 承認と同時（即時）
 - **成長の記録** … 園の `digest_time`（既定 17:00 / `Asia/Tokyo`）に合わせた次回時刻
@@ -134,20 +139,20 @@ stateDiagram-v2
 | 複数の GPU ワーカーが同じジョブを取る | `claim_token` による排他取得 |
 | 同じ録音セッションを二重に作る | `recording_sessions(teacher_id, client_session_id)` の一意制約 |
 | 同じ録音から記録を二重生成する | queued→processingの原子的UPDATEと最終確定のclaim token照合 |
+| 同じ分割番号を二重に保存する | `recording_segments(session_id, sequence)` の一意制約とSHA-256照合 |
+| 招待コードが複数有効になる | 新規発行時に同じ園児の未使用コードを失効 |
+| 同じ記録を Notion へ二重投稿する | `notion_syncs.record_id` に一意制約 |
 
 録音セッションの中間要約はDBへ保存しません。処理停止は失敗として音声を削除し、途中区間だけの再実行はしません。
 部分失敗の記録は `records.audio_processing_incomplete=true` で先生へ明示します。
 現在の発生日時はサーバーのセッション受付日時であり、端末側の実録音開始日時とは一致しない場合があります。
-| 同じ分割番号を二重に保存する | `recording_segments(session_id, sequence)` の一意制約とSHA-256照合 |
-| 招待コードが複数有効になる | 新規発行時に同じ園児の未使用コードを失効 |
-| 同じ記録を Notion へ二重投稿する | `notion_syncs.record_id` に一意制約 |
 
 ---
 
 ## 監査イベント
 
 `audit_events` は「誰が」「いつ」「どの種類の操作を」「どの種別の対象に」行ったかだけを残します。
-本文・園児名・トークン・音声は入りません。記録される操作は次の 25 種類です。
+本文・園児名・トークン・音声は入りません。操作種別は `app/models.py` の `AuditEventAction` を正とします。主な分類は次のとおりです。
 
 | 分類 | `action` |
 | --- | --- |
@@ -157,7 +162,7 @@ stateDiagram-v2
 | アーカイブ | `guardian_archive_issued`, `guardian_archive_revoked` |
 | 園児 | `child_updated`, `child_archived`, `child_restored` |
 | 先生 | `teacher_disabled`, `teacher_restored`, `teacher_role_changed` |
-| 園・端末 | `school_digest_time_changed`, `edge_device_created`, `edge_device_key_rotated`, `edge_device_disabled` |
+| 園・端末 | `school_digest_time_changed`, `school_trial_mode_changed`, `edge_device_created`, `edge_device_key_rotated`, `edge_device_disabled` |
 | 連携 | `notion_synced`, `audit_history_exported` |
 
 先生管理者は画面の「操作履歴」から閲覧と CSV 書き出しができます（書き出し自体も監査対象です）。

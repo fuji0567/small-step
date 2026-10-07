@@ -144,12 +144,6 @@ export class RecorderController {
     }
   }
 
-  visibilityHidden(): void {
-    this.interrupt(
-      "画面が背面になったため録音を一時停止しました。内容を確認して再開してください。",
-    );
-  }
-
   microphoneInterrupted(): void {
     this.interrupt(
       "マイクが中断されたため録音を一時停止しました。マイクを確認して再開してください。",
@@ -178,13 +172,17 @@ export class RecorderController {
       if (event.data.size > 0) this.#chunks.push(event.data);
     };
     recorder.onerror = () => this.microphoneInterrupted();
-    recorder.onstop = () => void this.#completeSegment();
+    recorder.onstop = () => {
+      // The browser can stop capture without an application stop request.
+      if (!this.#finishing) this.microphoneInterrupted();
+      else void this.#completeSegment();
+    };
     recorder.start();
 
     const remaining = this.#maxDurationMs - this.totalDurationMs;
     const delay = Math.min(SEGMENT_DURATION_MS, remaining);
     this.#timer = this.#setTimer(() => {
-      const reachesLimit = this.totalDurationMs + delay >= this.#maxDurationMs;
+      const reachesLimit = this.#now() - this.#segmentStartedAt >= remaining;
       this.#finishSegment(reachesLimit ? "stopped" : "recording");
     }, delay);
     this.#changed();

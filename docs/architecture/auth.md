@@ -105,8 +105,12 @@ flowchart TD
 
 | 役割 | できること |
 | --- | --- |
-| `teacher` | 記録のレビュー・承認・却下、手入力、履歴と通知状況の閲覧、園児一覧の閲覧、自分の声紋同意・登録・本人確認・削除 |
+| `teacher` | 自分が担当する記録のレビュー・承認・却下・履歴と通知状況、手入力、園児一覧、本人の録音と声紋操作 |
 | `school_admin` | 上記すべてに加えて、園児・先生・端末・園の設定・監査ログ・通知の再送や取り消し・CSV 書き出し |
+
+`assert_record_access` は一般の先生の記録を担当本人に限定します。記録・通知の一覧も担当で絞り込みます。
+録音セッションの一覧は一般先生が本人分、管理者が園全体です。単一取得・音声送信・確定・破棄・
+処理表示は管理者でも録音者本人だけです。
 
 `assert_school_admin(current_teacher)` が管理者限定の操作を守ります。
 フロントエンドも `state.isSchoolAdmin` で該当 UI を隠しますが、**画面の非表示は補助でしかなく、
@@ -148,7 +152,7 @@ edge_devices.api_key_hash と照合 → is_active を確認
 | 閲覧範囲 | その園児の**送信済み**通知のみ。音声も文字起こし原文も返さない |
 
 保護者用ページは受け取ったトークンを `sessionStorage` に移し、
-`history.replaceState()` で URL からフラグメントを消します。
+SvelteKit の `$app/navigation.replaceState` でルーター初期化後にURLからフラグメントを消します。
 ページには `<meta name="referrer" content="no-referrer">` も付けています。
 
 ---
