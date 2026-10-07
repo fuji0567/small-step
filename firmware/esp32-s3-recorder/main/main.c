@@ -28,38 +28,6 @@ static bool file_exists(const char *path)
     return access(path, F_OK) == 0;
 }
 
-static bool atomic_write(const char *temporary_path, const char *path, const void *data, size_t size)
-{
-    FILE *file = fopen(temporary_path, "wb");
-    if (file == NULL) {
-        ESP_LOGE(TAG, "fopen(%s) failed: errno=%d", temporary_path, errno);
-        return false;
-    }
-    bool success = true;
-    if (fwrite(data, 1U, size, file) != size) {
-        ESP_LOGE(TAG, "fwrite(%s) failed: errno=%d", temporary_path, errno);
-        success = false;
-    } else if (fflush(file) != 0) {
-        ESP_LOGE(TAG, "fflush(%s) failed: errno=%d", temporary_path, errno);
-        success = false;
-    } else if (fsync(fileno(file)) != 0) {
-        ESP_LOGE(TAG, "fsync(%s) failed: errno=%d", temporary_path, errno);
-        success = false;
-    }
-    if (fclose(file) != 0) {
-        ESP_LOGE(TAG, "fclose(%s) failed: errno=%d", temporary_path, errno);
-        success = false;
-    }
-    if (success && rename(temporary_path, path) != 0) {
-        ESP_LOGE(TAG, "rename(%s -> %s) failed: errno=%d", temporary_path, path, errno);
-        success = false;
-    }
-    if (!success) {
-        remove(temporary_path);
-    }
-    return success;
-}
-
 static void generate_upload_id(char destination[37])
 {
     uint8_t bytes[16];
@@ -75,14 +43,51 @@ static void generate_upload_id(char destination[37])
     );
 }
 
+// The ID file is 36 bytes and load_upload_id() rejects any other length, so a
+// torn write is treated as "no ID". Writing in place avoids SPIFFS rename(),
+// which fails with EIO when the destination already exists or the FS is damaged.
 static bool save_upload_id(const char *upload_id)
 {
-    return atomic_write(
-        SMALL_STEP_PENDING_ID_TEMP_PATH,
-        SMALL_STEP_PENDING_ID_PATH,
-        upload_id,
-        strlen(upload_id)
-    );
+    const size_t length = strlen(upload_id);
+    FILE *file = fopen(SMALL_STEP_PENDING_ID_PATH, "wb");
+    if (file == NULL) {
+        ESP_LOGE(TAG, "fopen(%s) failed: errno=%d", SMALL_STEP_PENDING_ID_PATH, errno);
+        return false;
+    }
+    bool success = true;
+    if (fwrite(upload_id, 1U, length, file) != length) {
+        ESP_LOGE(TAG, "fwrite(%s) failed: errno=%d", SMALL_STEP_PENDING_ID_PATH, errno);
+        success = false;
+    } else if (fflush(file) != 0) {
+        ESP_LOGE(TAG, "fflush(%s) failed: errno=%d", SMALL_STEP_PENDING_ID_PATH, errno);
+        success = false;
+    } else if (fsync(fileno(file)) != 0) {
+        ESP_LOGE(TAG, "fsync(%s) failed: errno=%d", SMALL_STEP_PENDING_ID_PATH, errno);
+        success = false;
+    }
+    if (fclose(file) != 0) {
+        ESP_LOGE(TAG, "fclose(%s) failed: errno=%d", SMALL_STEP_PENDING_ID_PATH, errno);
+        success = false;
+    }
+    if (!success) {
+        remove(SMALL_STEP_PENDING_ID_PATH);
+    }
+    return success;
+}
+
+// Called only when no pending recording exists, so formatting loses no audio.
+static bool save_upload_id_with_recovery(const char *upload_id)
+{
+    if (save_upload_id(upload_id)) {
+        return true;
+    }
+    ESP_LOGW(TAG, "Retry storage looks damaged and holds no pending audio; formatting it");
+    esp_err_t format_error = esp_spiffs_format("retry");
+    if (format_error != ESP_OK) {
+        ESP_LOGE(TAG, "Retry storage format failed: %s", esp_err_to_name(format_error));
+        return false;
+    }
+    return save_upload_id(upload_id);
 }
 
 static bool load_upload_id(char upload_id[37])
@@ -299,7 +304,7 @@ void app_main(void)
 
         char upload_id[37];
         generate_upload_id(upload_id);
-        if (!save_upload_id(upload_id)) {
+        if (!save_upload_id_with_recovery(upload_id)) {
             ESP_LOGE(TAG, "Could not persist upload ID; discarding chunk safely");
             small_step_audio_release(&audio);
             continue;
