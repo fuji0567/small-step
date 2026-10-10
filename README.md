@@ -272,6 +272,7 @@ VRT上では、FastAPIを起動した後に別プロセスでGPUワーカーを�
 
 ```bash
 .venv313/bin/python -m pip install -e '.[edge-audio,speaker-diarization]'
+.venv313/bin/python scripts/check_audio_decoder.py
 .venv313/bin/python scripts/process_cloud_audio_jobs.py --once
 ```
 
@@ -412,6 +413,8 @@ docker compose -f compose.yaml -f compose.vrt.yaml logs --tail=100 gpu-worker
 録音処理の診断は例外文・音声・文字起こしを出さず、固定の分類コードと許可モジュールの別名・行番号だけを使います。
 TypeErrorで失敗する場合の確認手順は [録音失敗のプライバシー保護診断](docs/recorder-private-diagnostics.md) を参照してください。
 診断の追加は原因を特定するためのもので、録音エラー自体を修正したことは意味しません。
+faster-whisperとPyAV 19の引数互換性問題を避けるため、音声extrasは `av<19` を指定しています。
+GPUイメージのビルド時は合成WAVのデコードを検査し、互換性エラーならビルドを停止します。
 
 ### LINE送信失敗の確認と再送
 

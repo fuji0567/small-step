@@ -18,7 +18,11 @@ dependencies = [
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.2.0"]
 backup-s3 = ["boto3>=1.35.0,<2.0.0"]
-edge-audio = ["faster-whisper>=1.1.0,<2.0.0"]
+edge-audio = [
+  "faster-whisper>=1.1.0,<2.0.0",
+  # Released faster-whisper versions still pass metadata_errors to av.open.
+  "av>=11.0.0,<19.0.0",
+]
 speaker-diarization = [
   "omegaconf>=2.3.0,<3.0.0",
   "pyannote.audio>=4.0.0,<5.0.0",

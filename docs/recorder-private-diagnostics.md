@@ -4,8 +4,17 @@
 
 2026-10-10に提供されたGPUワーカーログでは、声紋ジョブはcompleted、録音セッションは
 `stage=audio_analysis; types=TypeError` で失敗しています。
-この情報だけでは、文字起こし・LLM・人物候補・処理表示のどこで発生したかは特定できません。
+初回の情報だけでは、文字起こし・LLM・人物候補・処理表示のどこで発生したかは特定できませんでした。
 TF32や古いチェックポイントの警告を消すだけで、この型例外を解決したとは説明しません。
+
+追加の実機ログで `type_error_argument_mismatch`、`speech_transcriber:876`、
+`speech_decoder:46` を確認しました。この場所はfaster-whisperの `av.open` 呼び出しで、
+[上流の既知不具合](https://github.com/SYSTRAN/faster-whisper/issues/1589)と一致します。
+PyAV 19が `metadata_errors` 引数を廃止したため、faster-whisper 1.2.1との組み合わせでは
+文字起こし前にTypeErrorになります。ローカルでfaster-whisper 1.2.1とPyAV 19.0.1の
+組み合わせによる同じTypeErrorを再現し、PyAV 18.1.0で合成WAV・WebM/Opus・MP4/AACの
+実デコード成功を確認しました。提供された実機の版確認でも、faster-whisper 1.2.1と
+PyAV 19.0.1がインストールされていることを確認しました。
 
 ## 追加する診断
 
@@ -51,4 +60,25 @@ sudo docker compose -f compose.yaml -f compose.vrt.yaml \
 `stage`、`types`、`codes` の行と診断版を確認します。生のtracebackや文字起こしを追加しません。
 GPUワーカーのイメージとコード版が一致していることも確認し、行番号の示す実装を調べます。
 処理済み・失敗した音声は既存の削除方針を維持します。削除済み音声の再送・再解析は約束しません。
-現在はローカルの診断試験のみで、実機の原因特定・修正・再録音成功は未確認です。
+提供されたログで診断版の実機反映とreadiness ready、新しい失敗診断を確認しています。
+
+## 音声デコーダーの互換性修正
+
+音声extrasで `av>=11,<19` を指定し、GPUイメージのビルド時に合成WAVを実デコーダーで
+16kHz・モノラルへ変換します。検査に失敗したイメージはビルドを停止します。
+Git版のfaster-whisperや実行中コンテナの直接書き換えは使わず、依存指定から再ビルドします。
+上流の修正を含む公開版へ更新するときは、この上限の解除を合成音声と実機で検証してください。
+
+実行中のライブラリ版と合成音声の確認はUbuntuで次を実行します。
+
+```bash
+sudo docker compose -f compose.yaml -f compose.vrt.yaml exec -T gpu-worker \
+  python3 -c 'from importlib.metadata import version; print("faster-whisper:", version("faster-whisper")); print("PyAV:", version("av"))'
+
+sudo docker compose -f compose.yaml -f compose.vrt.yaml run --rm --no-deps gpu-worker \
+  python3 scripts/check_audio_decoder.py
+```
+
+確認スクリプトはGPUモデル・LLM・DB・LINEを呼ばず、メモリ上の合成音声だけを使います。
+互換性試験の成功は文字起こしやLLMの精度を意味しません。Ubuntuへの修正版反映と
+新しい模擬録音での処理成功は別途確認します。
