@@ -409,6 +409,10 @@ python scripts/check_runtime_readiness.py
 docker compose -f compose.yaml -f compose.vrt.yaml logs --tail=100 gpu-worker
 ```
 
+録音処理の診断は例外文・音声・文字起こしを出さず、固定の分類コードと許可モジュールの別名・行番号だけを使います。
+TypeErrorで失敗する場合の確認手順は [録音失敗のプライバシー保護診断](docs/recorder-private-diagnostics.md) を参照してください。
+診断の追加は原因を特定するためのもので、録音エラー自体を修正したことは意味しません。
+
 ### LINE送信失敗の確認と再送
 
 LINE配信ワーカーは、通信断などで送信結果が確定しない通知を勝手に繰り返し送信しません。二重送信を避けるため、失敗した場合は先生管理者が先生画面の「通知状況」で確認してから「再送を予約」を実行します。

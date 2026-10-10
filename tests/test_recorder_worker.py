@@ -129,6 +129,75 @@ def test_value_error_diagnostics_only_emit_fixed_codes(capsys, message, code):
     assert "/private/" not in output
 
 
+@pytest.mark.parametrize("message,code", [
+    ("transcribe() got an unexpected keyword argument 'private-child-name'", "type_error_argument_mismatch"),
+    ("call() missing 1 required positional argument: 'secret-token'", "type_error_argument_mismatch"),
+    ("call() missing 1 required keyword-only argument: 'private-child-name'", "type_error_argument_mismatch"),
+    ("call() takes 1 positional argument but 2 were given secret-token", "type_error_argument_mismatch"),
+    ("Object of type private-child-name is not JSON serializable", "type_error_json_serialization"),
+    ("'private-child-name' object is not subscriptable", "type_error_container_access"),
+    ("list indices must be integers, not private-child-name", "type_error_container_access"),
+    ("'private-child-name' object is not iterable", "type_error_iteration"),
+    ("cannot unpack non-iterable private-child-name object", "type_error_iteration"),
+    ("float() argument must be a string or real number, not private-child-name", "type_error_value_conversion"),
+    ("unsupported operand type(s) for +: private-child-name secret-token", "type_error_value_conversion"),
+    ("private-child-name /private/audio.wav secret-token", "type_error_unclassified"),
+])
+def test_type_error_diagnostics_only_emit_fixed_codes(capsys, message, code):
+    from app.recorder_worker import _log_processing_failure
+
+    try:
+        raise TypeError(message)
+    except TypeError as error:
+        _log_processing_failure("audio_analysis", error)
+    result = capsys.readouterr().out
+    assert "types=TypeError" in result
+    assert code in result
+    assert "private-child-name" not in result
+    assert "secret-token" not in result
+    assert "/private/" not in result
+
+
+@pytest.mark.parametrize("module,label", [
+    ("app.edge_audio", "audio_processor"),
+    ("app.recorder_children", "child_matching"),
+    ("app.recorder_demo", "demo_trace"),
+    ("faster_whisper.transcribe", "speech_transcriber"),
+    ("faster_whisper.audio", "speech_decoder"),
+    ("private-child-name", None),
+])
+def test_type_error_trace_uses_only_module_alias_and_line_number(capsys, module, label):
+    from app.recorder_worker import _log_processing_failure
+
+    source = "def private_child_name():\n    raise TypeError('private transcript secret-token')\nprivate_child_name()\n"
+    try:
+        exec(compile(source, "/private/audio.wav", "exec"), {"__name__": module})
+    except TypeError as error:
+        _log_processing_failure("audio_analysis", error)
+    result = capsys.readouterr().out
+    assert "type_error_unclassified" in result
+    if label is not None:
+        assert f"{label}:2" in result
+    assert "private_child_name" not in result
+    assert "private-child-name" not in result
+    assert "private transcript" not in result
+    assert "/private/" not in result
+    assert "secret-token" not in result
+
+
+def test_diagnostic_handles_broken_type_error_message(capsys):
+    from app.recorder_worker import _log_processing_failure
+
+    class PrivateTypeError(TypeError):
+        def __str__(self):
+            raise RuntimeError("secret-token")
+    _log_processing_failure("audio_analysis", PrivateTypeError())
+    result = capsys.readouterr().out
+    assert "types=OtherError" in result
+    assert "type_error_unclassified" in result
+    assert "PrivateTypeError" not in result and "secret-token" not in result
+
+
 @pytest.fixture()
 def runtime(tmp_path):
     engine = create_database_engine(f"sqlite:///{tmp_path}/worker.db")

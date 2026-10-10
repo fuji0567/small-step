@@ -23,6 +23,7 @@ from app.trial import lock_school
 
 
 DEFAULT_PROCESSING_TIMEOUT = timedelta(minutes=10)
+FAILURE_DIAGNOSTICS_VERSION = "recorder-typeerror-2026-10-10-v1"
 ACTIVE_STATUSES = (
     RecordingSessionStatus.draft, RecordingSessionStatus.queued, RecordingSessionStatus.processing
 )
@@ -229,6 +230,32 @@ def _finish_session(
     return db.get(RecordingSession, session.id)
 
 
+def _type_error_diagnostic(error: TypeError) -> str:
+    try:
+        message = str(error).lower()
+    except Exception:
+        return "type_error_unclassified"
+    if (
+        "unexpected keyword argument" in message
+        or "required positional argument" in message
+        or "required keyword-only argument" in message
+        or ("positional argument" in message and "given" in message)
+    ):
+        return "type_error_argument_mismatch"
+    if "not json serializable" in message:
+        return "type_error_json_serialization"
+    if "not subscriptable" in message or "indices must be" in message:
+        return "type_error_container_access"
+    if "not iterable" in message or "cannot unpack" in message:
+        return "type_error_iteration"
+    if (
+        "float() argument" in message or "int() argument" in message
+        or "must be real number" in message or "unsupported operand type" in message
+    ):
+        return "type_error_value_conversion"
+    return "type_error_unclassified"
+
+
 def _log_processing_failure(stage: str, error: Exception) -> None:
     # Never log exception messages, paths, session IDs, or model inputs.
     allowed_types = {
@@ -241,6 +268,15 @@ def _log_processing_failure(stage: str, error: Exception) -> None:
     causes = []
     diagnostics = []
     known_modules = {
+        "app.edge_audio": "audio_processor",
+        "app.recorder_worker": "recorder_worker",
+        "app.recorder_children": "child_matching",
+        "app.recorder_voiceprint": "voiceprint_matching",
+        "app.recorder_demo": "demo_trace",
+        "app.llm_guidance": "llm_guidance",
+        "faster_whisper.transcribe": "speech_transcriber",
+        "faster_whisper.audio": "speech_decoder",
+        "json.encoder": "json_encoder",
         "sklearn.utils.validation": "numeric_validation",
         "sklearn.decomposition._pca": "pca",
         "pyannote.audio.pipelines.clustering": "speaker_clustering",
@@ -255,6 +291,8 @@ def _log_processing_failure(stage: str, error: Exception) -> None:
         seen.add(id(current))
         name = type(current).__name__
         causes.append(name if name in allowed_types else "OtherError")
+        if isinstance(current, TypeError):
+            diagnostics.append(_type_error_diagnostic(current))
         if isinstance(current, ValueError):
             message = str(current).lower()
             if "nan" in message or "infinity" in message or "infinite" in message:
